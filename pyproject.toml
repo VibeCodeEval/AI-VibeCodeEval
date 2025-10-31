@@ -5,9 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
+    "google>=3.0.0",
     "ipykernel>=6.31.0",
+    "langchain-anthropic>=0.3.22",
+    "langchain-google-genai>=2.1.12",
+    "langchain-google-vertexai>=2.1.2",
     "langchain-openai>=0.3.35",
     "langchain[anthropic]>=0.3.27",
     "langgraph>=0.6.11",
+    "pydantic>=2.12.3",
     "python-dotenv>=1.1.1",
+    "typing-extensions>=4.15.0",
 ]
