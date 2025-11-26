@@ -33,9 +33,9 @@ class RedisClient:
     async def close(self):
         """Redis 연결 종료"""
         if self._client:
-            await self._client.close()
+            await self._client.aclose()
         if self._pool:
-            await self._pool.disconnect()
+            await self._pool.aclose()
     
     @property
     def client(self) -> redis.Redis:
@@ -175,6 +175,168 @@ class RedisClient:
         """세션 활성 여부 확인"""
         key = self._active_session_key(exam_id, participant_id)
         return await self.exists(key)
+    
+    # ===== 턴별 평가 로그 관리 =====
+    
+    def _turn_log_key(self, session_id: str, turn: int) -> str:
+        """턴 로그 키 생성"""
+        return f"turn_logs:{session_id}:{turn}"
+    
+    def _turn_mapping_key(self, session_id: str) -> str:
+        """턴 매핑 키 생성"""
+        return f"turn_mapping:{session_id}"
+    
+    async def save_turn_log(
+        self, 
+        session_id: str, 
+        turn: int, 
+        turn_log: dict,
+        ttl_seconds: Optional[int] = None
+    ) -> bool:
+        """
+        턴별 평가 로그 저장
+        
+        turn_log 구조:
+        {
+            "turn_number": 5,
+            "user_prompt_summary": "...",
+            "prompt_evaluation_details": {
+                "intent": "OPTIMIZATION_REQUEST",
+                "score": 90,
+                "rubrics": [...]
+            },
+            "llm_answer_summary": "...",
+            "llm_answer_reasoning": "..."
+        }
+        """
+        key = self._turn_log_key(session_id, turn)
+        ttl = ttl_seconds or settings.CHECKPOINT_TTL_SECONDS
+        return await self.set_json(key, turn_log, ttl)
+    
+    async def get_turn_log(self, session_id: str, turn: int) -> Optional[dict]:
+        """특정 턴의 평가 로그 조회"""
+        key = self._turn_log_key(session_id, turn)
+        return await self.get_json(key)
+    
+    async def get_all_turn_logs(self, session_id: str) -> dict:
+        """
+        세션의 모든 턴 로그 조회
+        
+        Returns:
+            {"1": {...}, "2": {...}, ...}
+        """
+        pattern = f"turn_logs:{session_id}:*"
+        
+        # Redis SCAN으로 키 조회
+        cursor = 0
+        keys = []
+        while True:
+            cursor, partial_keys = await self.client.scan(
+                cursor=cursor,
+                match=pattern,
+                count=100
+            )
+            keys.extend(partial_keys)
+            if cursor == 0:
+                break
+        
+        # 각 키에서 턴 로그 조회
+        logs = {}
+        for key in keys:
+            # key 형식: "turn_logs:session_id:turn_number"
+            turn_num = key.split(":")[-1]
+            log = await self.get_json(key)
+            if log:
+                logs[turn_num] = log
+        
+        return logs
+    
+    # ===== 턴-메시지 매핑 관리 =====
+    
+    async def save_turn_mapping(
+        self,
+        session_id: str,
+        turn: int,
+        start_msg_idx: int,
+        end_msg_idx: int,
+        ttl_seconds: Optional[int] = None
+    ) -> bool:
+        """
+        특정 턴의 메시지 인덱스 매핑 저장
+        
+        Args:
+            session_id: 세션 ID
+            turn: 턴 번호
+            start_msg_idx: messages 배열에서 user 메시지 인덱스
+            end_msg_idx: messages 배열에서 assistant 메시지 인덱스
+            ttl_seconds: TTL (기본값: 3600초)
+        
+        Returns:
+            저장 성공 여부
+        """
+        ttl = ttl_seconds or 3600
+        key = self._turn_mapping_key(session_id)
+        
+        # 기존 매핑 로드
+        existing_mapping = await self.get_json(key) or {}
+        
+        # 새 턴 매핑 추가
+        existing_mapping[str(turn)] = {
+            "start_msg_idx": start_msg_idx,
+            "end_msg_idx": end_msg_idx
+        }
+        
+        # 저장
+        return await self.set_json(key, existing_mapping, ttl)
+    
+    async def get_turn_mapping(self, session_id: str) -> Optional[dict]:
+        """
+        세션의 모든 턴-메시지 매핑 조회
+        
+        Returns:
+            {
+                "1": {"start_msg_idx": 0, "end_msg_idx": 1},
+                "2": {"start_msg_idx": 2, "end_msg_idx": 3},
+                ...
+            }
+        """
+        key = self._turn_mapping_key(session_id)
+        return await self.get_json(key)
+    
+    async def get_turn_message_indices(
+        self, 
+        session_id: str, 
+        turn: int
+    ) -> Optional[dict]:
+        """
+        특정 턴의 메시지 인덱스 조회
+        
+        Returns:
+            {"start_msg_idx": 0, "end_msg_idx": 1} or None
+        """
+        mapping = await self.get_turn_mapping(session_id)
+        if mapping:
+            return mapping.get(str(turn))
+        return None
+    
+    async def delete_all_turn_logs(self, session_id: str) -> int:
+        """세션의 모든 턴 로그 삭제"""
+        pattern = f"turn_logs:{session_id}:*"
+        
+        cursor = 0
+        deleted_count = 0
+        while True:
+            cursor, keys = await self.client.scan(
+                cursor=cursor,
+                match=pattern,
+                count=100
+            )
+            if keys:
+                deleted_count += await self.client.delete(*keys)
+            if cursor == 0:
+                break
+        
+        return deleted_count
 
 
 # 싱글톤 인스턴스

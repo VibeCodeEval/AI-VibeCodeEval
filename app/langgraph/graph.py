@@ -14,6 +14,7 @@ from app.langgraph.nodes.intent_analyzer import intent_analyzer
 from app.langgraph.nodes.writer import writer_llm
 from app.langgraph.nodes.writer_router import writer_router, intent_router, main_router
 from app.langgraph.nodes.system_nodes import handle_failure, summarize_memory
+from app.langgraph.nodes.eval_turn_guard import eval_turn_submit_guard
 from app.langgraph.nodes.evaluators import (
     eval_holistic_flow,
     aggregate_turn_scores,
@@ -63,51 +64,8 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     builder.add_node("handle_failure", handle_failure)
     builder.add_node("summarize_memory", summarize_memory)
     
-    # 4. Eval Turn SubGraph (실시간 턴 평가)
-    # SubGraph를 래핑하는 노드
-    async def eval_turn_node(state: MainGraphState):
-        """Eval Turn SubGraph 실행"""
-        from app.langgraph.states import EvalTurnState
-        
-        # SubGraph 입력 준비
-        turn_state: EvalTurnState = {
-            "session_id": state.get("session_id", ""),
-            "turn": state.get("current_turn", 0),
-            "human_message": state.get("human_message", ""),
-            "ai_message": state.get("ai_message", ""),
-            "intent_type": None,
-            "intent_confidence": 0.0,
-            "rule_setting_eval": None,
-            "generation_eval": None,
-            "optimization_eval": None,
-            "debugging_eval": None,
-            "test_case_eval": None,
-            "hint_query_eval": None,
-            "follow_up_eval": None,
-            "answer_summary": None,
-            "turn_log": None,
-            "turn_score": None,
-        }
-        
-        # SubGraph 실행
-        result = await eval_turn_subgraph.ainvoke(turn_state)
-        
-        # 결과를 메인 상태에 반영
-        turn_scores = state.get("turn_scores", {})
-        current_turn = state.get("current_turn", 0)
-        
-        turn_scores[str(current_turn)] = {
-            "turn_score": result.get("turn_score"),
-            "turn_log": result.get("turn_log"),
-            "intent_type": result.get("intent_type"),
-        }
-        
-        return {
-            "turn_scores": turn_scores,
-            "updated_at": datetime.utcnow().isoformat(),
-        }
-    
-    builder.add_node("eval_turn", eval_turn_node)
+    # 4. Eval Turn Guard (제출 시 모든 턴 평가 완료 확인)
+    builder.add_node("eval_turn_guard", eval_turn_submit_guard)
     
     # 5. Main Router (조건부 분기 함수로 처리)
     
@@ -137,7 +95,7 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
             "handle_failure": "handle_failure",
             "summarize_memory": "summarize_memory",
             "handle_request": "handle_request",
-            "main_router": "eval_holistic_flow",  # 제출 시 바로 평가로
+            "eval_turn_guard": "eval_turn_guard",  # 제출 시 4번 가드로
         }
     )
     
@@ -147,22 +105,21 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
         writer_router,
         {
             "end": END,  # 답변 생성 성공 시 바로 종료
-            "eval_turn": "eval_turn",  # 제출 요청 시에만 평가 진행
             "handle_failure": "handle_failure",
             "summarize_memory": "summarize_memory",
             "handle_request": "handle_request",
         }
     )
     
-    # Eval Turn -> Main Router (조건부)
-    # 제출 요청일 때만 실행되므로 항상 eval_holistic_flow로 진행
+    # Eval Turn Guard -> Main Router (조건부)
+    # 제출 시 모든 턴 평가 완료 후 5번 Router로 진행
     builder.add_conditional_edges(
-        "eval_turn",
+        "eval_turn_guard",
         main_router,
         {
             "eval_holistic_flow": "eval_holistic_flow",  # 제출 시 평가 진행
             "handle_request": "handle_request",
-            "end": END,  # 일반 채팅은 여기 오지 않음
+            "end": END,
         }
     )
     

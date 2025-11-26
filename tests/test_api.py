@@ -9,7 +9,9 @@ from fastapi.testclient import TestClient
 def client():
     """테스트 클라이언트 생성"""
     from app.main import app
-    return TestClient(app)
+    # lifespan 이벤트를 처리하도록 context manager 사용
+    with TestClient(app) as client:
+        yield client
 
 
 class TestHealthAPI:

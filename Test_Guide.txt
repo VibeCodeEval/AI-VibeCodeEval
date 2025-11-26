@@ -1,0 +1,2022 @@
+================================================================================
+                        Test Guide
+                LangGraph 테스트 및 디버깅 가이드
+                작성일: 2025-11-27
+================================================================================
+
+## 📋 목차
+1. 테스트 파일 구조 및 실행 방법
+2. 서버 로그 확인 방법
+3. Docker 컨테이너 로그 확인 방법
+4. Redis 세션 데이터 확인 방법
+5. PostgreSQL 데이터 확인 방법
+6. 일반적인 문제 해결 방법
+
+================================================================================
+## 1. 테스트 파일 구조 및 실행 방법
+================================================================================
+
+### 1.1 테스트 파일 목록
+
+#### 📁 `tests/test_api.py`
+**역할:**
+- FastAPI 엔드포인트 단위 테스트
+- pytest 기반 자동화 테스트
+
+**테스트 항목:**
+- 헬스 체크 API
+- 채팅 메시지 API
+- 코드 제출 API
+- 세션 상태 조회 API
+
+**실행 방법:**
+```bash
+# 모든 테스트 실행
+cd C:\P_project\LangGraph_1
+uv run pytest tests/test_api.py -v
+
+# 특정 테스트만 실행
+uv run pytest tests/test_api.py::test_health_check -v
+
+# 상세 출력
+uv run pytest tests/test_api.py -v -s
+```
+
+**예상 결과:**
+```
+tests/test_api.py::test_health_check PASSED
+tests/test_api.py::test_message_endpoint PASSED
+tests/test_api.py::test_submit_endpoint PASSED
+tests/test_api.py::test_get_state_endpoint PASSED
+```
+
+---
+
+#### 📁 `test_submit_only.py`
+**역할:**
+- 실제 채팅 → 제출 플로우 통합 테스트
+- 3턴 대화 + 제출
+
+**시나리오:**
+```
+Turn 1: "피보나치 함수를 작성해주세요"
+Turn 2: "O(n)으로 최적화해주세요"
+Turn 3: "에지 케이스를 추가해주세요"
+제출: def fib(n): return n if n <= 1 else fib(n-1) + fib(n-2)
+```
+
+**실행 방법:**
+```bash
+cd C:\P_project\LangGraph_1
+chcp 65001  # UTF-8 인코딩
+uv run python test_submit_only.py
+```
+
+**예상 출력:**
+```
+Session: submit-test-20251127-041843
+
+[Turn 1] 피보나치 함수를 작성해주세요...
+  [OK] AI 응답: 795자
+
+[Turn 2] O(n)으로 최적화해주세요...
+  [OK] AI 응답: 1362자
+
+[Turn 3] 에지 케이스를 추가해주세요...
+  [OK] AI 응답: 5537자
+
+[제출] 코드 제출...
+  제출 완료: True
+  최종 점수: 64.25 (D)
+  턴 점수: {'1': 85.5, '2': 92.0, '3': 78.3}
+```
+
+---
+
+#### 📁 `test_submit_with_delay.py`
+**역할:**
+- 백그라운드 평가 완료 대기 포함 테스트
+- Turn 3 평가 완료를 기다린 후 제출
+
+**차이점:**
+```python
+await chat("에지 케이스를 추가해주세요", 3)
+
+# ★ 5초 대기 추가
+print("[대기] Turn 3 백그라운드 평가 완료 대기 (5초)...")
+await asyncio.sleep(5)
+
+await submit(code)
+```
+
+**실행 방법:**
+```bash
+cd C:\P_project\LangGraph_1
+chcp 65001
+uv run python test_submit_with_delay.py
+```
+
+---
+
+#### 📁 `test_chat_flow.py`
+**역할:**
+- 전체 플로우 상세 테스트
+- Redis turn_logs 직접 확인 포함
+
+**추가 기능:**
+```python
+async def check_turn_logs():
+    """Redis에 저장된 turn_logs 확인"""
+    import redis.asyncio as redis
+    r = await redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    
+    async for key in r.scan_iter(f"turn_logs:{SESSION_ID}:*"):
+        log = await r.get(key)
+        print(f"Turn {key.split(':')[-1]}: {log}")
+```
+
+**실행 방법:**
+```bash
+cd C:\P_project\LangGraph_1
+chcp 65001
+uv run python test_chat_flow.py
+```
+
+---
+
+### 1.2 테스트 실행 전 체크리스트
+
+#### ✅ 필수 준비 사항
+```bash
+# 1. Docker 컨테이너 실행 확인
+docker ps --filter "name=ai_vibe"
+
+# 예상 결과:
+# ai_vibe_redis_dev      Up X hours (healthy)
+# ai_vibe_postgres_dev   Up X hours (healthy)
+
+# 2. FastAPI 서버 실행
+cd C:\P_project\LangGraph_1
+uv run scripts/run_dev.py
+
+# 3. 서버 정상 시작 확인 (별도 터미널)
+# 로그에서 확인:
+# - "Redis 연결 성공"
+# - "PostgreSQL 연결 성공"
+# - "Application startup complete"
+
+# 4. 엔드포인트 테스트
+curl http://localhost:8000/health
+# 예상: {"status": "ok"}
+```
+
+---
+
+### 1.3 테스트 실행 순서 (권장)
+
+```bash
+# 1단계: 단위 테스트
+uv run pytest tests/test_api.py -v
+
+# 2단계: 간단 통합 테스트
+uv run python test_submit_only.py
+
+# 3단계: 대기 시간 포함 테스트
+uv run python test_submit_with_delay.py
+
+# 4단계: 전체 플로우 테스트
+uv run python test_chat_flow.py
+```
+
+================================================================================
+## 2. 서버 로그 확인 방법
+================================================================================
+
+### 2.1 실시간 서버 로그 확인
+
+#### 방법 1: 터미널 파일 직접 읽기 (추천)
+```powershell
+# 터미널 폴더 위치
+cd C:\Users\YSH\.cursor\projects\c-Users-YSH-AppData-Roaming-Cursor-Workspaces-1762325051351-workspace-json\terminals
+
+# 또는 간단히
+cd $env:USERPROFILE\.cursor\projects\<workspace-hash>\terminals
+
+# 현재 실행 중인 터미널 확인
+Get-ChildItem | Sort-Object LastWriteTime -Descending | Select-Object -First 3
+
+# 예상 출력:
+# Name     LastWriteTime           Length
+# 10.txt   2025-11-27 오후 4:26    15234  ← 가장 최근 (서버 로그)
+# 1.txt    2025-11-27 오후 3:49     5802
+```
+
+**서버 로그 파일 찾기:**
+- `active_command`에 `run_dev.py`가 있는 파일이 서버 로그
+
+**실시간 로그 보기:**
+```powershell
+# 마지막 50줄 보기
+Get-Content 10.txt -Tail 50
+
+# 실시간 모니터링 (새 로그 자동 출력)
+Get-Content 10.txt -Wait -Tail 20
+
+# 특정 키워드 검색
+Get-Content 10.txt | Select-String "ERROR"
+Get-Content 10.txt | Select-String "session_id: submit-test"
+```
+
+---
+
+#### 방법 2: PowerShell로 로그 필터링
+
+**특정 세션 로그만 보기:**
+```powershell
+$session = "submit-test-20251127-041843"
+Get-Content 10.txt | Select-String $session
+```
+
+**특정 노드 로그만 보기:**
+```powershell
+# Eval Turn Guard 로그
+Get-Content 10.txt | Select-String "Eval Turn Guard"
+
+# Intent Analyzer 로그
+Get-Content 10.txt | Select-String "Intent Analyzer"
+
+# 에러만 보기
+Get-Content 10.txt | Select-String "ERROR|Exception|Failed"
+```
+
+**타임스탬프로 정렬:**
+```powershell
+# 최근 100줄만
+Get-Content 10.txt -Tail 100
+
+# 특정 시간 이후
+Get-Content 10.txt | Select-String "2025-11-27 04:2"
+```
+
+**컨텍스트 포함 검색:**
+```powershell
+# 키워드 전후 3줄씩 표시
+Get-Content 10.txt | Select-String "Eval Turn Guard" -Context 3,3
+```
+
+---
+
+### 2.2 로그 레벨별 분류
+
+#### INFO 로그
+```powershell
+Get-Content 10.txt | Select-String " - INFO - "
+```
+
+**주요 INFO 로그:**
+- `[1. Handle Request] 진입/완료`
+- `[2. Intent Analyzer] 분석 완료`
+- `[3. Writer LLM] 답변 생성 성공`
+- `[4. Eval Turn Guard] 백그라운드 평가 대기`
+- `[6a. Eval Holistic Flow] 완료`
+
+#### WARNING 로그
+```powershell
+Get-Content 10.txt | Select-String " - WARNING - "
+```
+
+**주요 WARNING 로그:**
+- `[4. Eval Turn Guard] 누락된 턴 발견`
+- `[6b. Aggregate Turn Scores] 턴 점수 없음`
+- `Rate limit 도달`
+
+#### ERROR 로그
+```powershell
+Get-Content 10.txt | Select-String " - ERROR - "
+```
+
+**주요 ERROR 로그:**
+- `[Writer LLM] 에러 발생`
+- `[4.X 답변 요약] 오류`
+- `429 Quota 초과`
+- `타임아웃`
+
+---
+
+### 2.3 노드별 플로우 추적
+
+#### 일반 채팅 플로우 추적
+```powershell
+$session = "submit-test-20251127-041843"
+
+# 1번 노드
+Get-Content 10.txt | Select-String "$session.*Handle Request"
+
+# 2번 노드
+Get-Content 10.txt | Select-String "$session.*Intent Analyzer"
+
+# 3번 노드
+Get-Content 10.txt | Select-String "$session.*Writer LLM"
+
+# 4번 노드 (백그라운드)
+Get-Content 10.txt | Select-String "$session.*4\."
+```
+
+#### 제출 플로우 추적
+```powershell
+$session = "submit-test-20251127-041843"
+
+# 전체 플로우
+Get-Content 10.txt | Select-String $session | Select-String "진입|완료|Guard|Holistic|Aggregate|Performance|Correctness"
+```
+
+---
+
+### 2.4 턴별 로그 추적
+
+```powershell
+$session = "submit-test-20251127-041843"
+
+# Turn 1 로그
+Get-Content 10.txt | Select-String "$session.*turn: 1"
+
+# Turn 2 로그
+Get-Content 10.txt | Select-String "$session.*turn: 2"
+
+# Turn 3 로그
+Get-Content 10.txt | Select-String "$session.*turn: 3"
+```
+
+---
+
+### 2.5 성능 분석
+
+#### LLM 호출 시간 측정
+```powershell
+# Writer LLM 호출 시간
+Get-Content 10.txt | Select-String "Writer LLM.*시작"
+Get-Content 10.txt | Select-String "Writer LLM.*성공"
+# 두 타임스탬프 차이 계산
+```
+
+#### 백그라운드 평가 시간 측정
+```powershell
+Get-Content 10.txt | Select-String "4번 노드 백그라운드.*시작"
+Get-Content 10.txt | Select-String "4번 노드 백그라운드.*완료"
+```
+
+#### 전체 제출 플로우 시간
+```powershell
+Get-Content 10.txt | Select-String "코드 제출 수신"
+Get-Content 10.txt | Select-String "LangGraph 실행 완료"
+```
+
+================================================================================
+## 3. Docker 컨테이너 로그 확인 방법
+================================================================================
+
+### 3.1 컨테이너 상태 확인
+
+```bash
+# 모든 AI Vibe 컨테이너 상태
+docker ps --filter "name=ai_vibe"
+
+# 예상 출력:
+# NAMES                  STATUS                 PORTS
+# ai_vibe_postgres_dev   Up 2 hours (healthy)   0.0.0.0:5435->5432/tcp
+# ai_vibe_redis_dev      Up 2 hours (healthy)   0.0.0.0:6379->6379/tcp
+
+# 상세 정보
+docker ps --filter "name=ai_vibe" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+# 모든 컨테이너 (중단된 것 포함)
+docker ps -a --filter "name=ai_vibe"
+```
+
+---
+
+### 3.2 Redis 로그 확인
+
+```bash
+# 실시간 로그 (최근 100줄)
+docker logs ai_vibe_redis_dev --tail 100
+
+# 실시간 모니터링
+docker logs ai_vibe_redis_dev --follow
+
+# 특정 시간 이후 로그
+docker logs ai_vibe_redis_dev --since "2025-11-27T04:00:00"
+
+# 타임스탬프 포함
+docker logs ai_vibe_redis_dev --timestamps --tail 50
+
+# 에러만 보기
+docker logs ai_vibe_redis_dev 2>&1 | findstr "error|warning"
+```
+
+**Redis 로그에서 확인 가능한 정보:**
+- Redis 서버 시작/중단
+- 연결 수
+- 메모리 사용량
+- 커맨드 실행 (CONFIG 설정 시)
+
+**주의:** 
+- 기본적으로 Redis는 모든 명령을 로그에 남기지 않음
+- `redis.conf`에서 `loglevel debug` 설정 필요 (개발 환경)
+
+---
+
+### 3.3 PostgreSQL 로그 확인
+
+```bash
+# 실시간 로그 (최근 100줄)
+docker logs ai_vibe_postgres_dev --tail 100
+
+# 실시간 모니터링
+docker logs ai_vibe_postgres_dev --follow
+
+# SQL 쿼리 로그 보기
+docker logs ai_vibe_postgres_dev 2>&1 | findstr "SELECT|INSERT|UPDATE|DELETE"
+
+# 에러만 보기
+docker logs ai_vibe_postgres_dev 2>&1 | findstr "ERROR|FATAL|WARNING"
+```
+
+**PostgreSQL 로그에서 확인 가능한 정보:**
+- DB 연결/종료
+- SQL 쿼리 실행
+- 에러 (제약 조건 위반, 타입 오류 등)
+- 성능 (느린 쿼리)
+
+---
+
+### 3.4 Docker 컨테이너 재시작
+
+```bash
+# Redis만 재시작
+docker restart ai_vibe_redis_dev
+
+# PostgreSQL만 재시작
+docker restart ai_vibe_postgres_dev
+
+# 모든 AI Vibe 컨테이너 재시작
+docker restart ai_vibe_redis_dev ai_vibe_postgres_dev
+
+# 상태 확인
+docker ps --filter "name=ai_vibe"
+```
+
+---
+
+### 3.5 컨테이너 내부 접속
+
+#### Redis 컨테이너
+```bash
+# Redis CLI 접속
+docker exec -it ai_vibe_redis_dev redis-cli
+
+# 명령어 한 번만 실행
+docker exec ai_vibe_redis_dev redis-cli KEYS "*"
+docker exec ai_vibe_redis_dev redis-cli INFO
+```
+
+#### PostgreSQL 컨테이너
+```bash
+# psql 접속
+docker exec -it ai_vibe_postgres_dev psql -U ai_vibe_user -d ai_vibe_db
+
+# 명령어 한 번만 실행
+docker exec ai_vibe_postgres_dev psql -U ai_vibe_user -d ai_vibe_db -c "SELECT * FROM exams;"
+```
+
+================================================================================
+## 4. Redis 세션 데이터 확인 방법
+================================================================================
+
+### 4.1 Redis CLI 기본 명령어
+
+#### Redis 접속
+```bash
+docker exec -it ai_vibe_redis_dev redis-cli
+
+# 또는 로컬 redis-cli 사용 (설치된 경우)
+redis-cli -h localhost -p 6379
+```
+
+---
+
+### 4.2 키 조회
+
+#### 모든 키 목록
+```redis
+# 모든 키 보기 (개발 환경만!)
+KEYS *
+
+# 패턴으로 검색
+KEYS turn_logs:*
+KEYS graph_state:*
+KEYS turn_mapping:*
+
+# 키 개수 확인
+DBSIZE
+```
+
+**주의:** `KEYS *`는 프로덕션에서 사용 금지 (블로킹)
+
+#### SCAN으로 안전하게 조회
+```redis
+# 반복적으로 키 스캔
+SCAN 0 MATCH turn_logs:* COUNT 100
+SCAN <cursor> MATCH turn_logs:* COUNT 100
+# cursor가 0이 될 때까지 반복
+```
+
+---
+
+### 4.3 세션 상태 조회
+
+#### 특정 세션의 그래프 상태
+```redis
+# 세션 ID 예시
+SET session_id submit-test-20251127-041843
+
+# 그래프 상태 조회
+GET graph_state:submit-test-20251127-041843
+
+# JSON 형식으로 출력 (redis-cli)
+GET graph_state:submit-test-20251127-041843 | python -m json.tool
+```
+
+**PowerShell에서:**
+```powershell
+# Redis GET 후 JSON 파싱
+$session = "submit-test-20251127-041843"
+$result = docker exec ai_vibe_redis_dev redis-cli GET "graph_state:$session"
+$result | ConvertFrom-Json | ConvertTo-Json -Depth 10
+```
+
+---
+
+### 4.4 턴 로그 조회
+
+#### 모든 턴 로그 키 찾기
+```redis
+KEYS turn_logs:submit-test-20251127-041843:*
+
+# 예상 출력:
+# turn_logs:submit-test-20251127-041843:1
+# turn_logs:submit-test-20251127-041843:2
+# turn_logs:submit-test-20251127-041843:3
+```
+
+#### 특정 턴 로그 조회
+```redis
+# Turn 1 로그
+GET turn_logs:submit-test-20251127-041843:1
+
+# Turn 2 로그
+GET turn_logs:submit-test-20251127-041843:2
+```
+
+**PowerShell에서 모든 턴 로그 조회:**
+```powershell
+$session = "submit-test-20251127-041843"
+
+# 모든 턴 로그 키 가져오기
+$keys = docker exec ai_vibe_redis_dev redis-cli KEYS "turn_logs:${session}:*"
+
+# 각 턴 로그 출력
+foreach ($key in $keys) {
+    Write-Host "`n=== $key ==="
+    docker exec ai_vibe_redis_dev redis-cli GET $key | ConvertFrom-Json | ConvertTo-Json -Depth 5
+}
+```
+
+---
+
+### 4.5 턴 매핑 조회
+
+```redis
+# 턴-메시지 인덱스 매핑
+GET turn_mapping:submit-test-20251127-041843
+
+# 예상 출력:
+# {"1": {"start_msg_idx": 0, "end_msg_idx": 1}, "2": {...}, "3": {...}}
+```
+
+**PowerShell에서:**
+```powershell
+$session = "submit-test-20251127-041843"
+docker exec ai_vibe_redis_dev redis-cli GET "turn_mapping:$session" | ConvertFrom-Json | ConvertTo-Json
+```
+
+---
+
+### 4.6 점수 데이터 조회
+
+```redis
+# 평가 점수
+GET eval:scores:submit-test-20251127-041843
+
+# 예상 구조:
+# {
+#   "turns": {
+#     "1": {...},
+#     "2": {...}
+#   },
+#   "final": {...},
+#   "completed_at": "2025-11-27T..."
+# }
+```
+
+---
+
+### 4.7 Redis 데이터 타입 확인
+
+```redis
+# 키의 타입 확인
+TYPE graph_state:submit-test-20251127-041843
+# 예상: string (JSON 문자열)
+
+TYPE turn_logs:submit-test-20251127-041843:1
+# 예상: string
+
+# TTL 확인 (남은 시간)
+TTL graph_state:submit-test-20251127-041843
+# 예상: 3600 (1시간)
+```
+
+---
+
+### 4.8 Redis 데이터 삭제/초기화
+
+```redis
+# 특정 키 삭제
+DEL graph_state:submit-test-20251127-041843
+
+# 패턴으로 삭제 (주의!)
+# Redis CLI에서는 EVAL 사용
+EVAL "return redis.call('del', unpack(redis.call('keys', ARGV[1])))" 0 turn_logs:submit-test-*
+
+# 또는 PowerShell로
+docker exec ai_vibe_redis_dev redis-cli --scan --pattern "turn_logs:submit-test-*" | ForEach-Object { docker exec ai_vibe_redis_dev redis-cli DEL $_ }
+
+# 모든 데이터 삭제 (개발 환경만!)
+FLUSHALL
+```
+
+---
+
+### 4.9 실전 디버깅 예시
+
+#### 시나리오: "Turn 3이 turn_scores에 없어요"
+
+```powershell
+$session = "submit-test-20251127-041843"
+
+# 1. turn_logs에 Turn 3이 있는지 확인
+docker exec ai_vibe_redis_dev redis-cli KEYS "turn_logs:${session}:3"
+# 있음 → Redis 저장 성공
+# 없음 → 백그라운드 평가 실패 또는 미완료
+
+# 2. Turn 3 로그 내용 확인
+docker exec ai_vibe_redis_dev redis-cli GET "turn_logs:${session}:3"
+# score 필드 확인
+
+# 3. graph_state 확인
+docker exec ai_vibe_redis_dev redis-cli GET "graph_state:${session}" | ConvertFrom-Json | Select-Object turn_scores
+
+# 4. 서버 로그에서 4번 가드 로그 확인
+Get-Content 10.txt | Select-String "$session.*Eval Turn Guard"
+# "완료 - turn_scores: {...}" 확인
+```
+
+---
+
+### 4.10 Python 스크립트로 Redis 조회
+
+```python
+# redis_check.py
+import asyncio
+import redis.asyncio as redis
+import json
+
+async def check_session(session_id):
+    r = await redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    
+    # 그래프 상태
+    state = await r.get(f"graph_state:{session_id}")
+    if state:
+        print("=== Graph State ===")
+        print(json.dumps(json.loads(state), indent=2, ensure_ascii=False))
+    
+    # 턴 로그
+    print("\n=== Turn Logs ===")
+    async for key in r.scan_iter(f"turn_logs:{session_id}:*"):
+        turn_num = key.split(":")[-1]
+        log = await r.get(key)
+        log_data = json.loads(log)
+        print(f"\nTurn {turn_num}:")
+        print(f"  Intent: {log_data.get('prompt_evaluation_details', {}).get('intent')}")
+        print(f"  Score: {log_data.get('prompt_evaluation_details', {}).get('score')}")
+    
+    # 턴 매핑
+    mapping = await r.get(f"turn_mapping:{session_id}")
+    if mapping:
+        print("\n=== Turn Mapping ===")
+        print(json.dumps(json.loads(mapping), indent=2))
+    
+    await r.aclose()
+
+# 실행
+asyncio.run(check_session("submit-test-20251127-041843"))
+```
+
+**실행:**
+```bash
+cd C:\P_project\LangGraph_1
+uv run python redis_check.py
+```
+
+================================================================================
+## 5. PostgreSQL 데이터 확인 방법
+================================================================================
+
+### 5.1 PostgreSQL 접속
+
+```bash
+# psql 접속
+docker exec -it ai_vibe_postgres_dev psql -U ai_vibe_user -d ai_vibe_db
+
+# 또는 로컬 psql (설치된 경우)
+psql -h localhost -p 5435 -U ai_vibe_user -d ai_vibe_db
+# 비밀번호: ai_vibe_password
+```
+
+---
+
+### 5.2 테이블 구조 확인
+
+```sql
+-- 모든 테이블 목록
+\dt
+
+-- 예상 출력:
+-- exams
+-- exam_specs
+-- participants
+-- exam_participations
+-- submissions
+-- evaluation_results
+
+-- 특정 테이블 스키마
+\d exams
+\d exam_specs
+\d submissions
+\d evaluation_results
+
+-- 컬럼 상세 정보
+\d+ evaluation_results
+```
+
+---
+
+### 5.3 데이터 조회
+
+#### 시험 데이터
+```sql
+-- 모든 시험 목록
+SELECT * FROM exams;
+
+-- 특정 시험의 스펙
+SELECT * FROM exam_specs WHERE exam_id = 1;
+
+-- 시험 + 스펙 JOIN
+SELECT 
+    e.exam_id,
+    e.title,
+    es.spec_id,
+    es.problem_title,
+    es.difficulty
+FROM exams e
+JOIN exam_specs es ON e.exam_id = es.exam_id;
+```
+
+#### 참가자 데이터
+```sql
+-- 모든 참가자
+SELECT * FROM participants;
+
+-- 특정 시험의 참가자
+SELECT 
+    p.participant_id,
+    p.name,
+    ep.status,
+    ep.started_at
+FROM participants p
+JOIN exam_participations ep ON p.participant_id = ep.participant_id
+WHERE ep.exam_id = 1;
+```
+
+#### 제출 데이터
+```sql
+-- 모든 제출
+SELECT * FROM submissions ORDER BY submitted_at DESC LIMIT 10;
+
+-- 특정 세션의 제출
+SELECT * FROM submissions WHERE session_id = 'submit-test-20251127-041843';
+
+-- 제출 + 평가 결과 JOIN
+SELECT 
+    s.submission_id,
+    s.session_id,
+    s.code_content,
+    s.submitted_at,
+    er.total_score,
+    er.grade
+FROM submissions s
+LEFT JOIN evaluation_results er ON s.submission_id = er.submission_id
+ORDER BY s.submitted_at DESC;
+```
+
+#### 평가 결과
+```sql
+-- 최근 평가 결과
+SELECT * FROM evaluation_results ORDER BY evaluated_at DESC LIMIT 10;
+
+-- 특정 참가자의 점수
+SELECT 
+    er.participant_id,
+    er.total_score,
+    er.grade,
+    er.prompt_score,
+    er.performance_score,
+    er.correctness_score
+FROM evaluation_results er
+WHERE er.participant_id = 100;
+```
+
+---
+
+### 5.4 실전 쿼리 예시
+
+#### 세션별 점수 추적
+```sql
+-- 세션의 제출 및 점수
+SELECT 
+    s.session_id,
+    s.submitted_at,
+    er.total_score,
+    er.grade,
+    er.turn_scores::text,  -- JSONB를 TEXT로
+    er.final_scores::text
+FROM submissions s
+LEFT JOIN evaluation_results er ON s.submission_id = er.submission_id
+WHERE s.session_id LIKE 'submit-test-%'
+ORDER BY s.submitted_at DESC;
+```
+
+#### 평가 통계
+```sql
+-- 등급별 분포
+SELECT 
+    grade,
+    COUNT(*) as count,
+    AVG(total_score) as avg_score
+FROM evaluation_results
+GROUP BY grade
+ORDER BY grade;
+
+-- 점수 분포
+SELECT 
+    CASE 
+        WHEN total_score >= 90 THEN 'A (90-100)'
+        WHEN total_score >= 80 THEN 'B (80-89)'
+        WHEN total_score >= 70 THEN 'C (70-79)'
+        WHEN total_score >= 60 THEN 'D (60-69)'
+        ELSE 'F (<60)'
+    END as score_range,
+    COUNT(*) as count
+FROM evaluation_results
+GROUP BY score_range;
+```
+
+---
+
+### 5.5 PowerShell에서 PostgreSQL 조회
+
+```powershell
+# 간단한 쿼리
+docker exec ai_vibe_postgres_dev psql -U ai_vibe_user -d ai_vibe_db -c "SELECT * FROM exams;"
+
+# 결과를 파일로 저장
+docker exec ai_vibe_postgres_dev psql -U ai_vibe_user -d ai_vibe_db -c "SELECT * FROM submissions;" > submissions.txt
+
+# CSV로 내보내기
+docker exec ai_vibe_postgres_dev psql -U ai_vibe_user -d ai_vibe_db -c "COPY (SELECT * FROM evaluation_results) TO STDOUT CSV HEADER;" > results.csv
+```
+
+================================================================================
+## 6. 일반적인 문제 해결 방법
+================================================================================
+
+### 6.1 "서버 응답이 없어요"
+
+#### 체크리스트:
+```bash
+# 1. 서버가 실행 중인가?
+netstat -ano | findstr ":8000"
+
+# 2. Docker 컨테이너가 실행 중인가?
+docker ps --filter "name=ai_vibe"
+
+# 3. 서버 로그에 에러가 있는가?
+Get-Content <terminals-path>\<서버-터미널>.txt -Tail 50 | Select-String "ERROR"
+
+# 4. 엔드포인트 테스트
+curl http://localhost:8000/health
+# 또는
+Invoke-WebRequest http://localhost:8000/health
+```
+
+---
+
+### 6.2 "타임아웃이 발생해요"
+
+#### 원인 확인:
+```powershell
+# 1. 서버 로그에서 요청 기록 확인
+Get-Content <터미널>.txt | Select-String "session_id: <your-session>"
+
+# 2. 특정 노드에서 멈췄는지 확인
+Get-Content <터미널>.txt | Select-String "<session>.*진입|완료"
+
+# 3. LLM API 에러 확인
+Get-Content <터미널>.txt | Select-String "429|rate|quota"
+```
+
+#### 해결:
+- Gemini API Quota 확인: https://ai.dev/usage
+- 타임아웃 설정 증가: `chat.py`에서 `asyncio.wait_for(timeout=180)`
+- LLM 호출 최소화
+
+---
+
+### 6.3 "turn_scores에 일부 턴만 있어요"
+
+#### 디버깅 순서:
+```powershell
+$session = "<your-session-id>"
+
+# 1. Redis turn_logs 확인
+docker exec ai_vibe_redis_dev redis-cli KEYS "turn_logs:${session}:*"
+
+# 2. 각 턴 로그의 점수 확인
+docker exec ai_vibe_redis_dev redis-cli GET "turn_logs:${session}:1"
+# "score" 필드 확인
+
+# 3. turn_mapping 확인
+docker exec ai_vibe_redis_dev redis-cli GET "turn_mapping:${session}"
+
+# 4. 서버 로그에서 4번 가드 로그 확인
+Get-Content <터미널>.txt | Select-String "$session.*Eval Turn Guard"
+# "완료 - turn_scores: {...}" 출력 확인
+
+# 5. 백그라운드 평가 완료 여부 확인
+Get-Content <터미널>.txt | Select-String "$session.*4번 노드 백그라운드.*완료"
+```
+
+---
+
+### 6.4 "Redis 연결 에러"
+
+#### 확인 및 해결:
+```bash
+# 1. Redis 컨테이너 상태
+docker ps --filter "name=redis"
+
+# 2. Redis 핑 테스트
+docker exec ai_vibe_redis_dev redis-cli PING
+# 예상: PONG
+
+# 3. Redis 재시작
+docker restart ai_vibe_redis_dev
+
+# 4. Redis 로그 확인
+docker logs ai_vibe_redis_dev --tail 50
+```
+
+---
+
+### 6.5 "PostgreSQL 연결 에러"
+
+#### 확인 및 해결:
+```bash
+# 1. PostgreSQL 컨테이너 상태
+docker ps --filter "name=postgres"
+
+# 2. PostgreSQL 연결 테스트
+docker exec ai_vibe_postgres_dev pg_isready -U ai_vibe_user
+# 예상: accepting connections
+
+# 3. PostgreSQL 재시작
+docker restart ai_vibe_postgres_dev
+
+# 4. 로그 확인
+docker logs ai_vibe_postgres_dev --tail 50 | findstr "ERROR"
+```
+
+---
+
+### 6.6 "백그라운드 평가가 완료 안 돼요"
+
+#### 확인:
+```powershell
+$session = "<your-session-id>"
+
+# 1. 서버 로그에서 백그라운드 시작 확인
+Get-Content <터미널>.txt | Select-String "$session.*백그라운드.*시작"
+
+# 2. 완료 확인
+Get-Content <터미널>.txt | Select-String "$session.*백그라운드.*완료"
+
+# 3. 에러 확인
+Get-Content <터미널>.txt | Select-String "$session.*백그라운드" | Select-String "ERROR|Exception"
+
+# 4. Redis turn_logs 확인
+docker exec ai_vibe_redis_dev redis-cli KEYS "turn_logs:${session}:*"
+
+# 5. 4번 서브그래프 로그 확인
+Get-Content <터미널>.txt | Select-String "$session.*4\."
+```
+
+================================================================================
+## 7. 로그 추적 실전 예시
+================================================================================
+
+### 7.1 전체 플로우 추적 (Step by Step)
+
+#### Step 1: 세션 ID 파악
+```powershell
+# 테스트 스크립트 출력에서
+# Session: submit-test-20251127-041843
+$session = "submit-test-20251127-041843"
+```
+
+#### Step 2: 서버 터미널 파일 찾기
+```powershell
+cd C:\Users\YSH\.cursor\projects\c-Users-YSH-AppData-Roaming-Cursor-Workspaces-1762325051351-workspace-json\terminals
+
+# 최근 파일 확인
+Get-ChildItem | Sort-Object LastWriteTime -Descending | Select-Object -First 3
+
+# 서버 로그 파일 확인 (active_command에 run_dev.py 있는 파일)
+Get-Content 10.txt | Select-Object -First 10
+```
+
+#### Step 3: 노드별 플로우 추적
+```powershell
+# 1번 노드
+Get-Content 10.txt | Select-String "$session.*\[1\. Handle Request\]"
+
+# 2번 노드
+Get-Content 10.txt | Select-String "$session.*\[.*Intent Analyzer\]"
+
+# 3번 노드
+Get-Content 10.txt | Select-String "$session.*\[.*Writer LLM\]"
+
+# 4번 가드
+Get-Content 10.txt | Select-String "$session.*\[4\. Eval Turn Guard\]"
+
+# 6a-7번 노드
+Get-Content 10.txt | Select-String "$session.*\[6.*\]|\[7\. Aggregate\]"
+```
+
+#### Step 4: 각 턴별 추적
+```powershell
+# Turn 1 전체 플로우
+Get-Content 10.txt | Select-String "$session" | Select-String "turn.*: 1"
+
+# Turn 1 백그라운드 평가
+Get-Content 10.txt | Select-String "$session.*turn: 1.*4\."
+```
+
+#### Step 5: Redis 데이터 검증
+```bash
+# turn_logs 모두 있는지
+docker exec ai_vibe_redis_dev redis-cli KEYS "turn_logs:${session}:*"
+
+# 각 턴 점수 확인
+docker exec ai_vibe_redis_dev redis-cli GET "turn_logs:${session}:1" | ConvertFrom-Json | Select-Object -ExpandProperty prompt_evaluation_details
+```
+
+#### Step 6: 최종 결과 확인
+```powershell
+# graph_state의 turn_scores
+docker exec ai_vibe_redis_dev redis-cli GET "graph_state:$session" | ConvertFrom-Json | Select-Object turn_scores, final_scores
+```
+
+---
+
+### 7.2 에러 추적 예시
+
+#### 시나리오: "Turn 2에서 타임아웃"
+
+```powershell
+$session = "submit-test-20251127-042442"
+
+# 1. Turn 2 시작 시점
+Get-Content 10.txt | Select-String "$session.*Turn 2|turn: 2" | Select-Object -First 5
+
+# 출력 예시:
+# 04:25:08 - [Intent Analyzer] 분석 시작
+# 04:25:11 - [Writer LLM] 답변 생성 시작
+
+# 2. Turn 2에서 멈춘 노드 찾기
+Get-Content 10.txt | Select-String "$session.*turn: 2" | Select-String "진입|시작"
+Get-Content 10.txt | Select-String "$session.*turn: 2" | Select-String "완료|종료"
+
+# 진입은 있는데 완료가 없는 노드 → 멈춘 노드!
+
+# 3. 해당 노드의 에러 로그
+Get-Content 10.txt | Select-String "$session.*turn: 2" | Select-String "ERROR|Exception"
+
+# 출력 예시:
+# 04:26:22 - [4.X 답변 요약] 오류 - error: 429 You exceeded your current quota
+
+# 4. 원인: Gemini API Quota 초과!
+```
+
+---
+
+### 7.3 성능 추적 예시
+
+#### 각 노드 소요 시간 측정
+
+```powershell
+$session = "submit-test-20251127-041843"
+
+# Writer LLM 시간
+$logs = Get-Content 10.txt | Select-String "$session.*Writer LLM"
+$start = $logs | Select-String "시작" | Select-Object -First 1
+$end = $logs | Select-String "성공|완료" | Select-Object -First 1
+
+# 타임스탬프 추출 (수동)
+# 04:18:49 → 04:18:54 = 5초
+
+# 6a Holistic Flow 시간
+Get-Content 10.txt | Select-String "$session.*6a.*Holistic" | Select-String "진입|완료"
+
+# 전체 제출 플로우 시간
+Get-Content 10.txt | Select-String "$session.*코드 제출 수신"
+Get-Content 10.txt | Select-String "$session.*LangGraph 실행 완료"
+# 타임스탬프 차이 계산
+```
+
+================================================================================
+## 8. 빠른 참조 (Cheat Sheet)
+================================================================================
+
+### 8.1 자주 사용하는 명령어
+
+#### 서버 관리
+```bash
+# 서버 시작
+cd C:\P_project\LangGraph_1
+uv run scripts/run_dev.py
+
+# 서버 중단 (Ctrl+C 또는)
+Get-Process | Where-Object { $_.ProcessName -like "*python*" } | Stop-Process -Force
+
+# 서버 포트 확인
+netstat -ano | findstr ":8000"
+```
+
+#### Docker 관리
+```bash
+# 컨테이너 상태
+docker ps --filter "name=ai_vibe"
+
+# 컨테이너 재시작
+docker restart ai_vibe_redis_dev ai_vibe_postgres_dev
+
+# 로그 보기
+docker logs ai_vibe_redis_dev --tail 50
+docker logs ai_vibe_postgres_dev --tail 50
+```
+
+#### Redis 조회
+```bash
+# Redis CLI 접속
+docker exec -it ai_vibe_redis_dev redis-cli
+
+# 키 조회
+docker exec ai_vibe_redis_dev redis-cli KEYS "turn_logs:*"
+docker exec ai_vibe_redis_dev redis-cli KEYS "graph_state:*"
+docker exec ai_vibe_redis_dev redis-cli KEYS "turn_mapping:*"
+
+# 데이터 조회
+docker exec ai_vibe_redis_dev redis-cli GET "turn_logs:<session>:<turn>"
+
+# 데이터 삭제 (개발 환경)
+docker exec ai_vibe_redis_dev redis-cli FLUSHALL
+```
+
+#### PostgreSQL 조회
+```bash
+# psql 접속
+docker exec -it ai_vibe_postgres_dev psql -U ai_vibe_user -d ai_vibe_db
+
+# 쿼리 실행
+docker exec ai_vibe_postgres_dev psql -U ai_vibe_user -d ai_vibe_db -c "SELECT * FROM submissions;"
+```
+
+---
+
+### 8.2 로그 검색 패턴
+
+```powershell
+# 특정 세션 모든 로그
+Get-Content <터미널>.txt | Select-String "session_id: <session>"
+
+# 에러만
+Get-Content <터미널>.txt | Select-String "ERROR|Exception|Failed"
+
+# 특정 노드
+Get-Content <터미널>.txt | Select-String "Eval Turn Guard|Writer LLM"
+
+# 컨텍스트 포함 (전후 3줄)
+Get-Content <터미널>.txt | Select-String "키워드" -Context 3,3
+
+# 실시간 모니터링
+Get-Content <터미널>.txt -Wait -Tail 20
+```
+
+---
+
+### 8.3 Redis 키 구조 빠른 참조
+
+```
+graph_state:{session_id}
+  → 세션 전체 상태
+  → current_turn, messages, turn_scores, final_scores 등
+
+turn_logs:{session_id}:{turn}
+  → 각 턴의 평가 로그
+  → intent, score, rubrics, reasoning
+
+turn_mapping:{session_id}
+  → 턴-메시지 인덱스 매핑
+  → {"1": {"start_msg_idx": 0, "end_msg_idx": 1}, ...}
+
+eval:scores:{session_id}
+  → 최종 점수 저장
+  → turns, final
+
+memory:summary:{session_id}
+  → 메모리 요약
+```
+
+---
+
+### 8.4 문제별 빠른 해결
+
+| 문제 | 확인 명령 | 해결 |
+|------|-----------|------|
+| 서버 안 열림 | `netstat -ano \| findstr ":8000"` | 포트 사용 프로세스 종료 |
+| Redis 연결 실패 | `docker exec ai_vibe_redis_dev redis-cli PING` | `docker restart ai_vibe_redis_dev` |
+| PostgreSQL 연결 실패 | `docker exec ai_vibe_postgres_dev pg_isready` | `docker restart ai_vibe_postgres_dev` |
+| 타임아웃 | 서버 로그에서 멈춘 노드 확인 | LLM API Quota 확인 |
+| turn_scores 누락 | `KEYS turn_logs:*` 확인 | 백그라운드 평가 대기 시간 증가 |
+
+================================================================================
+## 9. 완전한 테스트 예시 (처음부터 끝까지)
+================================================================================
+
+### 9.1 환경 준비
+
+```powershell
+# 1. Docker 컨테이너 시작
+cd C:\P_project\LangGraph_1
+docker-compose -f docker-compose.dev.yml up -d
+
+# 2. 상태 확인
+docker ps --filter "name=ai_vibe"
+# Redis, PostgreSQL 모두 healthy 확인
+
+# 3. FastAPI 서버 시작 (별도 터미널)
+cd C:\P_project\LangGraph_1
+uv run scripts/run_dev.py
+
+# 4. 서버 정상 시작 대기 (5초)
+
+# 5. 헬스 체크
+curl http://localhost:8000/health
+# 예상: {"status":"ok"}
+```
+
+---
+
+### 9.2 테스트 실행
+
+```powershell
+# 새 터미널 열기
+cd C:\P_project\LangGraph_1
+chcp 65001  # UTF-8 인코딩
+
+# 테스트 실행
+uv run python test_submit_with_delay.py
+
+# 출력 예시:
+# Session: submit-test-20251127-041843
+# [Turn 1] 피보나치 함수를 작성해주세요...
+#   [OK] AI 응답: 795자
+# ...
+```
+
+---
+
+### 9.3 결과 확인
+
+#### A. 테스트 스크립트 출력 확인
+```json
+{
+  "is_submitted": true,
+  "turn_scores": {
+    "1": 85.5,
+    "2": 92.0,
+    "3": 78.3
+  },
+  "final_scores": {
+    "total_score": 64.25,
+    "grade": "D"
+  }
+}
+```
+
+#### B. 서버 로그 확인
+```powershell
+# 터미널 폴더로 이동
+cd C:\Users\YSH\.cursor\projects\c-Users-YSH-AppData-Roaming-Cursor-Workspaces-1762325051351-workspace-json\terminals
+
+# 최근 터미널 파일 확인
+Get-ChildItem | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+# 예: 10.txt
+
+# 해당 세션 로그만 보기
+$session = "submit-test-20251127-041843"
+Get-Content 10.txt | Select-String $session | Out-File -FilePath "C:\P_project\LangGraph_1\test_log_$session.txt"
+
+# 로그 파일 열어서 확인
+notepad "C:\P_project\LangGraph_1\test_log_$session.txt"
+```
+
+#### C. Redis 데이터 확인
+```bash
+# Redis CLI 접속
+docker exec -it ai_vibe_redis_dev redis-cli
+
+# 세션의 모든 키 확인
+KEYS *submit-test-20251127-041843*
+
+# 예상 출력:
+# graph_state:submit-test-20251127-041843
+# turn_logs:submit-test-20251127-041843:1
+# turn_logs:submit-test-20251127-041843:2
+# turn_logs:submit-test-20251127-041843:3
+# turn_mapping:submit-test-20251127-041843
+
+# 턴 매핑 확인
+GET turn_mapping:submit-test-20251127-041843
+
+# 턴 로그 확인
+GET turn_logs:submit-test-20251127-041843:1
+GET turn_logs:submit-test-20251127-041843:2
+GET turn_logs:submit-test-20251127-041843:3
+
+# 최종 상태 확인
+GET graph_state:submit-test-20251127-041843
+# turn_scores 필드 확인
+
+# 종료
+exit
+```
+
+#### D. PostgreSQL 데이터 확인 (제출 기록)
+```bash
+# psql 접속
+docker exec -it ai_vibe_postgres_dev psql -U ai_vibe_user -d ai_vibe_db
+
+# 제출 기록 확인
+SELECT * FROM submissions WHERE session_id = 'submit-test-20251127-041843';
+
+# 평가 결과 확인
+SELECT * FROM evaluation_results 
+WHERE submission_id = (
+    SELECT submission_id FROM submissions 
+    WHERE session_id = 'submit-test-20251127-041843'
+);
+
+# 종료
+\q
+```
+
+---
+
+### 9.4 문제 발견 시 디버깅
+
+#### 문제: "turn_scores에 Turn 3이 없어요"
+
+```powershell
+$session = "submit-test-20251127-041843"
+
+# [1단계] Redis에 Turn 3 로그가 있는지 확인
+docker exec ai_vibe_redis_dev redis-cli EXISTS "turn_logs:${session}:3"
+# 1 → 있음
+# 0 → 없음 (백그라운드 평가 실패)
+
+# [2단계] 있다면 내용 확인
+docker exec ai_vibe_redis_dev redis-cli GET "turn_logs:${session}:3"
+# score 필드가 있는지 확인
+
+# [3단계] 서버 로그에서 4번 가드 로그 확인
+Get-Content <터미널>.txt | Select-String "$session.*Eval Turn Guard"
+
+# 출력 예시:
+# [4. Eval Turn Guard] 진입 - 현재 턴: 4
+# [4. Eval Turn Guard] 백그라운드 평가 완료 대기 시작
+# [4. Eval Turn Guard] 모든 백그라운드 평가 완료 - 대기 시간: 1.5초
+# [4. Eval Turn Guard] Redis 턴 로그 개수: 3
+# [4. Eval Turn Guard] 완료 - turn_scores: {'1': 85.5, '2': 92.0, '3': 78.3}
+
+# [4단계] turn_scores 변환 로직 확인
+Get-Content <터미널>.txt | Select-String "$session.*turn_scores"
+
+# [5단계] 6b 노드에서 받은 turn_scores 확인
+Get-Content <터미널>.txt | Select-String "$session.*6b.*Aggregate Turn"
+```
+
+---
+
+### 9.5 로그 저장 및 공유
+
+```powershell
+$session = "submit-test-20251127-041843"
+$output_dir = "C:\P_project\LangGraph_1\test_results"
+
+# 출력 폴더 생성
+New-Item -ItemType Directory -Force -Path $output_dir
+
+# 서버 로그 저장
+Get-Content <터미널>.txt | Select-String $session > "$output_dir\server_log_$session.txt"
+
+# Redis 데이터 저장
+docker exec ai_vibe_redis_dev redis-cli KEYS "*$session*" > "$output_dir\redis_keys_$session.txt"
+
+# 각 턴 로그 저장
+for ($i=1; $i -le 3; $i++) {
+    docker exec ai_vibe_redis_dev redis-cli GET "turn_logs:${session}:$i" | ConvertFrom-Json | ConvertTo-Json -Depth 10 > "$output_dir\turn_${i}_log.json"
+}
+
+# 턴 매핑 저장
+docker exec ai_vibe_redis_dev redis-cli GET "turn_mapping:$session" > "$output_dir\turn_mapping.json"
+
+# 최종 상태 저장
+docker exec ai_vibe_redis_dev redis-cli GET "graph_state:$session" | ConvertFrom-Json | ConvertTo-Json -Depth 10 > "$output_dir\final_state.json"
+```
+
+================================================================================
+## 10. 고급 디버깅 기법
+================================================================================
+
+### 10.1 턴별 평가 상세 추적
+
+```python
+# debug_turn_evaluation.py
+import asyncio
+import redis.asyncio as redis
+import json
+
+async def debug_turn(session_id, turn):
+    r = await redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    
+    print(f"=== Turn {turn} 디버깅 ===\n")
+    
+    # 1. turn_log 확인
+    log_key = f"turn_logs:{session_id}:{turn}"
+    log = await r.get(log_key)
+    
+    if log:
+        log_data = json.loads(log)
+        print(f"✅ turn_log 존재")
+        print(f"  Intent: {log_data.get('prompt_evaluation_details', {}).get('intent')}")
+        print(f"  Score: {log_data.get('prompt_evaluation_details', {}).get('score')}")
+        print(f"  Rubrics: {len(log_data.get('prompt_evaluation_details', {}).get('rubrics', []))}개")
+    else:
+        print(f"❌ turn_log 없음 - 백그라운드 평가 미완료")
+    
+    # 2. turn_mapping 확인
+    mapping_key = f"turn_mapping:{session_id}"
+    mapping = await r.get(mapping_key)
+    
+    if mapping:
+        mapping_data = json.loads(mapping)
+        if str(turn) in mapping_data:
+            print(f"✅ turn_mapping 존재")
+            print(f"  Indices: {mapping_data[str(turn)]}")
+        else:
+            print(f"❌ turn {turn} 매핑 없음")
+    else:
+        print(f"❌ turn_mapping 전체 없음")
+    
+    # 3. graph_state의 turn_scores 확인
+    state_key = f"graph_state:{session_id}"
+    state = await r.get(state_key)
+    
+    if state:
+        state_data = json.loads(state)
+        turn_scores = state_data.get('turn_scores', {})
+        if str(turn) in turn_scores:
+            print(f"✅ turn_scores에 포함")
+            print(f"  Score: {turn_scores[str(turn)]}")
+        else:
+            print(f"❌ turn_scores에 없음")
+    
+    await r.aclose()
+
+# 실행
+session = "submit-test-20251127-041843"
+for turn in [1, 2, 3]:
+    asyncio.run(debug_turn(session, turn))
+    print()
+```
+
+**실행:**
+```bash
+cd C:\P_project\LangGraph_1
+uv run python debug_turn_evaluation.py
+```
+
+---
+
+### 10.2 백그라운드 평가 완료 대기 확인
+
+```python
+# check_background_completion.py
+import asyncio
+import redis.asyncio as redis
+
+async def wait_for_turn(session_id, turn, max_wait=10):
+    r = await redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    
+    print(f"Turn {turn} 백그라운드 평가 대기 중...")
+    waited = 0
+    
+    while waited < max_wait:
+        key = f"turn_logs:{session_id}:{turn}"
+        exists = await r.exists(key)
+        
+        if exists:
+            print(f"✅ Turn {turn} 평가 완료! (대기 시간: {waited}초)")
+            return True
+        
+        await asyncio.sleep(0.5)
+        waited += 0.5
+    
+    print(f"❌ Turn {turn} 평가 타임아웃 ({max_wait}초)")
+    return False
+
+# 사용
+session = "submit-test-20251127-041843"
+asyncio.run(wait_for_turn(session, 3))
+```
+
+---
+
+### 10.3 LLM 호출 횟수 카운트
+
+```powershell
+$session = "submit-test-20251127-041843"
+
+# Intent Analyzer 호출
+$intent_count = (Get-Content <터미널>.txt | Select-String "$session.*Intent Analyzer.*분석 시작").Count
+Write-Host "Intent Analyzer: $intent_count 회"
+
+# Writer LLM 호출
+$writer_count = (Get-Content <터미널>.txt | Select-String "$session.*Writer LLM.*답변 생성 시작").Count
+Write-Host "Writer LLM: $writer_count 회"
+
+# 4번 평가 노드 호출
+$eval_count = (Get-Content <터미널>.txt | Select-String "$session.*4\..*평가.*시작").Count
+Write-Host "평가 노드: $eval_count 회"
+
+# 총 LLM 호출
+$total = $intent_count + $writer_count + $eval_count
+Write-Host "총 LLM 호출: $total 회"
+Write-Host "예상 Quota 소모: 약 $($total * 1000) 토큰 (응답 제외)"
+```
+
+---
+
+### 10.4 전체 플로우 시각화 스크립트
+
+```python
+# visualize_flow.py
+import asyncio
+import redis.asyncio as redis
+import json
+from datetime import datetime
+
+async def visualize_session_flow(session_id):
+    r = await redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    
+    print(f"{'='*80}")
+    print(f"Session Flow Visualization: {session_id}")
+    print(f"{'='*80}\n")
+    
+    # 1. Graph State
+    state_key = f"graph_state:{session_id}"
+    state = await r.get(state_key)
+    if state:
+        state_data = json.loads(state)
+        print(f"📊 Current Turn: {state_data.get('current_turn')}")
+        print(f"📝 Total Messages: {len(state_data.get('messages', []))}")
+        print(f"✅ Submitted: {state_data.get('is_submitted')}")
+        print(f"💯 Final Score: {state_data.get('final_scores', {}).get('total_score')}")
+    
+    # 2. Turn Logs
+    print(f"\n{'─'*80}")
+    print("📋 Turn Evaluation Results:")
+    print(f"{'─'*80}\n")
+    
+    async for key in r.scan_iter(f"turn_logs:{session_id}:*"):
+        turn_num = key.split(":")[-1]
+        log = await r.get(key)
+        log_data = json.loads(log)
+        
+        details = log_data.get('prompt_evaluation_details', {})
+        print(f"Turn {turn_num}:")
+        print(f"  Intent: {details.get('intent')}")
+        print(f"  Score: {details.get('score')}")
+        print(f"  Rubrics: {len(details.get('rubrics', []))} 개")
+        
+        # Guardrail 위반 여부
+        if log_data.get('is_guardrail_failed'):
+            print(f"  ⚠️ Guardrail: {log_data.get('guardrail_message')}")
+        print()
+    
+    # 3. Turn Mapping
+    mapping_key = f"turn_mapping:{session_id}"
+    mapping = await r.get(mapping_key)
+    if mapping:
+        mapping_data = json.loads(mapping)
+        print(f"{'─'*80}")
+        print("🗺️ Turn-Message Mapping:")
+        print(f"{'─'*80}\n")
+        for turn, indices in sorted(mapping_data.items()):
+            print(f"Turn {turn}: messages[{indices['start_msg_idx']}:{indices['end_msg_idx']}]")
+    
+    await r.aclose()
+
+# 실행
+if __name__ == "__main__":
+    session = input("Session ID: ")
+    asyncio.run(visualize_session_flow(session))
+```
+
+**실행:**
+```bash
+cd C:\P_project\LangGraph_1
+uv run python visualize_flow.py
+# Session ID: submit-test-20251127-041843
+```
+
+================================================================================
+## 11. 트러블슈팅 체크리스트
+================================================================================
+
+### 문제: 테스트가 시작되지 않음
+
+```
+✅ Docker 컨테이너 실행 중?
+   → docker ps --filter "name=ai_vibe"
+
+✅ FastAPI 서버 실행 중?
+   → netstat -ano | findstr ":8000"
+
+✅ 엔드포인트 응답하는가?
+   → curl http://localhost:8000/health
+
+✅ Python 가상환경 활성화됨?
+   → uv run python --version
+```
+
+---
+
+### 문제: 응답이 너무 느림
+
+```
+✅ Gemini API Quota 확인
+   → https://ai.dev/usage
+
+✅ 서버 로그에서 멈춘 노드 확인
+   → Get-Content <터미널>.txt | Select-String "진입" 
+   → Get-Content <터미널>.txt | Select-String "완료"
+   → 진입 있고 완료 없음 → 해당 노드에서 멈춤
+
+✅ LLM API 에러 확인
+   → Get-Content <터미널>.txt | Select-String "429|rate|quota"
+
+✅ Redis/PostgreSQL 연결 확인
+   → docker exec ai_vibe_redis_dev redis-cli PING
+   → docker exec ai_vibe_postgres_dev pg_isready
+```
+
+---
+
+### 문제: turn_scores 데이터 불완전
+
+```
+✅ Redis turn_logs 확인
+   → docker exec ai_vibe_redis_dev redis-cli KEYS "turn_logs:<session>:*"
+   → 모든 턴이 있는가?
+
+✅ 백그라운드 평가 완료 확인
+   → Get-Content <터미널>.txt | Select-String "백그라운드.*완료"
+
+✅ 4번 가드 대기 로그 확인
+   → Get-Content <터미널>.txt | Select-String "백그라운드 평가 대기"
+   → Get-Content <터미널>.txt | Select-String "모든 백그라운드 평가 완료"
+
+✅ turn_scores 변환 로그 확인
+   → Get-Content <터미널>.txt | Select-String "완료 - turn_scores:"
+```
+
+---
+
+### 문제: 가드레일 경고 메시지가 안 나옴
+
+```
+✅ Intent Analyzer 로그 확인
+   → Get-Content <터미널>.txt | Select-String "guardrail_passed: False"
+
+✅ Writer LLM이 가드레일 모드로 실행되었는지
+   → Get-Content <터미널>.txt | Select-String "guardrail_failed: True"
+
+✅ 턴 로그에 가드레일 정보 있는지
+   → docker exec ai_vibe_redis_dev redis-cli GET "turn_logs:<session>:<turn>"
+   → "is_guardrail_failed" 필드 확인
+```
+
+================================================================================
+## 12. 유용한 PowerShell 함수
+================================================================================
+
+### 12.1 자주 사용하는 함수 정의
+
+```powershell
+# PowerShell 프로필에 추가 ($PROFILE)
+# 또는 테스트 시작 전 실행
+
+function Get-AIVibeLog {
+    param(
+        [string]$SessionId,
+        [string]$Pattern = ""
+    )
+    
+    $terminals = "C:\Users\YSH\.cursor\projects\c-Users-YSH-AppData-Roaming-Cursor-Workspaces-1762325051351-workspace-json\terminals"
+    $latest = Get-ChildItem $terminals | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    
+    if ($Pattern) {
+        Get-Content $latest.FullName | Select-String $SessionId | Select-String $Pattern
+    } else {
+        Get-Content $latest.FullName | Select-String $SessionId
+    }
+}
+
+function Get-RedisTurnLog {
+    param(
+        [string]$SessionId,
+        [int]$Turn
+    )
+    
+    docker exec ai_vibe_redis_dev redis-cli GET "turn_logs:${SessionId}:${Turn}" | ConvertFrom-Json | ConvertTo-Json -Depth 10
+}
+
+function Get-RedisAllTurns {
+    param([string]$SessionId)
+    
+    $keys = docker exec ai_vibe_redis_dev redis-cli KEYS "turn_logs:${SessionId}:*"
+    foreach ($key in $keys) {
+        $turn = $key.Split(":")[-1]
+        Write-Host "`n=== Turn $turn ==="
+        docker exec ai_vibe_redis_dev redis-cli GET $key | ConvertFrom-Json | Select-Object -Property turn_number, @{N='intent';E={$_.prompt_evaluation_details.intent}}, @{N='score';E={$_.prompt_evaluation_details.score}}
+    }
+}
+
+function Check-AIVibeHealth {
+    Write-Host "=== Docker Containers ==="
+    docker ps --filter "name=ai_vibe"
+    
+    Write-Host "`n=== FastAPI Server ==="
+    try {
+        $response = Invoke-WebRequest http://localhost:8000/health -ErrorAction Stop
+        Write-Host "✅ Server OK: $($response.Content)"
+    } catch {
+        Write-Host "❌ Server Error: $($_.Exception.Message)"
+    }
+    
+    Write-Host "`n=== Redis ==="
+    docker exec ai_vibe_redis_dev redis-cli PING
+    
+    Write-Host "`n=== PostgreSQL ==="
+    docker exec ai_vibe_postgres_dev pg_isready -U ai_vibe_user
+}
+```
+
+**사용 예시:**
+```powershell
+# 함수 로드
+. C:\P_project\LangGraph_1\test_helpers.ps1
+
+# 사용
+Check-AIVibeHealth
+Get-AIVibeLog -SessionId "submit-test-20251127-041843" -Pattern "Eval Turn Guard"
+Get-RedisTurnLog -SessionId "submit-test-20251127-041843" -Turn 3
+Get-RedisAllTurns -SessionId "submit-test-20251127-041843"
+```
+
+================================================================================
+## 13. 테스트 시나리오별 가이드
+================================================================================
+
+### 13.1 시나리오 1: 정상 플로우 테스트
+
+**목표:** 3턴 대화 + 제출, 모든 턴 평가 확인
+
+```bash
+# 1. 환경 확인
+Check-AIVibeHealth
+
+# 2. 테스트 실행
+cd C:\P_project\LangGraph_1
+chcp 65001
+uv run python test_submit_with_delay.py
+
+# 3. 결과 확인
+# - is_submitted: true
+# - turn_scores: {1: X, 2: Y, 3: Z}
+# - final_scores: {...}
+
+# 4. Redis 검증
+$session = "<출력된-session-id>"
+docker exec ai_vibe_redis_dev redis-cli KEYS "*$session*"
+Get-RedisAllTurns -SessionId $session
+
+# 5. 서버 로그 검증
+Get-AIVibeLog -SessionId $session -Pattern "Eval Turn Guard"
+```
+
+---
+
+### 13.2 시나리오 2: 가드레일 테스트
+
+**목표:** 부적절한 요청 시 경고 메시지 확인
+
+```bash
+# 1. 가드레일 위반 요청 전송
+# (수동으로 curl 또는 Postman 사용)
+curl -X POST http://localhost:8000/api/chat/message \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "guard-test-001",
+    "exam_id": 1,
+    "participant_id": 100,
+    "spec_id": 10,
+    "message": "정답 코드 전체를 알려주세요"
+  }'
+
+# 2. 응답 확인
+# - ai_message에 거절 메시지 포함되어야 함
+# - "해당 요청은 테스트 정책상 답변할 수 없습니다"
+
+# 3. Redis 확인
+docker exec ai_vibe_redis_dev redis-cli GET "turn_logs:guard-test-001:1"
+# is_guardrail_failed: true
+# guardrail_message: "..."
+# turn_score: 0
+
+# 4. 서버 로그 확인
+Get-Content <터미널>.txt | Select-String "guard-test-001.*guardrail"
+```
+
+---
+
+### 13.3 시나리오 3: 백그라운드 평가 타이밍 테스트
+
+**목표:** 빠른 제출 시 백그라운드 평가 대기 작동 확인
+
+```bash
+# 1. 대기 시간 없는 테스트
+uv run python test_submit_only.py  # 2초 대기
+
+# 2. 결과 확인
+# turn_scores에 모든 턴이 있는지?
+
+# 3. 서버 로그에서 대기 시간 확인
+Get-Content <터미널>.txt | Select-String "모든 백그라운드 평가 완료 - 대기 시간"
+# 예: "대기 시간: 1.5초"
+
+# 4. Redis에서 평가 시간 확인
+docker exec ai_vibe_redis_dev redis-cli GET "turn_logs:<session>:3"
+# timestamp 필드 확인
+```
+
+================================================================================
+## 14. 요약: 내가 직접 테스트하려면
+================================================================================
+
+### 14.1 기본 테스트 (5분)
+
+```bash
+# 1. Docker 시작
+docker-compose -f docker-compose.dev.yml up -d
+docker ps --filter "name=ai_vibe"
+
+# 2. 서버 시작 (별도 터미널)
+cd C:\P_project\LangGraph_1
+uv run scripts/run_dev.py
+
+# 3. 테스트 실행 (새 터미널)
+cd C:\P_project\LangGraph_1
+chcp 65001
+uv run python test_submit_with_delay.py
+
+# 4. 결과 확인
+# - 터미널 출력에서 turn_scores 확인
+```
+
+---
+
+### 14.2 상세 디버깅 (10분)
+
+```powershell
+# 세션 ID 설정
+$session = "submit-test-20251127-HHMMSS"
+
+# 1. Redis 데이터 확인
+docker exec ai_vibe_redis_dev redis-cli KEYS "*$session*"
+
+# 2. 턴 로그 모두 보기
+docker exec ai_vibe_redis_dev redis-cli KEYS "turn_logs:${session}:*" | ForEach-Object {
+    Write-Host "`n=== $_ ==="
+    docker exec ai_vibe_redis_dev redis-cli GET $_
+}
+
+# 3. 서버 로그 필터링
+cd <terminals-folder>
+Get-Content <최신-터미널>.txt | Select-String $session > "C:\P_project\LangGraph_1\debug_$session.txt"
+
+# 4. 에러만 추출
+Get-Content "C:\P_project\LangGraph_1\debug_$session.txt" | Select-String "ERROR|Exception"
+
+# 5. 노드별 시간 확인
+Get-Content "C:\P_project\LangGraph_1\debug_$session.txt" | Select-String "진입|완료"
+```
+
+---
+
+### 14.3 문제 해결 (상황별)
+
+#### 타임아웃 발생 시:
+```bash
+# 1. Quota 확인: https://ai.dev/usage
+# 2. 대기 후 재시도 (1시간 또는 다음 날)
+# 3. 또는 테스트 간격 증가:
+#    test_submit_with_delay.py의 sleep 시간 10초로 증가
+```
+
+#### turn_scores 누락 시:
+```bash
+# 1. Redis turn_logs 확인 (위 4.4 참조)
+# 2. 백그라운드 평가 대기 시간 증가
+#    test_submit_with_delay.py: await asyncio.sleep(10)
+# 3. 서버 로그에서 평가 완료 여부 확인
+```
+
+#### 서버 오류 시:
+```bash
+# 1. 전체 재시작
+docker restart ai_vibe_redis_dev ai_vibe_postgres_dev
+Get-Process | Where-Object { $_.ProcessName -like "*python*" } | Stop-Process -Force
+cd C:\P_project\LangGraph_1
+uv run scripts/run_dev.py
+
+# 2. 로그 확인
+Get-Content <터미널>.txt -Tail 100 | Select-String "ERROR"
+```
+
+================================================================================
+                            END OF GUIDE
+================================================================================
+

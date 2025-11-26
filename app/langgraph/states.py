@@ -78,6 +78,10 @@ class EvalTurnState(TypedDict):
     human_message: str
     ai_message: str
     
+    # Guardrail 정보 (추가)
+    is_guardrail_failed: bool = False
+    guardrail_message: Optional[str] = None
+    
     # Intent 분석 결과
     intent_type: Optional[str]  # CodeIntentType
     intent_confidence: float

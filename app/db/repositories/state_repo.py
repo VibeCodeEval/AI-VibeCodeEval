@@ -18,6 +18,36 @@ class StateRepository:
     
     # ===== 그래프 상태 관리 =====
     
+    def _serialize_messages(self, messages: list) -> list:
+        """
+        LangChain 메시지 객체를 JSON 직렬화 가능한 dict로 변환
+        """
+        serialized = []
+        for msg in messages:
+            if hasattr(msg, '__dict__'):
+                # LangChain BaseMessage 객체
+                serialized_msg = {
+                    "type": getattr(msg, 'type', 'unknown'),
+                    "content": getattr(msg, 'content', ''),
+                }
+                # turn, role, timestamp 등 추가 속성 보존
+                if isinstance(msg, dict):
+                    serialized_msg.update(msg)
+                elif hasattr(msg, '__dict__'):
+                    for key in ['turn', 'role', 'timestamp']:
+                        if hasattr(msg, key):
+                            serialized_msg[key] = getattr(msg, key)
+            elif isinstance(msg, dict):
+                # 이미 dict 형태
+                serialized_msg = msg
+            else:
+                # 기타
+                serialized_msg = {"content": str(msg)}
+            
+            serialized.append(serialized_msg)
+        
+        return serialized
+    
     async def save_state(
         self,
         session_id: str,
@@ -25,8 +55,13 @@ class StateRepository:
         ttl_seconds: Optional[int] = None
     ) -> bool:
         """그래프 상태 저장"""
+        # messages 직렬화
+        state_copy = {**state}
+        if 'messages' in state_copy and isinstance(state_copy['messages'], list):
+            state_copy['messages'] = self._serialize_messages(state_copy['messages'])
+        
         state_with_meta = {
-            **state,
+            **state_copy,
             "_meta": {
                 "updated_at": datetime.utcnow().isoformat(),
                 "session_id": session_id

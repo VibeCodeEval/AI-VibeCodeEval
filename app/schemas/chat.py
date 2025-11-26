@@ -2,19 +2,13 @@
 채팅 관련 스키마
 """
 from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class ChatRequest(BaseModel):
     """채팅 요청"""
-    session_id: str = Field(..., description="세션 ID")
-    exam_id: int = Field(..., description="시험 ID")
-    participant_id: int = Field(..., description="참가자 ID")
-    spec_id: int = Field(..., description="문제 스펙 ID")
-    message: str = Field(..., description="사용자 메시지")
-    
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "session_id": "session-123",
                 "exam_id": 1,
@@ -23,19 +17,19 @@ class ChatRequest(BaseModel):
                 "message": "피보나치 수열을 계산하는 함수를 작성해주세요."
             }
         }
+    )
+    
+    session_id: str = Field(..., description="세션 ID")
+    exam_id: int = Field(..., description="시험 ID")
+    participant_id: int = Field(..., description="참가자 ID")
+    spec_id: int = Field(..., description="문제 스펙 ID")
+    message: str = Field(..., description="사용자 메시지")
 
 
 class ChatResponse(BaseModel):
     """채팅 응답"""
-    session_id: str = Field(..., description="세션 ID")
-    turn: int = Field(..., description="턴 번호")
-    ai_message: Optional[str] = Field(None, description="AI 응답 메시지")
-    is_submitted: bool = Field(False, description="제출 여부")
-    error: bool = Field(False, description="에러 발생 여부")
-    error_message: Optional[str] = Field(None, description="에러 메시지")
-    
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "session_id": "session-123",
                 "turn": 1,
@@ -45,19 +39,20 @@ class ChatResponse(BaseModel):
                 "error_message": None
             }
         }
+    )
+    
+    session_id: str = Field(..., description="세션 ID")
+    turn: int = Field(..., description="턴 번호")
+    ai_message: Optional[str] = Field(None, description="AI 응답 메시지")
+    is_submitted: bool = Field(False, description="제출 여부")
+    error: bool = Field(False, description="에러 발생 여부")
+    error_message: Optional[str] = Field(None, description="에러 메시지")
 
 
 class SubmitRequest(BaseModel):
     """코드 제출 요청"""
-    session_id: str = Field(..., description="세션 ID")
-    exam_id: int = Field(..., description="시험 ID")
-    participant_id: int = Field(..., description="참가자 ID")
-    spec_id: int = Field(..., description="문제 스펙 ID")
-    code: str = Field(..., description="제출 코드")
-    lang: str = Field("python", description="프로그래밍 언어")
-    
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "session_id": "session-123",
                 "exam_id": 1,
@@ -67,6 +62,14 @@ class SubmitRequest(BaseModel):
                 "lang": "python"
             }
         }
+    )
+    
+    session_id: str = Field(..., description="세션 ID")
+    exam_id: int = Field(..., description="시험 ID")
+    participant_id: int = Field(..., description="참가자 ID")
+    spec_id: int = Field(..., description="문제 스펙 ID")
+    code: str = Field(..., description="제출 코드")
+    lang: str = Field("python", description="프로그래밍 언어")
 
 
 class FinalScores(BaseModel):
@@ -80,16 +83,8 @@ class FinalScores(BaseModel):
 
 class SubmitResponse(BaseModel):
     """코드 제출 응답"""
-    session_id: str = Field(..., description="세션 ID")
-    submission_id: Optional[int] = Field(None, description="제출 ID")
-    is_submitted: bool = Field(True, description="제출 완료 여부")
-    final_scores: Optional[FinalScores] = Field(None, description="최종 점수")
-    turn_scores: Optional[Dict[str, Any]] = Field(None, description="턴별 점수")
-    error: bool = Field(False, description="에러 발생 여부")
-    error_message: Optional[str] = Field(None, description="에러 메시지")
-    
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "session_id": "session-123",
                 "submission_id": 1,
@@ -109,6 +104,15 @@ class SubmitResponse(BaseModel):
                 "error_message": None
             }
         }
+    )
+    
+    session_id: str = Field(..., description="세션 ID")
+    submission_id: Optional[int] = Field(None, description="제출 ID")
+    is_submitted: bool = Field(True, description="제출 완료 여부")
+    final_scores: Optional[FinalScores] = Field(None, description="최종 점수")
+    turn_scores: Optional[Dict[str, Any]] = Field(None, description="턴별 점수")
+    error: bool = Field(False, description="에러 발생 여부")
+    error_message: Optional[str] = Field(None, description="에러 메시지")
 
 
 

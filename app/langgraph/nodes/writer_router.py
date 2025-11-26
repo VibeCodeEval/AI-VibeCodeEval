@@ -68,36 +68,45 @@ def intent_router(state: MainGraphState) -> Literal[
     "handle_failure",
     "summarize_memory",
     "handle_request",
-    "main_router"
+    "eval_turn_guard"
 ]:
     """
     Intent Analyzer 결과에 따른 라우팅
     
     라우팅 규칙:
     - PASSED_HINT: writer (답변 생성)
-    - PASSED_SUBMIT: main_router (제출 처리)
+    - PASSED_SUBMIT: eval_turn_guard (제출 시 4번 가드로)
     - FAILED_GUARDRAIL: handle_failure (가드레일 위반)
     - FAILED_RATE_LIMIT: handle_request (재시도)
     """
     from app.db.models.enums import IntentAnalyzerStatus
+    import logging
+    logger = logging.getLogger(__name__)
     
     intent_status = state.get("intent_status")
     is_submitted = state.get("is_submitted", False)
     
-    # 제출 요청인 경우
+    # 제출 요청인 경우 4번 가드로
     if is_submitted or intent_status == IntentAnalyzerStatus.PASSED_SUBMIT.value:
-        return "main_router"
+        logger.info("[Intent Router] 제출 요청 감지 - eval_turn_guard로 진행")
+        return "eval_turn_guard"
     
     if intent_status == IntentAnalyzerStatus.PASSED_HINT.value:
+        logger.info("[Intent Router] 일반 채팅 - writer로 진행")
         return "writer"
     
     if intent_status == IntentAnalyzerStatus.FAILED_GUARDRAIL.value:
-        return "handle_failure"
+        logger.warning("[Intent Router] 가드레일 위반 감지 - writer로 교육적 메시지 생성")
+        # 가드레일 위반도 writer로 보내서 교육적 거절 메시지 생성
+        # 이후 백그라운드 4번 평가로 위반 사실 기록
+        return "writer"
     
     if intent_status == IntentAnalyzerStatus.FAILED_RATE_LIMIT.value:
+        logger.warning("[Intent Router] Rate limit - handle_request로 재시도")
         return "handle_request"
     
     # 기본값
+    logger.info("[Intent Router] 기본값 - writer로 진행")
     return "writer"
 
 

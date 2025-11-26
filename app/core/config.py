@@ -4,11 +4,17 @@ PostgreSQL, Redis, LLM API 등의 설정을 관리합니다.
 """
 from functools import lru_cache
 from typing import Optional
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """애플리케이션 환경 설정"""
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True
+    )
     
     # 앱 기본 설정
     APP_NAME: str = "AI Vibe Coding Test Worker"
@@ -71,11 +77,6 @@ class Settings(BaseSettings):
     
     # LangGraph 체크포인트 설정
     CHECKPOINT_TTL_SECONDS: int = 3600  # 1시간
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
 
 
 @lru_cache()

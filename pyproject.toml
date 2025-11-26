@@ -33,6 +33,7 @@ dependencies = [
     "httpx>=0.26.0",
     # Utils
     "tenacity>=8.2.0",
+    "unicorn>=2.1.4",
 ]
 
 [project.optional-dependencies]

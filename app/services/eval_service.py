@@ -248,6 +248,8 @@ class EvalService:
                 "turn": main_state.get("current_turn", 0),
                 "human_message": main_state.get("human_message", ""),
                 "ai_message": main_state.get("ai_message", ""),
+                "is_guardrail_failed": main_state.get("is_guardrail_failed", False),
+                "guardrail_message": main_state.get("guardrail_message"),
                 "intent_type": None,
                 "intent_confidence": 0.0,
                 "rule_setting_eval": None,
@@ -265,21 +267,63 @@ class EvalService:
             # SubGraph 실행 (비동기)
             result = await eval_turn_subgraph.ainvoke(turn_state)
             
-            # 결과를 Redis에 저장
-            turn_scores = main_state.get("turn_scores", {})
             current_turn = main_state.get("current_turn", 0)
+            intent_type = result.get("intent_type", "UNKNOWN")
+            turn_score = result.get("turn_score", 0)
             
+            # 개별 평가 결과에서 rubrics 생성
+            evaluations = []
+            eval_mapping = {
+                "rule_setting_eval": "규칙 설정 (Rules)",
+                "generation_eval": "코드 생성 (Generation)",
+                "optimization_eval": "최적화 (Optimization)",
+                "debugging_eval": "디버깅 (Debugging)",
+                "test_case_eval": "테스트 케이스 (Test Case)",
+                "hint_query_eval": "힌트/질의 (Hint/Query)",
+                "follow_up_eval": "후속 응답 (Follow-up)"
+            }
+            
+            rubrics = []
+            for eval_key, criterion_name in eval_mapping.items():
+                eval_result = result.get(eval_key)
+                if eval_result and isinstance(eval_result, dict):
+                    rubrics.append({
+                        "criterion": criterion_name,
+                        "score": eval_result.get("average", 0),
+                        "reason": eval_result.get("feedback", "평가 없음")
+                    })
+            
+            # 상세 turn_log 구조 생성 (사용자 정의 형식)
+            detailed_turn_log = {
+                "turn_number": current_turn,
+                "user_prompt_summary": main_state.get("human_message", "")[:200] + "..." if len(main_state.get("human_message", "")) > 200 else main_state.get("human_message", ""),
+                "prompt_evaluation_details": {
+                    "intent": intent_type,
+                    "score": turn_score,
+                    "rubrics": rubrics,
+                    "final_reasoning": result.get("answer_summary", "평가 완료")
+                },
+                "llm_answer_summary": result.get("answer_summary", ""),
+                "llm_answer_reasoning": rubrics[0].get("reason", "") if rubrics else "평가 없음",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            # Redis에 상세 turn_log 저장
+            await self.redis.save_turn_log(session_id, current_turn, detailed_turn_log)
+            
+            # 기존 turn_scores도 업데이트 (호환성)
+            turn_scores = main_state.get("turn_scores", {})
             turn_scores[str(current_turn)] = {
-                "turn_score": result.get("turn_score"),
+                "turn_score": turn_score,
                 "turn_log": result.get("turn_log"),
-                "intent_type": result.get("intent_type"),
+                "intent_type": intent_type,
             }
             
             # 업데이트된 turn_scores를 상태에 저장
             updated_state = {**main_state, "turn_scores": turn_scores}
             await self.state_repo.save_state(session_id, updated_state)
             
-            logger.info(f"[EvalService] 4번 노드 백그라운드 실행 완료 - session_id: {session_id}, turn: {current_turn}, score: {result.get('turn_score')}")
+            logger.info(f"[EvalService] 4번 노드 백그라운드 실행 완료 - session_id: {session_id}, turn: {current_turn}, score: {turn_score}, intent: {intent_type}")
             
         except Exception as e:
             logger.error(f"[EvalService] 4번 노드 백그라운드 실행 중 오류 - session_id: {session_id}, error: {str(e)}", exc_info=True)
