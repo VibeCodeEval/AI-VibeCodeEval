@@ -29,19 +29,18 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
     logger.info(f"[4. Eval Turn Guard] 진입 - session_id: {session_id}, 현재 턴: {current_turn}")
     
     try:
-        # ★ 백그라운드 평가 완료 대기 (최대 10초)
+        # ★ 백그라운드 평가 완료 대기 (최대 60초)
         logger.info(f"[4. Eval Turn Guard] 백그라운드 평가 완료 대기 시작 - session_id: {session_id}")
         
-        max_wait_seconds = 10
-        wait_interval = 0.5
+        max_wait_seconds = 60  # 백그라운드 평가에 60초 이상 필요
+        wait_interval = 1.0    # 폴링 간격 1초
         total_waited = 0
         
         while total_waited < max_wait_seconds:
             all_turn_logs = await redis_client.get_all_turn_logs(session_id)
             
-            # 모든 턴(1 ~ current_turn 포함)이 평가되었는지 확인
-            # 제출 API는 턴 증가 없이 호출되므로 current_turn까지 포함
-            expected_turns = set(str(t) for t in range(1, current_turn + 1))
+            # 제출 턴(current_turn)은 평가하지 않으므로, 1 ~ (current_turn - 1)만 확인
+            expected_turns = set(str(t) for t in range(1, current_turn))
             existing_turns = set(all_turn_logs.keys())
             
             if expected_turns.issubset(existing_turns):
@@ -50,31 +49,38 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
             
             # 아직 누락된 턴이 있으면 대기
             missing_now = expected_turns - existing_turns
-            logger.debug(f"[4. Eval Turn Guard] 백그라운드 평가 대기 중 - 누락: {missing_now}, 대기: {total_waited:.1f}초")
+            if total_waited % 5 == 0: # 로그 너무 자주 찍지 않도록
+                logger.debug(f"[4. Eval Turn Guard] 백그라운드 평가 대기 중 - 누락: {missing_now}, 대기: {total_waited:.1f}초")
             
             await asyncio.sleep(wait_interval)
             total_waited += wait_interval
         
         if total_waited >= max_wait_seconds:
-            logger.warning(f"[4. Eval Turn Guard] 백그라운드 평가 대기 타임아웃 - {max_wait_seconds}초 초과")
+            logger.warning(f"[4. Eval Turn Guard] 백그라운드 평가 대기 타임아웃 - {max_wait_seconds}초 초과, 누락된 턴 재평가 진행")
         
         # 최종 turn_logs 조회
         all_turn_logs = await redis_client.get_all_turn_logs(session_id)
         
         logger.info(f"[4. Eval Turn Guard] Redis 턴 로그 개수: {len(all_turn_logs)}")
         
-        # 누락된 턴 찾기 (현재 턴 포함)
-        # 제출 API는 별도 호출이므로 current_turn까지 모두 평가 대상
+        # 누락된 턴 찾기 (제출 턴 제외)
+        # 제출 턴(current_turn)은 평가하지 않으므로, 1 ~ (current_turn - 1)만 확인
         missing_turns = []
-        for turn in range(1, current_turn + 1):  # current_turn 포함
+        for turn in range(1, current_turn):  # 제출 턴 제외
             if str(turn) not in all_turn_logs:
                 missing_turns.append(turn)
         
         if missing_turns:
             logger.warning(f"[4. Eval Turn Guard] 누락된 턴 발견 - session_id: {session_id}, 누락: {missing_turns}")
             
-            # Redis에서 턴-메시지 매핑 조회
-            turn_mapping = await redis_client.get_turn_mapping(session_id)
+            # Redis에서 턴-메시지 매핑 조회 (재시도 로직 추가)
+            turn_mapping = None
+            for _ in range(5): # 매핑 정보도 비동기로 저장되므로 최대 5초 대기
+                turn_mapping = await redis_client.get_turn_mapping(session_id)
+                if turn_mapping and str(missing_turns[0]) in turn_mapping:
+                    break
+                await asyncio.sleep(1)
+                
             logger.info(f"[4. Eval Turn Guard] 턴 매핑 조회 - 존재: {turn_mapping is not None}, 턴 개수: {len(turn_mapping) if turn_mapping else 0}")
             
             # messages 배열에서 누락된 턴 복원
@@ -151,7 +157,7 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                     logger.error(f"[4. Eval Turn Guard] 턴 {missing_turn} 메시지 추출 실패 - human: {bool(human_msg)}, ai: {bool(ai_msg)}")
                     logger.error(f"[4. Eval Turn Guard] 턴 {missing_turn} - 재평가 불가능 ✗")
         else:
-            logger.info(f"[4. Eval Turn Guard] 모든 턴 평가 완료 확인 - session_id: {session_id}, 총 {current_turn}턴")
+            logger.info(f"[4. Eval Turn Guard] 모든 턴 평가 완료 확인 - session_id: {session_id}, 평가 대상: {current_turn - 1}턴 (제출 턴 제외)")
         
         # Redis에서 최신 turn_logs 재조회 (재평가 결과 반영)
         updated_turn_logs = await redis_client.get_all_turn_logs(session_id)

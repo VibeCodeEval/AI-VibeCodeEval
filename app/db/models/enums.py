@@ -90,7 +90,8 @@ class IntentAnalyzerStatus(str, enum.Enum):
 
 
 class CodeIntentType(str, enum.Enum):
-    """코드 의도 타입 (7가지 패턴)"""
+    """코드 의도 타입 (8가지 패턴 - Claude Prompt Engineering)"""
+    SYSTEM_PROMPT = "system_prompt"  # 신규 추가
     RULE_SETTING = "rule_setting"
     GENERATION = "generation"
     OPTIMIZATION = "optimization"

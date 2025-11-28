@@ -1,6 +1,38 @@
 """
 메인 LangGraph 정의
 AI 바이브 코딩 테스트 평가 플로우
+
+[목적]
+- LangGraph를 사용하여 복잡한 AI 평가 플로우를 정의
+- 상태 기반 워크플로우로 일관성 있는 평가 프로세스 구현
+
+[그래프 구조]
+START → 1. Handle Request → 2. Intent Analyzer → 3. Writer LLM → END
+                                      ↓ (제출)
+                           4. Eval Turn Guard → 5. Main Router
+                                                       ↓
+                                           6a-6d. 평가 노드들
+                                                       ↓
+                                          7. Final Score Aggregation
+                                                       ↓
+                                                      END
+
+[노드 설명]
+1. Handle Request: Redis 상태 로드, 턴 번호 증가
+2. Intent Analyzer: 의도 분석 + 가드레일 체크
+3. Writer LLM: AI 답변 생성 (Socratic 방식)
+4. Eval Turn Guard: 제출 시 모든 턴 평가 완료 대기
+5. Main Router: 제출 여부에 따른 분기
+6a. Holistic Flow: Chaining 전략 평가
+6b. Aggregate Scores: 턴별 점수 집계
+6c. Code Performance: 성능 평가
+6d. Code Correctness: 정확성 평가
+7. Final Scores: 최종 점수 산출
+
+[상태 관리]
+- MainGraphState: 모든 노드가 공유하는 상태 객체
+- Redis: 영구 저장소 (세션, 턴 로그 등)
+- MemorySaver: LangGraph 체크포인트 (in-memory)
 """
 from typing import Optional
 from datetime import datetime
@@ -15,13 +47,13 @@ from app.langgraph.nodes.writer import writer_llm
 from app.langgraph.nodes.writer_router import writer_router, intent_router, main_router
 from app.langgraph.nodes.system_nodes import handle_failure, summarize_memory
 from app.langgraph.nodes.eval_turn_guard import eval_turn_submit_guard
-from app.langgraph.nodes.evaluators import (
-    eval_holistic_flow,
+from app.langgraph.nodes.holistic_evaluator.flow import eval_holistic_flow
+from app.langgraph.nodes.holistic_evaluator.scores import (
     aggregate_turn_scores,
-    eval_code_performance,
-    eval_code_correctness,
     aggregate_final_scores,
 )
+from app.langgraph.nodes.holistic_evaluator.performance import eval_code_performance
+from app.langgraph.nodes.holistic_evaluator.correctness import eval_code_correctness
 from app.langgraph.subgraph_eval_turn import create_eval_turn_subgraph
 
 
@@ -29,24 +61,61 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     """
     메인 그래프 생성
     
-    플로우:
-    1. Handle Request Load State: 요청 처리 및 상태 로드
-    2. Intent Analyzer: 의도 분석 및 가드레일
-    3. Writer LLM: AI 답변 생성
-    3.5. Writer Router: 응답 상태에 따른 라우팅
-    4. Eval Turn SubGraph: 실시간 턴 품질 평가
-    5. Main Router: 제출 여부 확인
-    6a. Eval Holistic Flow: 전략 분석
-    6b. Aggregate Turn Scores: 턴 점수 집계
-    6c. Eval Code Performance: 성능 평가
-    6d. Eval Code Correctness: 정확성 평가
-    7. Aggregate Final Scores: 최종 점수 계산
+    [역할]
+    - LangGraph 메인 플로우를 정의하고 컴파일
+    - 노드 추가 및 엣지 연결
+    - 조건부 분기 설정
+    
+    [플로우 상세]
+    ┌─────────────────────────────────────────────────────────┐
+    │ 일반 채팅 플로우                                          │
+    │ START → Handle Request → Intent Analyzer → Writer LLM    │
+    │         ↓                         ↓ (가드레일 위반)      │
+    │    Redis 상태 로드         Handle Failure → END          │
+    └─────────────────────────────────────────────────────────┘
+    
+    ┌─────────────────────────────────────────────────────────┐
+    │ 제출 플로우                                               │
+    │ START → Handle Request → Intent Analyzer                 │
+    │                              ↓ (PASSED_SUBMIT)           │
+    │                   Eval Turn Guard (모든 턴 평가 대기)     │
+    │                              ↓                           │
+    │                   Main Router (제출 확인)                │
+    │                              ↓                           │
+    │         ┌────────────────────┴──────────────────┐       │
+    │         ↓                    ↓                  ↓       │
+    │  Holistic Flow    Aggregate Scores    Code Eval        │
+    │         └────────────────────┬──────────────────┘       │
+    │                              ↓                          │
+    │                   Final Score Aggregation               │
+    │                              ↓                          │
+    │                             END                         │
+    └─────────────────────────────────────────────────────────┘
+    
+    [노드 종류]
+    1. 처리 노드: handle_request, intent_analyzer, writer
+    2. 시스템 노드: handle_failure, summarize_memory
+    3. 가드 노드: eval_turn_guard
+    4. 평가 노드: eval_holistic_flow, aggregate_turn_scores, 
+                 eval_code_performance, eval_code_correctness
+    5. 집계 노드: aggregate_final_scores
+    
+    [조건부 분기]
+    - Intent Router: 의도에 따라 writer/failure/guard로 분기
+    - Writer Router: 응답 상태에 따라 end/failure로 분기
+    - Main Router: 제출 여부에 따라 평가/end로 분기
+    
+    Args:
+        checkpointer: LangGraph 체크포인트 (선택, 기본 None)
+    
+    Returns:
+        StateGraph: 컴파일된 메인 그래프
     """
     
-    # SubGraph 생성
-    eval_turn_subgraph = create_eval_turn_subgraph()
+    # SubGraph는 사용하지 않음 (백그라운드로 직접 실행)
+    # eval_turn_subgraph = create_eval_turn_subgraph()
     
-    # 메인 그래프 빌더
+    # 메인 그래프 빌더 초기화
     builder = StateGraph(MainGraphState)
     
     # ===== 노드 추가 =====

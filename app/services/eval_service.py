@@ -1,6 +1,31 @@
 """
-평가 서비스
-LangGraph 실행 및 결과 관리
+평가 서비스 (Evaluation Service)
+
+[목적]
+- LangGraph 메인 플로우의 실행을 관리하는 핵심 서비스
+- Redis를 통한 상태 관리
+- 백그라운드 평가 (Eval Turn SubGraph) 실행
+
+[주요 역할]
+1. process_message(): 일반 채팅 메시지 처리
+   - LangGraph 메인 플로우 실행
+   - Redis 상태 로드/저장
+   - 백그라운드 턴 평가 시작 (비동기)
+   
+2. submit_code(): 코드 제출 및 최종 평가
+   - is_submission=True로 설정
+   - 전체 평가 플로우 실행
+   - 최종 점수 산출
+
+3. _run_eval_turn_background(): 백그라운드 평가
+   - Eval Turn SubGraph 실행
+   - 턴별 평가 로그 생성
+   - Redis에 turn_logs 저장
+
+[아키텍처]
+API 요청 → EvalService → LangGraph → Redis
+                     ↓
+            Eval Turn SubGraph (백그라운드)
 """
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -21,13 +46,34 @@ logger = logging.getLogger(__name__)
 
 
 class EvalService:
-    """AI 평가 서비스"""
+    """
+    AI 평가 서비스
+    
+    [구성 요소]
+    - redis: Redis 클라이언트 (세션 상태 관리)
+    - state_repo: 상태 저장소 (Redis 래퍼)
+    - checkpointer: LangGraph 체크포인트 (메모리 기반)
+    - graph: LangGraph 메인 플로우
+    
+    [생명주기]
+    1. __init__(): 초기화
+       - Redis 클라이언트 주입
+       - LangGraph 컴파일
+    2. process_message() / submit_code(): 요청 처리
+    3. _run_eval_turn_background(): 백그라운드 평가 (일반 채팅만)
+    """
     
     def __init__(self, redis: RedisClient):
+        """
+        EvalService 초기화
+        
+        Args:
+            redis: Redis 클라이언트 인스턴스
+        """
         self.redis = redis
         self.state_repo = StateRepository(redis)
-        self.checkpointer = MemorySaver()
-        self.graph = create_main_graph(self.checkpointer)
+        self.checkpointer = MemorySaver()  # LangGraph 체크포인트 (in-memory)
+        self.graph = create_main_graph(self.checkpointer)  # 메인 그래프 컴파일
     
     async def process_message(
         self,
@@ -42,17 +88,37 @@ class EvalService:
         """
         메시지 처리 및 평가 실행
         
+        [처리 흐름]
+        1. Redis에서 기존 상태 로드 (또는 초기 상태 생성)
+        2. LangGraph 메인 플로우 실행
+           - Handle Request → Intent Analyzer → Writer LLM → END
+           - 또는 제출 시: Intent Analyzer → Eval Turn Guard → 평가 노드들 → END
+        3. 일반 채팅: Eval Turn SubGraph를 백그라운드로 실행
+        4. 결과를 Redis에 저장
+        5. 응답 반환
+        
+        [백그라운드 평가]
+        - 일반 채팅(is_submission=False): _run_eval_turn_background() 비동기 실행
+        - 제출(is_submission=True): 백그라운드 없음 (동기적으로 모든 평가 완료)
+        
         Args:
-            session_id: 세션 ID
+            session_id: 세션 ID (고유)
             exam_id: 시험 ID
             participant_id: 참가자 ID
             spec_id: 문제 스펙 ID
             human_message: 사용자 메시지
-            is_submission: 제출 여부
-            code_content: 제출 코드 (제출 시)
+            is_submission: 제출 여부 (False: 일반 채팅, True: 코드 제출)
+            code_content: 제출 코드 (제출 시만 필요)
         
         Returns:
-            처리 결과 (AI 응답, 점수 등)
+            Dict[str, Any]: 처리 결과
+                - session_id: 세션 ID
+                - turn: 현재 턴 번호
+                - ai_message: AI 응답 메시지
+                - is_submitted: 제출 완료 여부
+                - error_message: 에러 메시지 (에러 시)
+                - final_scores: 최종 점수 (제출 시)
+                - turn_scores: 턴별 점수 (제출 시)
         """
         try:
             # 기존 상태 로드 또는 초기 상태 생성
@@ -231,7 +297,33 @@ class EvalService:
     ) -> None:
         """
         4번 노드(Eval Turn SubGraph)를 백그라운드에서 실행
-        일반 채팅의 각 턴마다 비동기로 평가 수행
+        
+        [목적]
+        - 일반 채팅의 각 턴마다 비동기로 평가 수행
+        - 사용자 응답 지연 없이 실시간 평가
+        
+        [처리 과정]
+        1. Eval Turn SubGraph 생성
+        2. EvalTurnState 준비 (session_id, turn, messages, guardrail_info)
+        3. SubGraph 실행
+           - 4.0 Intent Analysis: 의도 분석
+           - 4.R/G/O/D/T/H/F: 의도별 평가
+           - 4.X Answer Summary: 답변 요약
+           - 4.4 Turn Log Aggregation: 턴 로그 집계
+        4. Redis에 turn_logs 저장
+        5. 메인 state의 turn_scores 업데이트
+        
+        [저장 데이터]
+        - turn_logs:{session_id}:{turn}: 상세 평가 로그
+        - graph_state:{session_id}: turn_scores 업데이트
+        
+        [에러 처리]
+        - 모든 예외 캡처 및 로깅
+        - 에러 발생 시에도 메인 플로우에 영향 없음 (백그라운드)
+        
+        Args:
+            session_id: 세션 ID
+            main_state: 메인 그래프의 현재 상태
         """
         try:
             from app.langgraph.subgraph_eval_turn import create_eval_turn_subgraph

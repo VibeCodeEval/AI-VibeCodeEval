@@ -71,22 +71,23 @@ class MainGraphState(TypedDict):
 # ===== Eval Turn SubGraph 상태 =====
 
 class EvalTurnState(TypedDict):
-    """Eval Turn SubGraph 상태"""
+    """Eval Turn SubGraph 상태 (사용자 프롬프트 평가)"""
     # 입력 데이터
     session_id: str
     turn: int
     human_message: str
     ai_message: str
     
-    # Guardrail 정보 (추가)
-    is_guardrail_failed: bool = False
-    guardrail_message: Optional[str] = None
+    # Guardrail 정보 (eval_service에서 전달)
+    is_guardrail_failed: bool
+    guardrail_message: Optional[str]
     
-    # Intent 분석 결과
-    intent_type: Optional[str]  # CodeIntentType
+    # Intent 분석 결과 (복수 의도 지원)
+    intent_types: Optional[list[str]]  # CodeIntentType 목록
     intent_confidence: float
     
-    # 각 평가 결과
+    # 8가지 의도별 평가 결과
+    system_prompt_eval: Optional[Dict[str, Any]]  # 신규 추가
     rule_setting_eval: Optional[Dict[str, Any]]
     generation_eval: Optional[Dict[str, Any]]
     optimization_eval: Optional[Dict[str, Any]]
@@ -106,10 +107,10 @@ class EvalTurnState(TypedDict):
 # ===== Pydantic 모델 (LLM 구조화 출력용) =====
 
 class IntentClassification(BaseModel):
-    """Intent 분류 결과"""
-    intent_type: CodeIntentType = Field(
+    """Intent 분류 결과 (복수 의도 지원)"""
+    intent_types: list[CodeIntentType] = Field(
         ...,
-        description="분류된 코드 의도 타입"
+        description="분류된 코드 의도 타입 목록 (복수 선택 가능)"
     )
     confidence: float = Field(
         ...,
@@ -139,29 +140,43 @@ class GuardrailCheck(BaseModel):
     )
 
 
+class Rubric(BaseModel):
+    """평가 루브릭 (단일 기준)"""
+    criterion: str = Field(
+        ...,
+        description="평가 기준 (예: 명확성, 예시 사용, 규칙 명시)"
+    )
+    score: float = Field(
+        ...,
+        ge=0.0,
+        le=100.0,
+        description="해당 기준의 점수 (0-100)"
+    )
+    reasoning: str = Field(
+        ...,
+        description="해당 기준에 대한 평가 근거"
+    )
+
+
 class TurnEvaluation(BaseModel):
-    """턴 평가 결과"""
-    quality_score: float = Field(
+    """턴 평가 결과 (Claude Prompt Engineering 기준)"""
+    intent: str = Field(
+        ...,
+        description="분류된 의도 (GENERATION, OPTIMIZATION, DEBUGGING 등)"
+    )
+    score: float = Field(
         ...,
         ge=0.0,
-        le=10.0,
-        description="품질 점수 (0-10)"
+        le=100.0,
+        description="전체 점수 (0-100)"
     )
-    relevance_score: float = Field(
-        ...,
-        ge=0.0,
-        le=10.0,
-        description="관련성 점수 (0-10)"
+    rubrics: list[Rubric] = Field(
+        default_factory=list,
+        description="평가 루브릭 목록 (명확성, 예시, 규칙, 사고 연쇄)"
     )
-    helpfulness_score: float = Field(
+    final_reasoning: str = Field(
         ...,
-        ge=0.0,
-        le=10.0,
-        description="유용성 점수 (0-10)"
-    )
-    feedback: str = Field(
-        ...,
-        description="평가 피드백"
+        description="전체 평가 근거 및 요약"
     )
 
 

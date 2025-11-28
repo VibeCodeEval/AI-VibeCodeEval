@@ -1,0 +1,9 @@
+[
+  {
+    "session_id": "turns-collect-20251127-204946",
+    "created_at": "2025-11-27T20:49:46",
+    "turns": 2,
+    "status": "turns_collected_partial",
+    "note": "Turn 1 evaluation incomplete, Turn 2 completed - Testing aggregate_turn_scores fix"
+  }
+]
