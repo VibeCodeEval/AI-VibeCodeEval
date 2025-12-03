@@ -49,6 +49,28 @@ async def aggregate_turn_log(state: EvalTurnState) -> Dict[str, Any]:
     intent_types = state.get("intent_types", [])
     primary_intent = intent_types[0] if intent_types else state.get("intent_type")
 
+    # 평가 결과에서 rubrics와 final_reasoning 추출 (상세 피드백)
+    detailed_feedback = []
+    comprehensive_reasoning_parts = []
+    
+    for eval_key, eval_data in eval_results.items():
+        if isinstance(eval_data, dict):
+            eval_rubrics = eval_data.get("rubrics", [])
+            final_reasoning = eval_data.get("final_reasoning", "")
+            
+            if eval_rubrics or final_reasoning:
+                detailed_feedback.append({
+                    "intent": eval_key,
+                    "rubrics": eval_rubrics if isinstance(eval_rubrics, list) else [],
+                    "final_reasoning": final_reasoning
+                })
+                
+                if final_reasoning:
+                    comprehensive_reasoning_parts.append(f"[{eval_key}]: {final_reasoning}")
+    
+    # 전체 턴에 대한 종합 평가 근거
+    comprehensive_reasoning = "\n\n".join(comprehensive_reasoning_parts) if comprehensive_reasoning_parts else "평가 완료"
+    
     turn_log = {
         "session_id": state.get("session_id"),
         "turn": state.get("turn"),
@@ -57,7 +79,9 @@ async def aggregate_turn_log(state: EvalTurnState) -> Dict[str, Any]:
         "intent_confidence": state.get("intent_confidence"),
         "is_guardrail_failed": is_guardrail_failed,
         "guardrail_message": state.get("guardrail_message"),
-        "evaluations": eval_results,
+        "evaluations": eval_results,  # 전체 평가 결과 (상세 정보 포함)
+        "detailed_feedback": detailed_feedback,  # 상세 피드백 (rubrics와 final_reasoning)
+        "comprehensive_reasoning": comprehensive_reasoning,  # 전체 평가 근거
         "answer_summary": state.get("answer_summary"),
         "turn_score": round(turn_score, 2),  # 이미 0-100 스케일
         "timestamp": datetime.utcnow().isoformat(),

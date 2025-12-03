@@ -113,6 +113,9 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         else:
             grade = "F"
         
+        # Holistic Flow 분석 정보 포함
+        holistic_flow_analysis = state.get("holistic_flow_analysis")
+        
         final_scores = {
             "prompt_score": round(prompt_score, 2),
             "performance_score": round(perf_score, 2),
@@ -121,12 +124,23 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             "grade": grade,
         }
         
+        # 피드백 정보 포함
+        feedback = {}
+        if holistic_flow_analysis:
+            feedback["holistic_flow_analysis"] = holistic_flow_analysis
+        
         logger.info(f"[7. Aggregate Final Scores] 완료 - session_id: {session_id}, 총점: {total_score:.2f}, 등급: {grade}")
         
-        return {
+        result = {
             "final_scores": final_scores,
             "updated_at": datetime.utcnow().isoformat(),
         }
+        
+        # 피드백 정보가 있으면 포함
+        if feedback:
+            result["feedback"] = feedback
+        
+        return result
         
     except Exception as e:
         logger.error(f"[7. Aggregate Final Scores] 오류 - session_id: {session_id}, error: {str(e)}", exc_info=True)

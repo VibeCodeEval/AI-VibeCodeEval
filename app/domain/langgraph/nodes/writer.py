@@ -1,16 +1,21 @@
 """
 노드 3: Writer LLM
-AI 답변 생성
+AI 답변 생성 (Runnable & Chain 구조)
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from datetime import datetime
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 from app.domain.langgraph.states import MainGraphState
 from app.core.config import settings
 from app.infrastructure.persistence.models.enums import WriterResponseStatus
+from app.domain.langgraph.middleware import wrap_chain_with_middleware
+from app.domain.langgraph.utils.token_tracking import extract_token_usage, accumulate_tokens
 
 
 def get_llm():
@@ -23,37 +28,12 @@ def get_llm():
     )
 
 
-async def writer_llm(state: MainGraphState) -> Dict[str, Any]:
-    """
-    AI 답변 생성
-    
-    역할:
-    - 사용자 요청에 대한 코드 작성
-    - 힌트 제공
-    - 디버깅 도움
-    - 설명 제공
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    human_message = state.get("human_message", "")
-    messages = state.get("messages", [])
-    memory_summary = state.get("memory_summary", "")
-    is_guardrail_failed = state.get("is_guardrail_failed", False)
-    guardrail_message = state.get("guardrail_message", "")
-    
-    logger.info(f"[Writer LLM] 답변 생성 시작 - message: {human_message[:100]}..., guardrail_failed: {is_guardrail_failed}")
-    
-    llm = get_llm()
-    
-    # 시스템 프롬프트 구성 (가드레일 여부에 따라 다름)
-    if is_guardrail_failed:
-        # 가드레일 위반 시: 교육적 거절 메시지
-        system_prompt = f"""당신은 AI 코딩 테스트의 보안 관리자(Gatekeeper)입니다.
+# 시스템 프롬프트 템플릿
+GUARDRAIL_SYSTEM_PROMPT_TEMPLATE = """당신은 AI 코딩 테스트의 보안 관리자(Gatekeeper)입니다.
 
 # 🛡️ 상황
 사용자의 요청이 테스트 정책에 위반되었습니다.
-위반 이유: {guardrail_message or "부적절한 요청"}
+위반 이유: {guardrail_message}
 
 # ✋ 거절 메시지 생성 규칙
 1. **정중하게 거절**: "해당 요청은 테스트 정책상 답변할 수 없습니다."
@@ -74,45 +54,294 @@ async def writer_llm(state: MainGraphState) -> Dict[str, Any]:
 
 **톤**: 엄격하지만 교육적, 격려하는 태도
 """
+
+def create_normal_system_prompt(
+    status: str,
+    guide_strategy: str,
+    keywords: str,
+    memory_summary: str,
+    problem_context: Optional[Dict[str, Any]] = None,
+    is_code_generation_request: bool = False
+) -> str:
+    """
+    Writer LLM 시스템 프롬프트 생성 (문제 정보 포함)
+    
+    Args:
+        status: 안전 상태 (SAFE)
+        guide_strategy: 가이드 전략 (SYNTAX_GUIDE | LOGIC_HINT | ROADMAP)
+        keywords: 핵심 키워드
+        memory_summary: 이전 대화 요약
+        problem_context: 문제 정보 딕셔너리
+    
+    Returns:
+        str: 시스템 프롬프트
+    """
+    # 문제 정보 추출
+    problem_info_section = ""
+    hint_roadmap_section = ""
+    
+    if problem_context:
+        basic_info = problem_context.get("basic_info", {})
+        ai_guide = problem_context.get("ai_guide", {})
+        hint_roadmap = ai_guide.get("hint_roadmap", {})
+        
+        problem_title = basic_info.get("title", "알 수 없음")
+        problem_id = basic_info.get("problem_id", "")
+        key_algorithms = ai_guide.get("key_algorithms", [])
+        algorithms_text = ", ".join(key_algorithms) if key_algorithms else "없음"
+        
+        problem_info_section = f"""
+[문제 정보]
+- 문제: {problem_title} ({problem_id})
+- 필수 알고리즘: {algorithms_text}
+
+"""
+        
+        # 힌트 로드맵이 있는 경우 추가
+        if hint_roadmap:
+            hint_roadmap_section = f"""
+[힌트 로드맵 참고]
+- 1단계: {hint_roadmap.get("step_1_concept", "")}
+- 2단계: {hint_roadmap.get("step_2_state", "")}
+- 3단계: {hint_roadmap.get("step_3_transition", "")}
+- 4단계: {hint_roadmap.get("step_4_base_case", "")}
+
+"""
     else:
-        # 정상 요청 시: 소크라테스식 튜터
-        system_prompt = """당신은 소크라테스식 교육법을 지향하는 AI 코딩 튜터입니다.
+        problem_info_section = ""
+        hint_roadmap_section = ""
+    
+    # SYNTAX_GUIDE 규칙 미리 계산 (에러 체크 및 디버깅 용이)
+    syntax_guide_rule = (
+        f"- {problem_title} 문제의 정답 코드는 절대 제공하지 않음"
+        if problem_context
+        else "- 문제의 정답 코드는 절대 제공하지 않음"
+    )
+    
+    # 코드 생성 요청인 경우 추가 안내
+    code_generation_section = ""
+    if is_code_generation_request:
+        code_generation_section = """
+# 📝 코드 생성 요청 감지
+사용자가 이전 대화 맥락을 바탕으로 코드 생성을 요청했습니다.
+- 이전 턴에서 힌트, 점화식, 접근 방식이 논의되었으므로 코드 생성이 허용됩니다.
+- 이전 대화의 맥락을 명확히 참조하여 일관성 있는 코드를 생성하세요.
+- 사용자가 요청한 제약 조건(시간 복잡도, 입력 형식 등)을 반드시 준수하세요.
 
-# 🎯 역할
-사용자의 알고리즘 문제 해결을 돕되, **정답을 직접 주지 않고** 스스로 깨닫도록 유도합니다.
-
-# ✍️ 답변 규칙
-1. **정답 코드 지양**: 핵심 알고리즘 로직은 직접 주지 않음
-2. **답변 형식**:
-   - `[Syntax]`: 순수 문법 예시 (문제와 무관)
-   - `[Concept]`: 개념적 설명
-   - `[Roadmap]`: 단계별 접근법
-   - `[Question]`: 반문으로 유도
-
-3. **예시 코드**: 문제와 직접 관련 없는 일반적 상황만
-   ```python
-   # 비트 연산 예시
-   visited = 0
-   visited |= (1 << 3)  # 3번 방문 표시
-   ```
-
-4. **톤**: 친절하고 격려하되, 스스로 생각하도록 유도
-
-# 규칙
-1. 실행 가능한 코드와 설명 제공
-2. 적절한 주석 포함
-3. 효율적인 알고리즘 권장
-4. 에지 케이스 고려
 """
     
-    if memory_summary:
-        system_prompt += f"\n\n이전 대화 요약:\n{memory_summary}"
+    return f"""# Role Definition
+
+너는 소크라테스식 교육법을 지향하는 알고리즘 튜터 '바이브코딩'이다.
+
+{problem_info_section}Node 2의 분석 결과:
+- Status: {status} (SAFE)
+- Guide Strategy: {guide_strategy} (SYNTAX_GUIDE | LOGIC_HINT | ROADMAP | GENERATION)
+- Keywords: {keywords}
+{code_generation_section}{hint_roadmap_section}
+
+# 🎯 Guide Strategy별 답변 규칙
+
+## SYNTAX_GUIDE인 경우:
+- **[Syntax Example]** 형식 필수
+- 문제와 무관한 순수 문법 예시만 제공
+{syntax_guide_rule}
+
+예시:
+```
+[Syntax Example]
+비트마스킹의 기본 문법 예시 (문제와 무관):
+
+```python
+# 비트 시프트 연산 예시
+a = 1
+print(a << 3)  # 2^3 = 8 출력
+
+# 비트 OR 연산 예시
+visited = 0
+visited |= (1 << 3)  # 3번 방문 표시
+```
+```
+
+## LOGIC_HINT인 경우:
+- **[Concept]** 형식 필수
+- 일반적인 알고리즘 개념 설명
+- **힌트 요청 시**: 구체적이고 실용적인 힌트 제공 (회피적이지 않게)
+- **점화식 힌트 요청 시**: 점화식의 구조와 접근 방식을 구체적으로 안내
+- 문제 특정 완전한 정답 코드는 제외하되, 힌트는 충분히 제공
+
+예시 (일반 개념 질문):
+```
+[Concept]
+동적 계획법은 큰 문제를 작은 하위 문제로 나누어 해결하는 기법입니다.
+- 메모이제이션: 계산 결과를 저장하여 중복 계산 방지
+- 점화식: 하위 문제 간의 관계를 수식으로 표현
+
+[Question]
+스스로 생각해보세요: "이 문제에서 어떤 하위 문제들이 있을까요?"
+```
+
+예시 (점화식 힌트 요청):
+```
+[Concept]
+`dp[current_city][visited_bitmask]` 상태에서 점화식을 수립할 때:
+
+1. **현재 상태**: `current_city`에 있고, `visited_bitmask`에 해당하는 도시들을 방문한 상태
+2. **다음 단계**: 아직 방문하지 않은 도시 `next_city`로 이동
+3. **점화식 구조**: 
+   - `dp[current][visited] = min(모든 next_city에 대해, cost(current, next) + dp[next][visited | (1<<next)])`
+   - 현재 도시에서 다음 도시로 이동하는 비용 + 다음 도시에서 나머지를 방문하는 최소 비용
+
+[Question]
+이제 기저 조건(base case)을 생각해보세요: 모든 도시를 방문한 경우는 어떻게 처리해야 할까요?
+```
+```
+
+## ROADMAP인 경우:
+- **[Roadmap]** 형식 필수
+- 문제 해결 단계별 접근법
+- 구체적 로직은 제외
+
+예시:
+```
+[Roadmap]
+문제 해결 단계별 접근법 (구체적 로직 제외):
+
+1. 문제 이해: 입력/출력 형식 파악
+2. 접근 방법 선택: 어떤 알고리즘 패러다임을 사용할지
+3. 상태 정의: 동적 계획법이라면 어떤 상태를 저장할지
+4. 점화식 설계: 상태 간의 관계 정의
+5. 구현 및 테스트
+
+[Question]
+스스로 생각해보세요: "각 단계에서 어떤 정보가 필요할까요?"
+```
+```
+
+## GENERATION인 경우 (코드 생성 요청):
+- **[Code]** 형식 필수
+- 이전 대화 맥락을 바탕으로 코드 생성
+- 이전 턴에서 논의된 힌트, 점화식, 접근 방식을 반영
+- 사용자가 요청한 제약 조건을 반드시 준수
+- 코드에 주석을 추가하여 이해를 돕기
+
+예시:
+```
+[Code]
+이전에 논의한 점화식을 바탕으로 코드를 작성했습니다:
+
+```python
+# 이전 턴에서 논의한 점화식 구조를 반영
+# dp[current][visited] = min(cost(current, next) + dp[next][visited | (1<<next)])
+# ... (코드 내용)
+```
+
+[Note]
+- 이전 대화에서 논의한 점화식 구조를 반영했습니다.
+- 요청하신 제약 조건(시간 복잡도 O(N^2 * 2^N), sys.stdin.readline 사용 등)을 준수했습니다.
+```
+```
+
+# 🚫 절대 금지
+- 문제의 완전한 정답 코드 제공 (처음부터 끝까지 완성된 코드, 맥락 없이 요청된 경우)
+- 문제 특정 핵심 로직의 완전한 구현 제공 (맥락 없이 요청된 경우)
+
+# ✅ 허용 (맥락 기반)
+- **힌트 요청 시**: 구체적이고 실용적인 힌트 제공 (회피적이지 않게)
+  - 예: "점화식 수립을 위한 힌트" → 점화식의 구조, 접근 방식, 예시를 구체적으로 안내
+  - 예: "비트마스킹 사용법" → 구체적인 사용 예시와 패턴 제공
+- **코드 생성 요청 시**: 이전 대화 맥락을 바탕으로 적절한 코드 생성
+  - 이전 턴에서 힌트, 점화식, 접근 방식이 논의된 경우 → 그를 바탕으로 코드 생성 허용
+  - 예: "제안해주신 점화식을 바탕으로 코드를 작성해주세요" → 코드 생성 허용
+  - 예: "이전에 말한 방법으로 코드를 작성해주세요" → 코드 생성 허용
+  - 단, 처음부터 완전한 정답 코드를 요청하는 경우는 제외
+
+# 📝 코드 생성 시 주의사항
+- 이전 대화 맥락을 명확히 참조하여 일관성 있는 코드 생성
+- 사용자가 요청한 제약 조건(시간 복잡도, 입력 형식 등)을 반드시 준수
+- 코드에 주석을 추가하여 이해를 돕기
+
+# Output Formats (Strictly Adhere)
+답변은 반드시 다음 형식 중 하나 이상을 사용:
+- **[Syntax Example]**: 문법 예시 (문제와 무관)
+- **[Concept]**: 개념 설명 또는 구체적 힌트
+- **[Roadmap]**: 단계별 접근법
+- **[Question]**: 반문으로 유도
+- **[Code]**: 코드 생성 요청 시 코드 제공 (맥락 기반)
+
+# 톤
+친절하고 격려하되, 적절한 수준의 도움을 제공
+- 힌트 요청 시: 회피적이지 않고 구체적으로 안내
+- 코드 생성 요청 시: 맥락을 고려하여 적절한 코드 제공
+
+{memory_summary}
+"""
+
+
+def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
+    """Writer Chain 입력 준비 (Guide Strategy 기반)"""
+    human_message = state.get("human_message", "")
+    messages = state.get("messages", [])
+    memory_summary = state.get("memory_summary", "")
+    is_guardrail_failed = state.get("is_guardrail_failed", False)
+    guardrail_message = state.get("guardrail_message", "")
     
-    # 메시지 히스토리 구성
-    chat_messages = [{"role": "system", "content": system_prompt}]
+    # Guide Strategy 정보 가져오기
+    guide_strategy = state.get("guide_strategy", "LOGIC_HINT")  # 기본값
+    keywords = state.get("keywords", [])
+    problem_context = state.get("problem_context")
     
-    # 최근 메시지 추가 (최대 10개)
+    # 코드 생성 요청 감지 (맥락 기반)
+    is_code_generation_request = False
+    if not is_guardrail_failed:
+        message_lower = human_message.lower()
+        code_generation_keywords = ["코드 작성", "코드 생성", "코드를 작성", "코드를 생성", "코드 작성해", "코드 생성해"]
+        
+        # 코드 생성 요청 키워드 확인
+        if any(kw in message_lower for kw in code_generation_keywords):
+            # 이전 대화에서 힌트나 점화식이 논의되었는지 확인
+            has_previous_context = False
+            if messages:
+                # 최근 3턴 확인
+                recent_messages = messages[-6:] if len(messages) > 6 else messages
+                for msg in recent_messages:
+                    if hasattr(msg, 'content'):
+                        content = str(msg.content).lower()
+                        # 힌트, 점화식, 접근 방식 등이 논의되었는지 확인
+                        context_keywords = ["힌트", "점화식", "접근", "방법", "hint", "recurrence", "approach"]
+                        if any(ck in content for ck in context_keywords):
+                            has_previous_context = True
+                            break
+            
+            # 이전 맥락이 있거나, 명시적으로 이전 대화를 참조하는 경우
+            if has_previous_context or any(ref in message_lower for ref in ["제안해주신", "이전", "앞서", "말한", "바탕으로"]):
+                is_code_generation_request = True
+    
+    # 시스템 프롬프트 선택
+    if is_guardrail_failed:
+        system_prompt = GUARDRAIL_SYSTEM_PROMPT_TEMPLATE.format(
+            guardrail_message=guardrail_message or "부적절한 요청"
+        )
+    else:
+        memory_text = f"\n\n이전 대화 요약:\n{memory_summary}" if memory_summary else ""
+        keywords_text = ", ".join(keywords) if keywords else "없음"
+        
+        # 코드 생성 요청인 경우 Guide Strategy를 GENERATION으로 변경
+        if is_code_generation_request:
+            guide_strategy = "GENERATION"
+        
+        system_prompt = create_normal_system_prompt(
+            status="SAFE",
+            guide_strategy=guide_strategy or "LOGIC_HINT",
+            keywords=keywords_text,
+            memory_summary=memory_text,
+            problem_context=problem_context,
+            is_code_generation_request=is_code_generation_request
+        )
+    
+    # 최근 메시지 변환 (최대 10개)
     recent_messages = messages[-10:] if len(messages) > 10 else messages
+    formatted_messages = []
     for msg in recent_messages:
         if hasattr(msg, 'content'):
             role = getattr(msg, 'type', 'user')
@@ -120,14 +349,124 @@ async def writer_llm(state: MainGraphState) -> Dict[str, Any]:
                 role = 'user'
             elif role == 'ai':
                 role = 'assistant'
-            chat_messages.append({"role": role, "content": msg.content})
+            formatted_messages.append({"role": role, "content": msg.content})
     
-    # 현재 메시지 추가
-    chat_messages.append({"role": "user", "content": human_message})
+    return {
+        "system_prompt": system_prompt,
+        "messages": formatted_messages,
+        "human_message": human_message,
+        "state": state,  # 후처리를 위해 state 전달
+    }
+
+
+def format_writer_messages(inputs: Dict[str, Any]) -> list:
+    """메시지 리스트를 LangChain BaseMessage 객체로 변환"""
+    chat_messages = []
+    
+    # 시스템 메시지 추가
+    if inputs.get("system_prompt"):
+        chat_messages.append(SystemMessage(content=inputs["system_prompt"]))
+    
+    # 이전 대화 메시지 변환
+    for msg in inputs.get("messages", []):
+        if isinstance(msg, dict):
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "system":
+                chat_messages.append(SystemMessage(content=content))
+            elif role == "assistant" or role == "ai":
+                chat_messages.append(AIMessage(content=content))
+            else:
+                chat_messages.append(HumanMessage(content=content))
+        elif hasattr(msg, 'content'):
+            # 이미 BaseMessage 객체인 경우
+            chat_messages.append(msg)
+    
+    # 현재 사용자 메시지 추가
+    if inputs.get("human_message"):
+        chat_messages.append(HumanMessage(content=inputs["human_message"]))
+    
+    return chat_messages
+
+
+def extract_content(response: Any) -> Dict[str, Any]:
+    """LLM 응답에서 내용 추출"""
+    ai_content = response.content if hasattr(response, 'content') else str(response)
+    return {
+        "ai_content": ai_content,
+        "state": response.state if hasattr(response, 'state') else None,
+    }
+
+
+# Writer Chain 구성 (모듈 레벨에서 캐싱)
+_writer_chain = None
+_writer_llm = None
+
+def get_writer_chain():
+    """Writer Chain 생성 (싱글톤 패턴) - Middleware 적용"""
+    global _writer_chain, _writer_llm
+    
+    if _writer_chain is None:
+        _writer_llm = get_llm()
+        
+        # 기본 Chain: 입력 준비 -> 메시지 포맷 -> LLM 호출 -> 내용 추출 (토큰 추출을 위해 LLM 응답 객체도 전달)
+        def extract_content_with_response(response: Any) -> Dict[str, Any]:
+            """LLM 응답에서 내용과 응답 객체를 함께 반환"""
+            ai_content = response.content if hasattr(response, 'content') else str(response)
+            return {
+                "ai_content": ai_content,
+                "_llm_response": response  # 토큰 추출용 - LLM 응답 객체 그대로 전달
+            }
+        
+        _base_writer_chain = (
+            RunnableLambda(prepare_writer_input)
+            | RunnableLambda(format_writer_messages)
+            | _writer_llm  # LLM 호출 - AIMessage 객체 반환
+            | RunnableLambda(extract_content_with_response)  # 내용 추출 및 응답 객체 보존
+        )
+        
+        # Middleware 적용 (Factory 함수 사용)
+        _writer_chain = wrap_chain_with_middleware(
+            _base_writer_chain,
+            name="Writer LLM"
+        )
+    
+    return _writer_chain
+
+
+async def writer_llm(state: MainGraphState) -> Dict[str, Any]:
+    """
+    AI 답변 생성 (Runnable & Chain 구조)
+    
+    역할:
+    - 사용자 요청에 대한 코드 작성
+    - 힌트 제공
+    - 디버깅 도움
+    - 설명 제공
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    human_message = state.get("human_message", "")
+    is_guardrail_failed = state.get("is_guardrail_failed", False)
+    
+    logger.info(f"[Writer LLM] 답변 생성 시작 - message: {human_message[:100]}..., guardrail_failed: {is_guardrail_failed}")
     
     try:
-        response = await llm.ainvoke(chat_messages)
-        ai_content = response.content
+        # Writer Chain 실행 (캐싱된 Chain 사용)
+        chain = get_writer_chain()
+        chain_result = await chain.ainvoke(state)
+        
+        # Chain 결과에서 내용과 LLM 응답 객체 분리
+        ai_content = chain_result.get("ai_content", "") if isinstance(chain_result, dict) else str(chain_result)
+        llm_response = chain_result.get("_llm_response") if isinstance(chain_result, dict) else None
+        
+        # 토큰 사용량 추출 및 State에 누적
+        if llm_response:
+            tokens = extract_token_usage(llm_response)
+            if tokens:
+                accumulate_tokens(state, tokens, token_type="chat")
+                logger.debug(f"[Writer LLM] 토큰 사용량 - prompt: {tokens.get('prompt_tokens')}, completion: {tokens.get('completion_tokens')}, total: {tokens.get('total_tokens')}")
         
         logger.info(f"[Writer LLM] 답변 생성 성공 - 길이: {len(ai_content)} 문자")
         
@@ -174,13 +513,20 @@ async def writer_llm(state: MainGraphState) -> Dict[str, Any]:
             }
         ]
         
-        return {
+        # State에 누적된 토큰 정보를 result에 포함 (LangGraph 병합을 위해)
+        result = {
             "ai_message": ai_content,
             "messages": new_messages,
             "writer_status": WriterResponseStatus.SUCCESS.value,
             "writer_error": None,
             "updated_at": datetime.utcnow().isoformat(),
         }
+        
+        # State에 누적된 토큰 정보 포함
+        if "chat_tokens" in state:
+            result["chat_tokens"] = state["chat_tokens"]
+        
+        return result
         
     except Exception as e:
         logger.error(f"[Writer LLM] 에러 발생: {str(e)}", exc_info=True)

@@ -45,3 +45,10 @@ dev = [
     "isort>=5.13.0",
     "mypy>=1.8.0",
 ]
+
+[tool.pytest.ini_options]
+# pytest-asyncio 설정
+asyncio_mode = "auto"
+# 각 테스트마다 새로운 event loop 생성 (기본값)
+# 이렇게 하면 LLM 호출 중 event loop가 닫히는 문제 방지
+asyncio_default_fixture_loop_scope = "function"

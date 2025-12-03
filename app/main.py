@@ -7,6 +7,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import os
 
 from app.core.config import settings
 from app.infrastructure.cache.redis_client import redis_client
@@ -99,6 +102,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# 정적 파일 서빙 (웹 인터페이스) - 라우터 등록 전에 먼저 처리
+static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+logger.info(f"정적 파일 디렉토리: {static_dir}, 존재 여부: {os.path.exists(static_dir)}")
+
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    
+    @app.get("/", include_in_schema=False)
+    async def read_root():
+        """웹 인터페이스 홈페이지"""
+        index_path = os.path.join(static_dir, "index.html")
+        logger.info(f"인덱스 파일 경로: {index_path}, 존재 여부: {os.path.exists(index_path)}")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        return {"message": "웹 인터페이스 파일을 찾을 수 없습니다.", "static_dir": static_dir, "index_path": index_path}
 
 # 라우터 등록
 app.include_router(health_router)

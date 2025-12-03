@@ -46,12 +46,12 @@ async def health_check() -> HealthResponse:
 
 
 @router.get(
-    "/",
-    summary="루트",
+    "/info",
+    summary="API 정보",
     description="API 정보를 반환합니다."
 )
-async def root():
-    """루트 엔드포인트"""
+async def api_info():
+    """API 정보 엔드포인트"""
     return {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,

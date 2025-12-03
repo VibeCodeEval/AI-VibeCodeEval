@@ -55,6 +55,7 @@ from app.domain.langgraph.nodes.holistic_evaluator.scores import (
 from app.domain.langgraph.nodes.holistic_evaluator.performance import eval_code_performance
 from app.domain.langgraph.nodes.holistic_evaluator.correctness import eval_code_correctness
 from app.domain.langgraph.subgraph_eval_turn import create_eval_turn_subgraph
+from app.domain.langgraph.utils.problem_info import get_problem_info_sync
 
 
 def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
@@ -238,14 +239,31 @@ def get_initial_state(
     spec_id: int,
     human_message: str = "",
 ) -> MainGraphState:
-    """초기 상태 생성"""
+    """
+    초기 상태 생성
+    
+    문제 정보를 하드코딩 딕셔너리에서 가져와서 State에 추가
+    추후 DB 조회로 전환 가능
+    """
     now = datetime.utcnow().isoformat()
+    
+    # 문제 정보 가져오기 (하드코딩 딕셔너리)
+    problem_context = get_problem_info_sync(spec_id)
+    
+    # 개별 필드 추출 (하위 호환성 유지)
+    basic_info = problem_context.get("basic_info", {})
+    ai_guide = problem_context.get("ai_guide", {})
     
     return MainGraphState(
         session_id=session_id,
         exam_id=exam_id,
         participant_id=participant_id,
         spec_id=spec_id,
+        problem_context=problem_context,  # 새 구조
+        problem_id=basic_info.get("problem_id"),
+        problem_name=basic_info.get("title"),
+        problem_algorithm=ai_guide.get("key_algorithms", [None])[0] if ai_guide.get("key_algorithms") else None,
+        problem_keywords=problem_context.get("keywords", []),
         messages=[],
         current_turn=0,
         human_message=human_message,
@@ -253,6 +271,8 @@ def get_initial_state(
         intent_status=None,
         is_guardrail_failed=False,
         guardrail_message=None,
+        guide_strategy=None,
+        keywords=None,
         writer_status=None,
         writer_error=None,
         is_submitted=False,
@@ -260,6 +280,7 @@ def get_initial_state(
         code_content=None,
         turn_scores={},
         holistic_flow_score=None,
+        holistic_flow_analysis=None,
         aggregate_turn_score=None,
         code_performance_score=None,
         code_correctness_score=None,
@@ -269,6 +290,7 @@ def get_initial_state(
         retry_count=0,
         created_at=now,
         updated_at=now,
+        enable_langsmith_tracing=None,  # None이면 환경 변수 사용
     )
 
 

@@ -1,15 +1,112 @@
+"""
+6a: 전체 플로우 평가 - 전략 Chaining 분석
+
+[구조]
+- 상수: 프롬프트 템플릿
+- Chain 구성 함수: 평가 Chain 생성
+- 내부 구현: 실제 평가 로직
+- 외부 래퍼: LangSmith 추적 제어
+"""
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from datetime import datetime
+import json
+
+from langchain_core.runnables import RunnableLambda
 
 from app.domain.langgraph.states import MainGraphState, HolisticFlowEvaluation
 from app.domain.langgraph.nodes.holistic_evaluator.utils import get_llm
+from app.domain.langgraph.nodes.holistic_evaluator.langsmith_utils import (
+    wrap_node_with_tracing,
+    should_enable_langsmith,
+    TRACE_NAME_HOLISTIC_FLOW,
+)
+from app.domain.langgraph.utils.token_tracking import extract_token_usage, accumulate_tokens
 
 logger = logging.getLogger(__name__)
 
-async def eval_holistic_flow(state: MainGraphState) -> Dict[str, Any]:
+# ===== 상수 =====
+
+def create_holistic_system_prompt(problem_context: Optional[Dict[str, Any]] = None) -> str:
     """
-    6a: 전체 플로우 평가 - 전략 Chaining 분석
+    Holistic Evaluator 시스템 프롬프트 생성 (문제 정보 포함)
+    
+    Args:
+        problem_context: 문제 정보 딕셔너리
+    
+    Returns:
+        str: 시스템 프롬프트
+    """
+    # 문제 정보 추출
+    problem_info_section = ""
+    hint_roadmap_section = ""
+    
+    if problem_context:
+        basic_info = problem_context.get("basic_info", {})
+        ai_guide = problem_context.get("ai_guide", {})
+        hint_roadmap = ai_guide.get("hint_roadmap", {})
+        
+        problem_title = basic_info.get("title", "알 수 없음")
+        key_algorithms = ai_guide.get("key_algorithms", [])
+        algorithms_text = ", ".join(key_algorithms) if key_algorithms else "없음"
+        
+        problem_info_section = f"""
+[문제 정보]
+- 문제: {problem_title}
+- 필수 알고리즘: {algorithms_text}
+
+"""
+        
+        # 힌트 로드맵이 있는 경우 추가
+        if hint_roadmap:
+            hint_roadmap_section = f"""
+[힌트 로드맵 (참고용)]
+- 1단계: {hint_roadmap.get("step_1_concept", "")}
+- 2단계: {hint_roadmap.get("step_2_state", "")}
+- 3단계: {hint_roadmap.get("step_3_transition", "")}
+- 4단계: {hint_roadmap.get("step_4_base_case", "")}
+
+"""
+    
+    return f"""당신은 AI 코딩 테스트의 Chaining 전략을 평가하는 전문가입니다.
+
+{problem_info_section}다음은 사용자의 턴별 대화 로그입니다. 각 턴의 의도, 프롬프트 요약, AI 추론을 분석하여 다음 항목을 평가하세요:
+
+1. **문제 분해 (Problem Decomposition):**
+   - 전체 코드가 아닌 부분 코드로 점진적으로 구성되는가?
+   - 큰 문제를 작은 단계로 나누어 해결하는가?
+   - 문제 특성({algorithms_text if problem_context else "알 수 없음"})에 맞는 접근 방식인가?
+   - 힌트 로드맵 순서와 유사하게 진행되었는가?{hint_roadmap_section}
+
+2. **피드백 수용성 (Feedback Integration):**
+   - 턴 N의 AI 힌트 내용이 턴 N+1의 사용자 요청에 반영되었는가?
+   - 이전 턴의 제안을 다음 턴에서 활용하는가?
+
+3. **주도성 및 오류 수정 (Proactiveness):**
+   - 사용자가 AI의 이전 오류를 구체적으로 지적하는가?
+   - 능동적으로 개선 방향을 제시하는가?
+
+4. **전략적 탐색 (Strategic Exploration):**
+   - 의도가 HINT_OR_QUERY에서 OPTIMIZATION으로 전환되는 등 능동적인 변화가 있는가?
+   - DEBUGGING에서 TEST_CASE로 전환하는 등 전략적 탐색이 있는가?
+
+5. **고급 프롬프트 기법 활용 (Advanced Techniques Bonus):**
+   - System Prompting, XML 태그, Few-shot 예시 등 고급 기법을 사용했는가?
+   - 이러한 기법 사용 시 보너스 점수를 부여하세요.
+
+각 항목은 0-100점으로 평가하고, overall_flow_score를 종합 점수로 반환하세요.
+
+**중요**: `analysis` 필드에는 다음을 포함하여 상세한 피드백을 제공하세요:
+- 문제 분해 전략에 대한 구체적 평가 (어떤 부분이 잘되었고, 어떤 부분을 개선할 수 있는지)
+- 피드백 수용성에 대한 구체적 평가 (이전 턴의 힌트가 어떻게 반영되었는지)
+- 주도성에 대한 구체적 평가 (사용자가 어떻게 능동적으로 개선을 제시했는지)
+- 전략적 탐색에 대한 구체적 평가 (의도 전환이 어떻게 이루어졌는지)
+- 전체적인 체이닝 전략에 대한 종합 의견 및 개선 제안"""
+
+
+async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
+    """
+    6a: 전체 플로우 평가 - 전략 Chaining 분석 (내부 구현)
     
     평가 항목:
     1. 문제 분해 (Problem Decomposition)
@@ -44,59 +141,126 @@ async def eval_holistic_flow(state: MainGraphState) -> Dict[str, Any]:
             logger.warning(f"[6a. Eval Holistic Flow] 턴 로그 없음 - session_id: {session_id}")
             return {
                 "holistic_flow_score": 0,
+                "holistic_flow_analysis": "턴 로그가 없어 평가할 수 없습니다.",
                 "updated_at": datetime.utcnow().isoformat(),
             }
         
-        llm = get_llm()
-        evaluator = llm.with_structured_output(HolisticFlowEvaluation)
+        # Holistic Flow 평가 Chain 구성
+        problem_context = state.get("problem_context")
         
-        # Chaining 평가 프롬프트
-        system_prompt = """당신은 AI 코딩 테스트의 Chaining 전략을 평가하는 전문가입니다.
-
-다음은 사용자의 턴별 대화 로그입니다. 각 턴의 의도, 프롬프트 요약, AI 추론을 분석하여 다음 항목을 평가하세요:
-
-1. **문제 분해 (Problem Decomposition):**
-   - 전체 코드가 아닌 부분 코드로 점진적으로 구성되는가?
-   - 큰 문제를 작은 단계로 나누어 해결하는가?
-
-2. **피드백 수용성 (Feedback Integration):**
-   - 턴 N의 AI 힌트 내용이 턴 N+1의 사용자 요청에 반영되었는가?
-   - 이전 턴의 제안을 다음 턴에서 활용하는가?
-
-3. **주도성 및 오류 수정 (Proactiveness):**
-   - 사용자가 AI의 이전 오류를 구체적으로 지적하는가?
-   - 능동적으로 개선 방향을 제시하는가?
-
-4. **전략적 탐색 (Strategic Exploration):**
-   - 의도가 HINT_OR_QUERY에서 OPTIMIZATION으로 전환되는 등 능동적인 변화가 있는가?
-   - DEBUGGING에서 TEST_CASE로 전환하는 등 전략적 탐색이 있는가?
-
-각 항목은 0-100점으로 평가하고, overall_flow_score를 종합 점수로 반환하세요."""
-
-        import json
-        prompt = f"""턴별 대화 로그:
+        def prepare_holistic_input(inputs: Dict[str, Any]) -> Dict[str, Any]:
+            """Holistic 평가 입력 준비 (문제 정보 포함)"""
+            structured_logs = inputs.get("structured_logs", [])
+            
+            # 문제 정보를 포함한 시스템 프롬프트 생성
+            system_prompt = create_holistic_system_prompt(problem_context)
+            
+            user_prompt = f"""턴별 대화 로그:
 
 {json.dumps(structured_logs, ensure_ascii=False, indent=2)}
 
 위 로그를 분석하여 Chaining 전략 점수를 평가하세요."""
-    
-        try:
-            result = await evaluator.ainvoke([
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ])
-            
-            logger.info(f"[6a. Eval Holistic Flow] 평가 완료 - session_id: {session_id}, score: {result.overall_flow_score}")
             
             return {
-                "holistic_flow_score": result.overall_flow_score,
-                "updated_at": datetime.utcnow().isoformat(),
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
             }
+        
+        def format_holistic_messages(inputs: Dict[str, Any]) -> list:
+            """메시지를 LangChain BaseMessage 객체로 변환"""
+            from langchain_core.messages import HumanMessage, SystemMessage
+            
+            messages = []
+            if inputs.get("system_prompt"):
+                messages.append(SystemMessage(content=inputs["system_prompt"]))
+            if inputs.get("user_prompt"):
+                messages.append(HumanMessage(content=inputs["user_prompt"]))
+            return messages
+        
+        def process_holistic_output_with_response(inputs: Dict[str, Any]) -> Dict[str, Any]:
+            """출력 처리 (LLM 응답 객체 포함)"""
+            # Chain에서 전달되는 형태: {"llm_response": HolisticFlowEvaluation}
+            if isinstance(inputs, dict):
+                llm_response = inputs.get("llm_response")
+            else:
+                # 직접 HolisticFlowEvaluation 객체가 전달된 경우
+                llm_response = inputs
+            
+            if llm_response is None:
+                logger.error(f"[Chain] process_holistic_output_with_response - llm_response가 None입니다. inputs 타입: {type(inputs)}, inputs: {inputs}")
+                raise ValueError("Holistic Flow 평가 결과를 파싱할 수 없습니다.")
+            
+            result = llm_response  # structured_llm의 결과는 이미 HolisticFlowEvaluation 객체
+            
+            processed = {
+                "holistic_flow_score": result.overall_flow_score,
+                "holistic_flow_analysis": result.analysis,  # 체이닝 전략에 대한 상세 분석 (문제 분해, 피드백 수용성, 주도성, 전략적 탐색)
+                "strategy_coherence": result.strategy_coherence,
+                "problem_solving_approach": result.problem_solving_approach,
+                "iteration_quality": result.iteration_quality,
+                "updated_at": datetime.utcnow().isoformat(),
+                "_llm_response": llm_response  # 토큰 추출용
+            }
+            return processed
+        
+        # Chain 구성 (토큰 추출을 위해 원본 LLM 응답도 전달)
+        llm = get_llm()
+        structured_llm = llm.with_structured_output(HolisticFlowEvaluation)
+        
+        holistic_chain = (
+            RunnableLambda(prepare_holistic_input)
+            | RunnableLambda(format_holistic_messages)
+            | structured_llm
+            | RunnableLambda(lambda x: {"llm_response": x})
+            | RunnableLambda(process_holistic_output_with_response)
+        )
+        
+        try:
+            # Chain 실행 전에 원본 LLM 호출하여 메타데이터 추출
+            # 주의: with_structured_output은 원본 응답 메타데이터를 보존하지 않으므로
+            # 원본 LLM을 먼저 호출하여 메타데이터 추출
+            chain_input = {"structured_logs": structured_logs}
+            
+            # 메시지 포맷팅 (토큰 추출용 원본 LLM 호출에 사용)
+            prepared_input = prepare_holistic_input(chain_input)
+            formatted_messages = format_holistic_messages(prepared_input)
+            
+            # 원본 LLM 호출 (토큰 사용량 추출용)
+            raw_response = await llm.ainvoke(formatted_messages)
+            
+            # 토큰 사용량 추출 및 State에 누적 (원본 응답에서)
+            tokens = extract_token_usage(raw_response)
+            if tokens:
+                accumulate_tokens(state, tokens, token_type="eval")
+                logger.debug(f"[6a. Eval Holistic Flow] 토큰 사용량 - prompt: {tokens.get('prompt_tokens')}, completion: {tokens.get('completion_tokens')}, total: {tokens.get('total_tokens')}")
+            else:
+                logger.warning(f"[6a. Eval Holistic Flow] 토큰 사용량 추출 실패 - raw_response 타입: {type(raw_response)}")
+            
+            # Chain 실행 (구조화된 출력 파싱)
+            chain_result = await holistic_chain.ainvoke(chain_input)
+            
+            # _llm_response는 더 이상 필요 없음 (이미 원본 응답에서 토큰 추출 완료)
+            chain_result.pop("_llm_response", None)
+            
+            result = chain_result
+            
+            # State에 누적된 토큰 정보를 result에 포함 (LangGraph 병합을 위해)
+            if "eval_tokens" in state:
+                result["eval_tokens"] = state["eval_tokens"]
+            
+            logger.info(f"[6a. Eval Holistic Flow] 평가 완료 - session_id: {session_id}, score: {result['holistic_flow_score']}")
+            
+            # LangSmith 추적 정보 로깅
+            if should_enable_langsmith(state):
+                logger.debug(f"[LangSmith] 6a 노드 추적 활성화 - session_id: {session_id}, 턴 개수: {len(structured_logs)}")
+            
+            return result
             
         except Exception as e:
             logger.error(f"[6a. Eval Holistic Flow] LLM 평가 오류 - session_id: {session_id}, error: {str(e)}", exc_info=True)
             return {
                 "holistic_flow_score": None,
+                "holistic_flow_analysis": None,
                 "error_message": f"Holistic flow 평가 실패: {str(e)}",
                 "updated_at": datetime.utcnow().isoformat(),
             }
@@ -105,7 +269,32 @@ async def eval_holistic_flow(state: MainGraphState) -> Dict[str, Any]:
         logger.error(f"[6a. Eval Holistic Flow] 오류 - session_id: {session_id}, error: {str(e)}", exc_info=True)
         return {
             "holistic_flow_score": None,
+            "holistic_flow_analysis": None,
             "error_message": f"Holistic flow 평가 실패: {str(e)}",
             "updated_at": datetime.utcnow().isoformat(),
         }
+
+
+# ===== 외부 래퍼 함수 =====
+
+async def eval_holistic_flow(state: MainGraphState) -> Dict[str, Any]:
+    """
+    6a: 전체 플로우 평가 - 전략 Chaining 분석
+    
+    LangSmith 추적:
+    - State의 enable_langsmith_tracing 값에 따라 활성화/비활성화
+    - None이면 환경 변수 LANGCHAIN_TRACING_V2 사용
+    
+    사용 예시:
+    - State에 enable_langsmith_tracing=True 설정 시 추적 활성화
+    - State에 enable_langsmith_tracing=False 설정 시 추적 비활성화
+    - State에 enable_langsmith_tracing=None 설정 시 환경 변수 사용
+    """
+    # LangSmith 추적과 함께 래핑
+    wrapped_func = wrap_node_with_tracing(
+        node_name=TRACE_NAME_HOLISTIC_FLOW,
+        impl_func=_eval_holistic_flow_impl,
+        state=state
+    )
+    return await wrapped_func(state)
 

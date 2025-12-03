@@ -30,14 +30,15 @@
 """
 import asyncio
 import logging
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from typing import Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Query
 
 from app.presentation.schemas.chat import ChatRequest, ChatResponse, SubmitRequest, SubmitResponse
 from app.presentation.schemas.common import ErrorResponse
 from app.application.services.eval_service import EvalService
 from app.infrastructure.cache.redis_client import redis_client, get_redis
 from app.core.config import settings
+from app.domain.langgraph.utils.problem_info import get_problem_info_sync
 
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -134,6 +135,13 @@ async def send_message(
                 error_message=result.get("error_message"),
             )
         
+        # 토큰 사용량을 Core 전달 형식으로 변환
+        from app.domain.langgraph.utils.token_tracking import format_tokens_for_core
+        core_tokens = format_tokens_for_core(
+            chat_tokens=result.get("chat_tokens"),
+            eval_tokens=result.get("eval_tokens")
+        )
+        
         # 정상 응답
         return ChatResponse(
             session_id=result.get("session_id", request.session_id),
@@ -142,6 +150,9 @@ async def send_message(
             is_submitted=result.get("is_submitted", False),
             error=False,
             error_message=None,
+            chat_tokens=core_tokens.get("chat_tokens"),
+            eval_tokens=core_tokens.get("eval_tokens"),
+            total_tokens=core_tokens.get("total_tokens"),
         )
     except asyncio.TimeoutError:
         # LLM 응답이 60초 이내에 완료되지 않은 경우
@@ -259,6 +270,22 @@ async def submit_code(
         
         final_scores = result.get("final_scores")
         
+        # 피드백 정보 추출
+        feedback_data = result.get("feedback", {})
+        feedback = None
+        if feedback_data:
+            from app.presentation.schemas.chat import EvaluationFeedback
+            feedback = EvaluationFeedback(
+                holistic_flow_analysis=feedback_data.get("holistic_flow_analysis")
+            )
+        
+        # 토큰 사용량을 Core 전달 형식으로 변환
+        from app.domain.langgraph.utils.token_tracking import format_tokens_for_core
+        core_tokens = format_tokens_for_core(
+            chat_tokens=result.get("chat_tokens"),
+            eval_tokens=result.get("eval_tokens")
+        )
+        
         # 정상 응답
         return SubmitResponse(
             session_id=result.get("session_id", request.session_id),
@@ -266,6 +293,9 @@ async def submit_code(
             is_submitted=True,
             final_scores=final_scores,
             turn_scores=result.get("turn_scores"),
+            feedback=feedback,
+            chat_tokens=core_tokens.get("chat_tokens"),
+            eval_tokens=core_tokens.get("eval_tokens"),
             error=False,
             error_message=None,
         )
@@ -412,12 +442,21 @@ async def websocket_chat(websocket: WebSocket):
                                 "turn_id": turn_id
                             })
                     
-                    # 완료 신호
+                    # 완료 신호 (토큰 사용량 포함)
                     if not active_streams.get(turn_id, False):
+                        # 최종 결과에서 토큰 사용량 추출
+                        final_state = await eval_service.get_session_state(session_id)
+                        token_summary = {}
+                        if final_state:
+                            from app.domain.langgraph.utils.token_tracking import get_token_summary
+                            token_summary = get_token_summary(final_state)
+                        
                         await websocket.send_json({
                             "type": "done",
                             "turn_id": turn_id,
-                            "full_content": full_content
+                            "full_content": full_content,
+                            "chat_tokens": token_summary.get("chat_tokens", {}),
+                            "eval_tokens": token_summary.get("eval_tokens", {}),
                         })
                     
                     # 스트림 제거
@@ -456,5 +495,185 @@ async def websocket_chat(websocket: WebSocket):
     finally:
         # 정리
         active_streams.clear()
+
+
+@router.get(
+    "/problem-info",
+    summary="문제 정보 조회",
+    description="spec_id로 문제 정보를 조회합니다."
+)
+async def get_problem_info(
+    spec_id: int = Query(..., description="문제 스펙 ID")
+) -> Dict[str, Any]:
+    """문제 정보 조회"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        problem_info = get_problem_info_sync(spec_id)
+        return {
+            "spec_id": spec_id,
+            "problem_info": problem_info,
+            "error": False,
+        }
+    except Exception as e:
+        logger.error(f"문제 정보 조회 오류: {str(e)}", exc_info=True)
+        return {
+            "spec_id": spec_id,
+            "problem_info": None,
+            "error": True,
+            "error_message": str(e),
+        }
+
+
+@router.get(
+    "/turn-logs",
+    summary="턴 로그 조회",
+    description="""
+    세션의 모든 턴 로그를 조회합니다.
+    
+    **반환 데이터:**
+    - 각 턴별 평가 결과
+    - 점수, 의도, 평가 항목 등
+    """
+)
+async def get_turn_logs(
+    session_id: str = Query(..., description="세션 ID")
+) -> Dict[str, Any]:
+    """
+    턴 로그 조회
+    
+    [역할]
+    - Redis에서 세션의 모든 턴 로그 조회
+    - 백그라운드 평가 결과 확인용
+    
+    Args:
+        session_id: 세션 ID
+    
+    Returns:
+        {
+            "session_id": "...",
+            "turn_logs": {
+                "1": {...},
+                "2": {...}
+            },
+            "error": false
+        }
+    """
+    try:
+        turn_logs = await redis_client.get_all_turn_logs(session_id)
+        
+        return {
+            "session_id": session_id,
+            "turn_logs": turn_logs,
+            "error": False,
+        }
+    except Exception as e:
+        logger.error(f"턴 로그 조회 오류: {str(e)}", exc_info=True)
+        return {
+            "session_id": session_id,
+            "turn_logs": {},
+            "error": True,
+            "error_message": str(e),
+        }
+
+
+@router.get(
+    "/tokens",
+    summary="토큰 사용량 조회",
+    description="""
+    세션의 토큰 사용량을 조회합니다.
+    
+    **반환 데이터:**
+    - chat_tokens: 채팅 검사 토큰 (Intent Analyzer, Writer LLM)
+    - eval_tokens: 평가 토큰 (Turn Evaluator, Holistic Evaluator)
+    - total_tokens: 전체 토큰 합계
+    
+    **Core 백엔드 전달 형식:**
+    - prompt_tokens: 프롬프트 토큰 수
+    - completion_tokens: 컴플리션 토큰 수
+    - total_tokens: 전체 토큰 수
+    """
+)
+async def get_token_usage(
+    session_id: str = Query(..., description="세션 ID"),
+    eval_service: EvalService = Depends(get_eval_service)
+) -> Dict[str, Any]:
+    """
+    토큰 사용량 조회 (Core 백엔드 전달용)
+    
+    [역할]
+    - Redis에서 세션의 토큰 사용량 조회
+    - chat_tokens와 eval_tokens를 분리하여 반환
+    - Core 백엔드로 전달할 형식으로 변환
+    
+    Args:
+        session_id: 세션 ID
+    
+    Returns:
+        {
+            "session_id": "...",
+            "chat_tokens": {
+                "prompt_tokens": int,
+                "completion_tokens": int,
+                "total_tokens": int
+            },
+            "eval_tokens": {
+                "prompt_tokens": int,
+                "completion_tokens": int,
+                "total_tokens": int
+            },
+            "total_tokens": {
+                "prompt_tokens": int,  # chat + eval 합계
+                "completion_tokens": int,  # chat + eval 합계
+                "total_tokens": int  # chat + eval 합계
+            },
+            "error": false
+        }
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # 세션 상태 조회
+        state = await eval_service.get_session_state(session_id)
+        
+        if not state:
+            return {
+                "session_id": session_id,
+                "chat_tokens": None,
+                "eval_tokens": None,
+                "total_tokens": None,
+                "error": True,
+                "error_message": "세션을 찾을 수 없습니다.",
+            }
+        
+        # 토큰 사용량 추출
+        from app.domain.langgraph.utils.token_tracking import get_token_summary, format_tokens_for_core
+        
+        token_summary = get_token_summary(state)
+        chat_tokens = token_summary.get("chat_tokens")
+        eval_tokens = token_summary.get("eval_tokens")
+        
+        # Core 전달 형식으로 변환
+        core_format = format_tokens_for_core(chat_tokens, eval_tokens)
+        
+        logger.info(f"[Token Usage API] 조회 완료 - session_id: {session_id}, chat: {chat_tokens}, eval: {eval_tokens}")
+        
+        return {
+            "session_id": session_id,
+            **core_format,  # chat_tokens, eval_tokens, total_tokens 포함
+            "error": False,
+        }
+    except Exception as e:
+        logger.error(f"토큰 사용량 조회 오류: {str(e)}", exc_info=True)
+        return {
+            "session_id": session_id,
+            "chat_tokens": None,
+            "eval_tokens": None,
+            "total_tokens": None,
+            "error": True,
+            "error_message": str(e),
+        }
 
 

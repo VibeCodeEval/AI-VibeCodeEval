@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Vibe Coding Test - 웹 인터페이스</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            height: calc(100vh - 40px);
+        }
+
+        .main-panel {
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #e0e0e0;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .header {
+            padding: 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .header .session-info {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .token-usage {
+            margin-top: 12px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .token-usage-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .token-usage-label {
+            font-weight: 600;
+        }
+
+        .token-usage-value {
+            font-weight: 700;
+        }
+
+        .token-progress-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        .token-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4ade80 0%, #fbbf24 70%, #ef4444 90%);
+            transition: width 0.3s ease;
+            border-radius: 4px;
+        }
+
+        .token-details {
+            margin-top: 8px;
+            font-size: 11px;
+            opacity: 0.85;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .token-warning {
+            color: #fbbf24;
+        }
+
+        .token-danger {
+            color: #ef4444;
+        }
+
+        .problem-toggle {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+            z-index: 10;
+        }
+
+        .problem-toggle:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .problem-panel {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            color: #333;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 100;
+        }
+
+        .problem-panel.open {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .problem-content {
+            padding: 24px;
+        }
+
+        .problem-content h2 {
+            color: #667eea;
+            margin-bottom: 16px;
+            font-size: 20px;
+        }
+
+        .problem-content h3 {
+            color: #764ba2;
+            margin-top: 20px;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+
+        .problem-content p {
+            margin-bottom: 12px;
+            line-height: 1.6;
+        }
+
+        .problem-content .info-section {
+            background: #f5f5f5;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .problem-content .info-section strong {
+            color: #667eea;
+        }
+
+        .problem-content ul {
+            margin-left: 20px;
+            margin-bottom: 12px;
+        }
+
+        .problem-content li {
+            margin-bottom: 8px;
+        }
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 20px;
+            background: #f5f5f5;
+            min-height: 200px;
+            max-height: calc(100vh - 300px);
+        }
+
+        .message {
+            margin-bottom: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message.user {
+            align-items: flex-end;
+        }
+
+        .message.assistant {
+            align-items: flex-start;
+        }
+
+        .message-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            word-wrap: break-word;
+            line-height: 1.5;
+        }
+
+        .message.user .message-bubble {
+            background: #667eea;
+            color: white;
+        }
+
+        .message.assistant .message-bubble {
+            background: white;
+            color: #333;
+            border: 1px solid #e0e0e0;
+        }
+
+        .message-time {
+            font-size: 11px;
+            color: #999;
+            margin-top: 4px;
+            padding: 0 4px;
+        }
+
+        .resizer {
+            height: 4px;
+            background: #e0e0e0;
+            cursor: ns-resize;
+            position: relative;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+
+        .resizer:hover {
+            background: #667eea;
+        }
+
+        .resizer::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 4px;
+            background: #ccc;
+            border-radius: 2px;
+        }
+
+        .resizer:hover::before {
+            background: #667eea;
+        }
+
+        .input-area {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            flex-shrink: 0;
+            min-height: 150px;
+            max-height: calc(100vh - 200px);
+            overflow-y: auto;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 12px;
+        }
+
+        .input-group textarea {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 14px;
+            resize: none;
+            font-family: inherit;
+        }
+
+        .input-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-1px);
+        }
+
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .btn-submit {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-submit:hover:not(:disabled) {
+            background: #059669;
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            background: #f9fafb;
+            overflow-y: auto;
+        }
+
+        .sidebar-section {
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .sidebar-section h2 {
+            font-size: 16px;
+            margin-bottom: 12px;
+            color: #333;
+        }
+
+        .turn-log {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border-left: 3px solid #667eea;
+        }
+
+        .turn-log h3 {
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: #667eea;
+        }
+
+        .turn-log .score {
+            font-size: 18px;
+            font-weight: bold;
+            color: #10b981;
+            margin: 8px 0;
+        }
+
+        .turn-log .details {
+            font-size: 12px;
+            color: #666;
+            margin-top: 8px;
+        }
+
+        .turn-log-content {
+            max-height: 400px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            margin-top: 8px;
+            padding: 8px;
+            background: #f9fafb;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .turn-log-toggle {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+
+        .turn-log-toggle:hover {
+            background: #5568d3;
+        }
+
+        .code-input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            resize: vertical;
+            min-height: 200px;
+        }
+
+        .code-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .final-scores {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-top: 12px;
+        }
+
+        .final-scores h3 {
+            margin-bottom: 12px;
+        }
+
+        .score-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .score-item.total {
+            font-size: 20px;
+            font-weight: bold;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+
+        .refresh-btn {
+            background: #f3f4f6;
+            color: #333;
+            padding: 8px 16px;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
+        .refresh-btn:hover {
+            background: #e5e7eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="main-panel">
+            <div class="header">
+                <button class="problem-toggle" id="problemToggle" onclick="toggleProblemPanel()">
+                    📋 문제 보기
+                </button>
+                <h1>🤖 AI Vibe Coding Test</h1>
+                <div class="session-info">
+                    Session: <span id="sessionId">-</span> | Turn: <span id="currentTurn">0</span>
+                </div>
+                <div class="token-usage">
+                    <div class="token-usage-header">
+                        <span class="token-usage-label">토큰 사용량</span>
+                        <span class="token-usage-value" id="tokenUsageValue">0 / 20,000</span>
+                    </div>
+                    <div class="token-progress-bar">
+                        <div class="token-progress-fill" id="tokenProgressFill" style="width: 0%;"></div>
+                    </div>
+                    <div class="token-details">
+                        <span>채팅: <span id="chatTokens">0</span></span>
+                        <span>평가: <span id="evalTokens">0</span></span>
+                    </div>
+                </div>
+                <div class="problem-panel" id="problemPanel">
+                    <div class="problem-content" id="problemContent">
+                        <p>문제 정보를 불러오는 중...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-container" id="chatContainer">
+                <div class="message assistant">
+                    <div class="message-bubble">
+                        안녕하세요! AI 코딩 어시스턴트입니다. 문제 해결을 도와드리겠습니다. 질문을 입력해주세요.
+                    </div>
+                    <div class="message-time">시작</div>
+                </div>
+            </div>
+
+            <div class="resizer" id="resizer"></div>
+
+            <div class="input-area" id="inputArea">
+                <div class="input-group">
+                    <textarea 
+                        id="messageInput" 
+                        placeholder="메시지를 입력하세요..."
+                        rows="2"
+                        onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); }"
+                    ></textarea>
+                    <button class="btn btn-primary" id="sendBtn" onclick="sendMessage()">전송</button>
+                </div>
+                <div style="margin-top: 12px; display: flex; gap: 8px;">
+                    <textarea 
+                        id="codeInput" 
+                        class="code-input"
+                        placeholder="코드 제출 (선택사항)"
+                    ></textarea>
+                </div>
+                <div style="margin-top: 8px;">
+                    <button class="btn btn-submit" id="submitBtn" onclick="submitCode()">코드 제출</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="sidebar-section">
+                <h2>📊 백그라운드 평가</h2>
+                <button class="btn refresh-btn" onclick="refreshTurnLogs()">새로고침</button>
+                <div id="turnLogs">
+                    <div style="color: #999; font-size: 14px; margin-top: 12px;">평가 대기 중...</div>
+                </div>
+            </div>
+
+            <div class="sidebar-section" id="finalScoresSection" style="display: none;">
+                <h2>🏆 최종 점수</h2>
+                <div id="finalScores"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000/api';
+        let sessionId = `web-session-${Date.now()}`;
+        let currentTurn = 0;
+        let refreshInterval = null;
+        let openTurnLogs = new Set(); // 열려있는 턴 로그 ID 저장
+        let problemPanelOpen = false;
+        const SPEC_ID = 10; // 기본 spec_id
+        
+        // 토큰 사용량 추적
+        const TOKEN_LIMIT = 20000; // 20K 제한
+        let totalChatTokens = 0;
+        let totalEvalTokens = 0;
+
+        // 초기화
+        document.getElementById('sessionId').textContent = sessionId;
+        
+        // 문제 정보 로드
+        loadProblemInfo();
+
+        // 메시지 전송
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+
+            // UI 업데이트
+            addMessage('user', message);
+            input.value = '';
+            setLoading(true);
+
+            try {
+                const response = await fetch(`${API_BASE}/chat/message`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        exam_id: 1,
+                        participant_id: 100,
+                        spec_id: 10,
+                        message: message
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    addMessage('assistant', `❌ 오류: ${data.error_message || '알 수 없는 오류'}`);
+                } else {
+                    if (data.ai_message) {
+                        addMessage('assistant', data.ai_message);
+                    }
+                    currentTurn = data.turn || currentTurn;
+                    document.getElementById('currentTurn').textContent = currentTurn;
+                    
+                    // 토큰 사용량 업데이트
+                    updateTokenUsage(data);
+                }
+
+                // 백그라운드 평가 새로고침 (약간의 지연 후)
+                setTimeout(refreshTurnLogs, 2000);
+            } catch (error) {
+                addMessage('assistant', `❌ 네트워크 오류: ${error.message}`);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // 코드 제출
+        async function submitCode() {
+            const codeInput = document.getElementById('codeInput');
+            const code = codeInput.value.trim();
+
+            if (!code) {
+                alert('코드를 입력해주세요.');
+                return;
+            }
+
+            setLoading(true);
+            addMessage('user', `[코드 제출]\n\`\`\`python\n${code}\n\`\`\``);
+
+            try {
+                const response = await fetch(`${API_BASE}/chat/submit`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        exam_id: 1,
+                        participant_id: 100,
+                        spec_id: 10,
+                        code: code,
+                        lang: 'python'
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    addMessage('assistant', `❌ 제출 오류: ${data.error_message || '알 수 없는 오류'}`);
+                } else {
+                    addMessage('assistant', '✅ 코드 제출 완료! 평가가 진행되었습니다.');
+                    
+                    // 토큰 사용량 업데이트
+                    updateTokenUsage(data);
+                    
+                    // 최종 점수 표시
+                    if (data.final_scores) {
+                        displayFinalScores(data.final_scores);
+                    }
+
+                    // 턴 로그 새로고침
+                    setTimeout(refreshTurnLogs, 2000);
+                }
+            } catch (error) {
+                addMessage('assistant', `❌ 네트워크 오류: ${error.message}`);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // 턴 로그 새로고침
+        async function refreshTurnLogs() {
+            try {
+                const response = await fetch(`${API_BASE}/chat/turn-logs?session_id=${sessionId}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    document.getElementById('turnLogs').innerHTML = 
+                        `<div class="error">오류: ${data.error_message}</div>`;
+                    return;
+                }
+
+                const logs = data.turn_logs || {};
+                const turnNumbers = Object.keys(logs).sort((a, b) => parseInt(a) - parseInt(b));
+
+                if (turnNumbers.length === 0) {
+                    document.getElementById('turnLogs').innerHTML = 
+                        '<div style="color: #999; font-size: 14px;">평가 대기 중...</div>';
+                    return;
+                }
+
+                // 현재 열려있는 턴 로그 상태 확인
+                const wasOpen = new Set(openTurnLogs);
+                
+                let html = '';
+                turnNumbers.forEach(turn => {
+                    const log = logs[turn];
+                    const evalDetails = log.prompt_evaluation_details || {};
+                    const score = evalDetails.score || 0;
+                    const intent = evalDetails.intent || 'UNKNOWN';
+                    const rubrics = evalDetails.rubrics || [];
+                    const logId = `turn-log-${turn}`;
+                    const contentId = `turn-content-${turn}`;
+
+                    // 전체 로그를 JSON으로 포맷팅
+                    const fullLogJson = JSON.stringify(log, null, 2);
+
+                    // 이전에 열려있었는지 확인
+                    const isOpen = wasOpen.has(contentId);
+                    const displayStyle = isOpen ? 'block' : 'none';
+                    const buttonText = isOpen ? '상세 내용 숨기기' : '상세 내용 보기';
+
+                    html += `
+                        <div class="turn-log">
+                            <h3>Turn ${turn}</h3>
+                            <div class="score">점수: ${score.toFixed(1)}</div>
+                            <div class="details">
+                                <div>의도: ${intent}</div>
+                                <div>평가 항목: ${rubrics.length}개</div>
+                            </div>
+                            <button class="turn-log-toggle" onclick="toggleTurnLog('${contentId}')">
+                                ${buttonText}
+                            </button>
+                            <div id="${contentId}" class="turn-log-content" style="display: ${displayStyle};">
+${escapeHtml(fullLogJson)}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                document.getElementById('turnLogs').innerHTML = html;
+            } catch (error) {
+                document.getElementById('turnLogs').innerHTML = 
+                    `<div class="error">오류: ${error.message}</div>`;
+            }
+        }
+
+        // 최종 점수 표시
+        function displayFinalScores(scores) {
+            const section = document.getElementById('finalScoresSection');
+            const container = document.getElementById('finalScores');
+
+            section.style.display = 'block';
+
+            container.innerHTML = `
+                <div class="final-scores">
+                    <h3>최종 평가 결과</h3>
+                    <div class="score-item">
+                        <span>프롬프트 점수</span>
+                        <span>${(scores.prompt_score || 0).toFixed(1)}</span>
+                    </div>
+                    <div class="score-item">
+                        <span>성능 점수</span>
+                        <span>${(scores.performance_score || 0).toFixed(1)}</span>
+                    </div>
+                    <div class="score-item">
+                        <span>정확성 점수</span>
+                        <span>${(scores.correctness_score || 0).toFixed(1)}</span>
+                    </div>
+                    <div class="score-item total">
+                        <span>총점</span>
+                        <span>${(scores.total_score || 0).toFixed(1)}</span>
+                    </div>
+                    <div style="margin-top: 12px; text-align: center; font-size: 18px; font-weight: bold;">
+                        등급: ${scores.grade || 'N/A'}
+                    </div>
+                </div>
+            `;
+        }
+
+        // 메시지 추가
+        function addMessage(role, text) {
+            const container = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.textContent = text;
+            
+            const time = document.createElement('div');
+            time.className = 'message-time';
+            time.textContent = new Date().toLocaleTimeString('ko-KR');
+
+            messageDiv.appendChild(bubble);
+            messageDiv.appendChild(time);
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // 로딩 상태 설정
+        function setLoading(loading) {
+            const sendBtn = document.getElementById('sendBtn');
+            const submitBtn = document.getElementById('submitBtn');
+            
+            sendBtn.disabled = loading;
+            submitBtn.disabled = loading;
+            
+            if (loading) {
+                sendBtn.innerHTML = '<span class="loading"></span>';
+            } else {
+                sendBtn.textContent = '전송';
+            }
+        }
+
+        // 턴 로그 토글
+        function toggleTurnLog(contentId) {
+            const content = document.getElementById(contentId);
+            const button = content.previousElementSibling;
+            
+            if (content.style.display === 'none') {
+                content.style.display = 'block';
+                button.textContent = '상세 내용 숨기기';
+                openTurnLogs.add(contentId); // 열린 상태 저장
+            } else {
+                content.style.display = 'none';
+                button.textContent = '상세 내용 보기';
+                openTurnLogs.delete(contentId); // 닫힌 상태 저장
+            }
+        }
+
+        // HTML 이스케이프 함수
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 토큰 사용량 업데이트
+        function updateTokenUsage(data) {
+            // chat_tokens 누적 (세션 전체 누적이 아니라 현재 응답의 토큰만 사용)
+            // API가 이미 누적된 값을 반환하므로 그대로 사용
+            if (data.chat_tokens && typeof data.chat_tokens === 'object') {
+                const chatTotal = data.chat_tokens.total_tokens || 0;
+                // API가 반환한 누적값 사용
+                totalChatTokens = chatTotal;
+            }
+            
+            // eval_tokens 누적
+            if (data.eval_tokens && typeof data.eval_tokens === 'object') {
+                const evalTotal = data.eval_tokens.total_tokens || 0;
+                // API가 반환한 누적값 사용
+                totalEvalTokens = evalTotal;
+            }
+            
+            // 총 토큰 사용량 계산
+            const totalUsed = totalChatTokens + totalEvalTokens;
+            const percentage = Math.min((totalUsed / TOKEN_LIMIT) * 100, 100);
+            
+            // UI 업데이트
+            document.getElementById('tokenUsageValue').textContent = 
+                `${totalUsed.toLocaleString()} / ${TOKEN_LIMIT.toLocaleString()}`;
+            document.getElementById('tokenProgressFill').style.width = `${percentage}%`;
+            document.getElementById('chatTokens').textContent = totalChatTokens.toLocaleString();
+            document.getElementById('evalTokens').textContent = totalEvalTokens.toLocaleString();
+            
+            // 경고 색상 적용
+            const valueElement = document.getElementById('tokenUsageValue');
+            const progressFill = document.getElementById('tokenProgressFill');
+            
+            if (percentage >= 90) {
+                valueElement.className = 'token-usage-value token-danger';
+                progressFill.style.background = '#ef4444';
+            } else if (percentage >= 70) {
+                valueElement.className = 'token-usage-value token-warning';
+                progressFill.style.background = 'linear-gradient(90deg, #fbbf24 0%, #ef4444 100%)';
+            } else {
+                valueElement.className = 'token-usage-value';
+                progressFill.style.background = 'linear-gradient(90deg, #4ade80 0%, #fbbf24 70%, #ef4444 90%)';
+            }
+        }
+
+        // 리사이저 기능
+        let isResizing = false;
+        let startY = 0;
+        let startChatHeight = 0;
+        let startInputHeight = 0;
+
+        const resizer = document.getElementById('resizer');
+        const chatContainer = document.getElementById('chatContainer');
+        const inputArea = document.getElementById('inputArea');
+
+        resizer.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            startY = e.clientY;
+            startChatHeight = chatContainer.offsetHeight;
+            startInputHeight = inputArea.offsetHeight;
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+
+            const deltaY = e.clientY - startY;
+            const container = chatContainer.parentElement;
+            const containerHeight = container.offsetHeight;
+            const headerHeight = container.querySelector('.header').offsetHeight;
+            const resizerHeight = resizer.offsetHeight;
+            const availableHeight = containerHeight - headerHeight - resizerHeight;
+
+            // 최소/최대 높이 제한
+            const minChatHeight = 200;
+            const minInputHeight = 150;
+            const maxChatHeight = availableHeight - minInputHeight;
+            const maxInputHeight = availableHeight - minChatHeight;
+
+            let newChatHeight = startChatHeight + deltaY;
+            let newInputHeight = startInputHeight - deltaY;
+
+            // 제한 적용
+            if (newChatHeight < minChatHeight) {
+                newChatHeight = minChatHeight;
+                newInputHeight = availableHeight - minChatHeight;
+            } else if (newChatHeight > maxChatHeight) {
+                newChatHeight = maxChatHeight;
+                newInputHeight = minInputHeight;
+            } else if (newInputHeight < minInputHeight) {
+                newInputHeight = minInputHeight;
+                newChatHeight = availableHeight - minInputHeight;
+            } else if (newInputHeight > maxInputHeight) {
+                newInputHeight = maxInputHeight;
+                newChatHeight = minChatHeight;
+            }
+
+            chatContainer.style.height = newChatHeight + 'px';
+            chatContainer.style.flex = 'none';
+            inputArea.style.height = newInputHeight + 'px';
+            inputArea.style.flex = 'none';
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+
+        // 문제 패널 토글
+        function toggleProblemPanel() {
+            const panel = document.getElementById('problemPanel');
+            const toggle = document.getElementById('problemToggle');
+            problemPanelOpen = !problemPanelOpen;
+            
+            if (problemPanelOpen) {
+                panel.classList.add('open');
+                toggle.textContent = '📋 문제 숨기기';
+            } else {
+                panel.classList.remove('open');
+                toggle.textContent = '📋 문제 보기';
+            }
+        }
+
+        // 문제 정보 로드
+        async function loadProblemInfo() {
+            try {
+                const response = await fetch(`${API_BASE}/chat/problem-info?spec_id=${SPEC_ID}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    document.getElementById('problemContent').innerHTML = 
+                        `<p style="color: red;">문제 정보를 불러올 수 없습니다: ${data.error_message || '알 수 없는 오류'}</p>`;
+                    return;
+                }
+                
+                const problemInfo = data.problem_info;
+                if (!problemInfo) {
+                    document.getElementById('problemContent').innerHTML = 
+                        '<p>문제 정보가 없습니다.</p>';
+                    return;
+                }
+                
+                // 문제 정보 포맷팅
+                const basicInfo = problemInfo.basic_info || {};
+                const constraints = problemInfo.constraints || {};
+                const aiGuide = problemInfo.ai_guide || {};
+                
+                let html = `
+                    <h2>${basicInfo.title || '문제 제목'}</h2>
+                    ${basicInfo.problem_id ? `<p><strong>문제 번호:</strong> ${basicInfo.problem_id}</p>` : ''}
+                    
+                    <div class="info-section">
+                        <h3>📝 문제 설명</h3>
+                        <p>${basicInfo.description_summary || '설명 없음'}</p>
+                    </div>
+                    
+                    ${basicInfo.input_format ? `
+                    <div class="info-section">
+                        <h3>📥 입력 형식</h3>
+                        <p>${basicInfo.input_format}</p>
+                    </div>
+                    ` : ''}
+                    
+                    ${basicInfo.output_format ? `
+                    <div class="info-section">
+                        <h3>📤 출력 형식</h3>
+                        <p>${basicInfo.output_format}</p>
+                    </div>
+                    ` : ''}
+                    
+                    ${constraints.time_limit_sec || constraints.memory_limit_mb ? `
+                    <div class="info-section">
+                        <h3>⏱️ 제약 조건</h3>
+                        ${constraints.time_limit_sec ? `<p><strong>시간 제한:</strong> ${constraints.time_limit_sec}초</p>` : ''}
+                        ${constraints.memory_limit_mb ? `<p><strong>메모리 제한:</strong> ${constraints.memory_limit_mb}MB</p>` : ''}
+                        ${constraints.logic_reasoning ? `<p><strong>알고리즘 힌트:</strong> ${constraints.logic_reasoning}</p>` : ''}
+                    </div>
+                    ` : ''}
+                    
+                    ${aiGuide.key_algorithms && aiGuide.key_algorithms.length > 0 ? `
+                    <div class="info-section">
+                        <h3>🔑 주요 알고리즘</h3>
+                        <ul>
+                            ${aiGuide.key_algorithms.map(alg => `<li>${alg}</li>`).join('')}
+                        </ul>
+                    </div>
+                    ` : ''}
+                    
+                    ${aiGuide.common_pitfalls && aiGuide.common_pitfalls.length > 0 ? `
+                    <div class="info-section">
+                        <h3>⚠️ 자주 틀리는 실수</h3>
+                        <ul>
+                            ${aiGuide.common_pitfalls.map(pitfall => `<li>${pitfall}</li>`).join('')}
+                        </ul>
+                    </div>
+                    ` : ''}
+                `;
+                
+                document.getElementById('problemContent').innerHTML = html;
+            } catch (error) {
+                console.error('문제 정보 로드 오류:', error);
+                document.getElementById('problemContent').innerHTML = 
+                    `<p style="color: red;">문제 정보를 불러오는 중 오류가 발생했습니다: ${error.message}</p>`;
+            }
+        }
+
+        // 주기적으로 턴 로그 새로고침 (5초마다)
+        refreshInterval = setInterval(refreshTurnLogs, 5000);
+
+        // 초기 턴 로그 로드
+        refreshTurnLogs();
+    </script>
+</body>
+</html>
+

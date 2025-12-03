@@ -26,6 +26,13 @@ class MainGraphState(TypedDict):
     participant_id: int
     spec_id: int
     
+    # 문제 정보 (하드코딩 또는 DB에서 가져옴)
+    problem_id: Optional[str]  # 문제 번호 (백준 등) - 하위 호환성 유지
+    problem_name: Optional[str]  # 문제 이름 - 하위 호환성 유지
+    problem_algorithm: Optional[str]  # 알고리즘 유형 - 하위 호환성 유지
+    problem_keywords: Optional[List[str]]  # 가드레일용 문제별 키워드 - 하위 호환성 유지
+    problem_context: Optional[Dict[str, Any]]  # 상세한 문제 정보 (basic_info, constraints, ai_guide, solution_code 포함)
+    
     # 메시지 히스토리
     messages: Annotated[list, add_messages]
     
@@ -38,6 +45,8 @@ class MainGraphState(TypedDict):
     intent_status: Optional[str]  # IntentAnalyzerStatus
     is_guardrail_failed: bool
     guardrail_message: Optional[str]
+    guide_strategy: Optional[str]  # SYNTAX_GUIDE, LOGIC_HINT, ROADMAP
+    keywords: Optional[List[str]]  # 사용자 질문의 핵심 키워드
     
     # Writer LLM 결과
     writer_status: Optional[str]  # WriterResponseStatus
@@ -51,6 +60,7 @@ class MainGraphState(TypedDict):
     # 평가 점수
     turn_scores: Dict[str, Any]
     holistic_flow_score: Optional[float]
+    holistic_flow_analysis: Optional[str]  # 체이닝 전략에 대한 상세 분석
     aggregate_turn_score: Optional[float]
     code_performance_score: Optional[float]
     code_correctness_score: Optional[float]
@@ -66,6 +76,13 @@ class MainGraphState(TypedDict):
     # 메타데이터
     created_at: str
     updated_at: str
+    
+    # LangSmith 추적 제어 (Optional, None이면 환경 변수 사용)
+    enable_langsmith_tracing: Optional[bool]
+    
+    # 토큰 사용량 (채팅 검사 vs 평가 분리)
+    chat_tokens: Optional[Dict[str, int]]  # 사용자 채팅 검사 토큰 (Intent Analyzer + Writer LLM)
+    eval_tokens: Optional[Dict[str, int]]  # 평가 토큰 (Eval Turn SubGraph + Holistic Evaluators)
 
 
 # ===== Eval Turn SubGraph 상태 =====
@@ -77,6 +94,9 @@ class EvalTurnState(TypedDict):
     turn: int
     human_message: str
     ai_message: str
+    
+    # 문제 정보 (평가 시 문제 적절성 판단용)
+    problem_context: Optional[Dict[str, Any]]
     
     # Guardrail 정보 (eval_service에서 전달)
     is_guardrail_failed: bool
@@ -102,6 +122,9 @@ class EvalTurnState(TypedDict):
     # 최종 턴 로그
     turn_log: Optional[Dict[str, Any]]
     turn_score: Optional[float]
+    
+    # 토큰 사용량 (평가용)
+    eval_tokens: Optional[Dict[str, int]]  # 평가 토큰 (Eval Turn SubGraph)
 
 
 # ===== Pydantic 모델 (LLM 구조화 출력용) =====

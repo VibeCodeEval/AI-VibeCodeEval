@@ -35,6 +35,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from app.domain.langgraph.graph import create_main_graph, get_initial_state
 from app.domain.langgraph.states import MainGraphState
+from app.domain.langgraph.utils.token_tracking import get_token_summary
 from app.infrastructure.cache.redis_client import RedisClient
 from app.infrastructure.repositories.state_repository import StateRepository
 from app.infrastructure.repositories.session_repository import SessionRepository
@@ -190,12 +191,34 @@ class EvalService:
                         ai_message = msg.content
                         break
             
+            # 토큰 사용량 추출
+            token_summary = get_token_summary(result)
+            
+            # 토큰 사용량이 비어있으면 빈 dict 대신 None 또는 기본값 설정
+            chat_tokens = token_summary.get("chat_tokens") or result.get("chat_tokens")
+            eval_tokens = token_summary.get("eval_tokens") or result.get("eval_tokens")
+            
+            # 빈 dict가 아닌 경우에만 포함
+            if chat_tokens and isinstance(chat_tokens, dict) and any(chat_tokens.values()):
+                logger.info(f"[EvalService] ✅ chat_tokens 발견: {chat_tokens}")
+            else:
+                logger.warning(f"[EvalService] ⚠️ chat_tokens 없음 - token_summary: {token_summary.get('chat_tokens')}, result: {result.get('chat_tokens')}")
+                chat_tokens = chat_tokens or {}
+            
+            if eval_tokens and isinstance(eval_tokens, dict) and any(eval_tokens.values()):
+                logger.info(f"[EvalService] ✅ eval_tokens 발견: {eval_tokens}")
+            else:
+                logger.debug(f"[EvalService] eval_tokens 없음 (백그라운드 평가는 아직 완료되지 않았을 수 있음)")
+                eval_tokens = eval_tokens or {}
+            
             response = {
                 "session_id": session_id,
                 "turn": result.get("current_turn", 0),
                 "ai_message": ai_message,
                 "is_submitted": result.get("is_submitted", False),
                 "error_message": result.get("error_message"),
+                "chat_tokens": chat_tokens,
+                "eval_tokens": eval_tokens,
             }
             
             # 제출된 경우 최종 점수 포함
@@ -478,6 +501,7 @@ class EvalService:
                 "turn": main_state.get("current_turn", 0),
                 "human_message": main_state.get("human_message", ""),
                 "ai_message": main_state.get("ai_message", ""),
+                "problem_context": main_state.get("problem_context"),  # 문제 정보 전달
                 "is_guardrail_failed": main_state.get("is_guardrail_failed", False),
                 "guardrail_message": main_state.get("guardrail_message"),
                 "intent_type": None,
@@ -498,10 +522,15 @@ class EvalService:
             result = await eval_turn_subgraph.ainvoke(turn_state)
             
             current_turn = main_state.get("current_turn", 0)
-            intent_type = result.get("intent_type", "UNKNOWN")
+            
+            # intent_type은 turn_log에서 가져오거나, intent_types의 첫 번째 값 사용
+            turn_log = result.get("turn_log", {})
+            intent_types = turn_log.get("intent_types", [])
+            intent_type = turn_log.get("intent_type") or (intent_types[0] if intent_types else "UNKNOWN")
+            
             turn_score = result.get("turn_score", 0)
             
-            # 개별 평가 결과에서 rubrics 생성
+            # 개별 평가 결과에서 rubrics 생성 (상세 피드백 포함)
             evaluations = []
             eval_mapping = {
                 "rule_setting_eval": "규칙 설정 (Rules)",
@@ -514,14 +543,53 @@ class EvalService:
             }
             
             rubrics = []
+            detailed_evaluations = []
             for eval_key, criterion_name in eval_mapping.items():
                 eval_result = result.get(eval_key)
                 if eval_result and isinstance(eval_result, dict):
+                    # 기본 정보
+                    score = eval_result.get("score", eval_result.get("average", 0))
+                    final_reasoning = eval_result.get("final_reasoning", "평가 없음")
+                    eval_rubrics = eval_result.get("rubrics", [])
+                    
+                    # Rubrics 생성 (간단한 형태)
                     rubrics.append({
                         "criterion": criterion_name,
-                        "score": eval_result.get("average", 0),
-                        "reason": eval_result.get("feedback", "평가 없음")
+                        "score": score,
+                        "reason": final_reasoning[:200] + "..." if len(final_reasoning) > 200 else final_reasoning
                     })
+                    
+                    # 상세 평가 정보 (전체 rubrics와 final_reasoning 포함)
+                    detailed_evaluations.append({
+                        "criterion": criterion_name,
+                        "score": score,
+                        "final_reasoning": final_reasoning,
+                        "rubrics": [
+                            {
+                                "criterion": r.get("criterion", ""),
+                                "score": r.get("score", 0),
+                                "reason": r.get("reason", "")
+                            }
+                            for r in eval_rubrics
+                        ] if isinstance(eval_rubrics, list) else []
+                    })
+            
+            # 전체 턴에 대한 종합 평가 근거 생성
+            # 모든 평가의 final_reasoning을 종합하여 전체 평가 의견 생성
+            all_reasonings = [e.get("final_reasoning", "") for e in detailed_evaluations if e.get("final_reasoning")]
+            comprehensive_reasoning = "\n\n".join([
+                f"[{e.get('criterion')}] {e.get('final_reasoning', '')}"
+                for e in detailed_evaluations
+            ]) if detailed_evaluations else "평가 완료"
+            
+            # turn_log에서 상세 피드백 정보 가져오기
+            turn_log_data = result.get("turn_log", {})
+            detailed_feedback_from_log = turn_log_data.get("detailed_feedback", [])
+            comprehensive_reasoning_from_log = turn_log_data.get("comprehensive_reasoning", comprehensive_reasoning)
+            
+            # detailed_feedback이 없으면 detailed_evaluations에서 생성
+            if not detailed_feedback_from_log and detailed_evaluations:
+                detailed_feedback_from_log = detailed_evaluations
             
             # 상세 turn_log 구조 생성 (사용자 정의 형식)
             detailed_turn_log = {
@@ -530,11 +598,13 @@ class EvalService:
                 "prompt_evaluation_details": {
                     "intent": intent_type,
                     "score": turn_score,
-                    "rubrics": rubrics,
-                    "final_reasoning": result.get("answer_summary", "평가 완료")
+                    "rubrics": rubrics,  # 간단한 형태 (요약)
+                    "final_reasoning": comprehensive_reasoning_from_log,  # 전체 평가 근거 (LLM의 의견)
+                    "detailed_evaluations": detailed_evaluations,  # 상세 평가 정보 (전체 rubrics 포함)
+                    "detailed_feedback": detailed_feedback_from_log  # 상세 피드백 (각 Intent별 rubrics와 final_reasoning)
                 },
                 "llm_answer_summary": result.get("answer_summary", ""),
-                "llm_answer_reasoning": rubrics[0].get("reason", "") if rubrics else "평가 없음",
+                "llm_answer_reasoning": comprehensive_reasoning_from_log[:500] + "..." if len(comprehensive_reasoning_from_log) > 500 else comprehensive_reasoning_from_log,
                 "timestamp": datetime.utcnow().isoformat()
             }
             
@@ -549,7 +619,19 @@ class EvalService:
                 "intent_type": intent_type,
             }
             
-            # 업데이트된 turn_scores를 상태에 저장
+            # EvalTurnState의 eval_tokens를 MainGraphState의 eval_tokens에 합산
+            eval_tokens_from_turn = result.get("eval_tokens", {})
+            if eval_tokens_from_turn:
+                main_eval_tokens = main_state.get("eval_tokens", {}) or {}
+                accumulated_eval_tokens = {
+                    "prompt_tokens": main_eval_tokens.get("prompt_tokens", 0) + eval_tokens_from_turn.get("prompt_tokens", 0),
+                    "completion_tokens": main_eval_tokens.get("completion_tokens", 0) + eval_tokens_from_turn.get("completion_tokens", 0),
+                    "total_tokens": main_eval_tokens.get("total_tokens", 0) + eval_tokens_from_turn.get("total_tokens", 0),
+                }
+                main_state["eval_tokens"] = accumulated_eval_tokens
+                logger.debug(f"[EvalService] Eval Turn 토큰 합산 - session_id: {session_id}, turn: {current_turn}, eval_tokens: {accumulated_eval_tokens}")
+            
+            # 업데이트된 turn_scores와 eval_tokens를 상태에 저장
             updated_state = {**main_state, "turn_scores": turn_scores}
             await self.state_repo.save_state(session_id, updated_state)
             

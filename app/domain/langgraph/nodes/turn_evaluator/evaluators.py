@@ -1,40 +1,115 @@
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableLambda
 
 from app.domain.langgraph.states import EvalTurnState, TurnEvaluation
 from app.domain.langgraph.nodes.turn_evaluator.utils import get_llm
+from app.domain.langgraph.utils.token_tracking import extract_token_usage, accumulate_tokens
+from app.domain.langgraph.utils.prompt_metrics import calculate_all_metrics
 
 logger = logging.getLogger(__name__)
 
-async def _evaluate_turn(state: EvalTurnState, eval_type: str, criteria: str) -> Dict[str, Any]:
-    """
-    공통 턴 평가 로직 (사용자 프롬프트 평가)
-    
-    Claude Prompt Engineering 기준:
-    1. 명확성 (Clarity)
-    2. 예시 사용 (Examples)
-    3. 규칙 및 제약조건 (Rules)
-    4. 사고 연쇄 유도 (Chain of Thought)
-    """
+
+def prepare_evaluation_input_internal(inputs: Dict[str, Any], eval_type: str, criteria: str) -> Dict[str, Any]:
+    """평가 입력 준비 (문제 정보 포함) - 외부에서 재사용 가능"""
+    state = inputs.get("state")
     human_message = state.get("human_message", "")
     ai_message = state.get("ai_message", "")
+    problem_context = state.get("problem_context")
     
-    llm = get_llm()
-    evaluator = llm.with_structured_output(TurnEvaluation)
+    # 문제 정보 추출
+    problem_info_section = ""
+    problem_algorithms = None
+    if problem_context:
+        basic_info = problem_context.get("basic_info", {})
+        ai_guide = problem_context.get("ai_guide", {})
+        
+        problem_title = basic_info.get("title", "알 수 없음")
+        key_algorithms = ai_guide.get("key_algorithms", [])
+        problem_algorithms = key_algorithms
+        algorithms_text = ", ".join(key_algorithms) if key_algorithms else "없음"
+        
+        problem_info_section = f"""
+[문제 정보]
+- 문제: {problem_title}
+- 필수 알고리즘: {algorithms_text}
+
+"""
+    
+    # 알고리즘 텍스트 미리 계산 (f-string 내부에서 조건식 사용 시 오류 방지)
+    algorithms_display = algorithms_text if problem_context else "알 수 없음"
+    
+    # 정량적 메트릭 계산
+    metrics = calculate_all_metrics(human_message, problem_algorithms)
+    
+    # 메트릭 정보 포맷팅
+    metrics_section = f"""
+[정량적 메트릭 (참고용)]
+- 텍스트 길이: {metrics['text_length']}자, 단어 수: {metrics['word_count']}개, 문장 수: {metrics['sentence_count']}개
+- 명확성 메트릭: 구체적 값 포함 {metrics['clarity']['has_specific_values']}, 값 개수 {metrics['clarity']['specific_value_count']}개
+- 예시 메트릭: 예시 포함 {metrics['examples']['has_examples']}, 예시 개수 {metrics['examples']['example_count']}개
+- 규칙 메트릭: XML 태그 {metrics['rules']['has_xml_tags']} ({metrics['rules']['xml_tag_count']}개), 제약조건 {metrics['rules']['has_constraints']} ({metrics['rules']['constraint_count']}개), 구조화 형식 {metrics['rules']['has_structured_format']}
+- 문맥 메트릭: 이전 대화 참조 {metrics['context']['has_context_reference']} ({metrics['context']['context_reference_count']}회)
+- 문제 적절성 메트릭: 기술 용어 {metrics['problem_relevance']['technical_term_count']}개
+- 코드 블록: {metrics['has_code_blocks']} ({metrics['code_block_count']}개)
+
+**참고**: 위 메트릭은 객관적 측정값입니다. LLM 평가 시 이 메트릭을 참고하되, 맥락과 의미를 종합적으로 고려하여 평가하세요.
+"""
     
     system_prompt = f"""당신은 '프롬프트 엔지니어링' 전문가입니다.
 사용자가 작성한 프롬프트가 '{eval_type}' 의도를 얼마나 잘 전달하고 있는지 평가하세요.
 AI의 응답은 참고용으로만 사용하고, 평가는 오직 '사용자의 프롬프트'에 집중하세요.
 
+{problem_info_section}{metrics_section}
 평가 기준 (Claude Prompt Engineering):
 1. **명확성 (Clarity)**: 요청이 모호하지 않고 구체적인가? (직접적이고 명확하게)
-2. **예시 (Examples)**: 원하는 입출력 예시나 상황을 제공했는가? (멀티샷)
-3. **규칙 (Rules)**: {criteria} (XML 태그 사용, 제약조건 명시 등)
-4. **문맥 (Context)**: 이전 대화나 배경 지식을 적절히 활용했는가?
+   - 메트릭 참고: 단어 수 {metrics['word_count']}개, 문장 수 {metrics['sentence_count']}개, 구체적 값 {metrics['clarity']['specific_value_count']}개
+   - 점수 범위별 기준:
+     * 90-100점: 단어 수 20-200개, 문장 수 2-10개, 구체적 값 1개 이상 포함
+     * 70-89점: 단어 수 10-20개 또는 200-300개, 문장 수 1-2개 또는 10-15개, 구체적 값 포함 여부 불명확
+     * 50-69점: 단어 수 5-10개 또는 300개 이상, 문장 수 1개 또는 15개 이상
+     * 0-49점: 단어 수 5개 미만, 문장 수 1개 미만, 매우 모호한 표현
 
-위 기준을 바탕으로 0-100점 사이의 점수를 부여하고, 상세한 루브릭과 추론을 제공하세요."""
+2. **문제 적절성 (Problem Relevance)**: 
+   - 요청이 문제 특성({algorithms_display})에 적합한가?
+   - 필수 개념을 언급했는가?
+   - 메트릭 참고: 기술 용어 {metrics['problem_relevance']['technical_term_count']}개
+   - 점수 범위별 기준:
+     * 90-100점: 기술 용어 3개 이상, 문제 특성에 맞는 알고리즘 명시
+     * 70-89점: 기술 용어 1-2개, 문제 관련 키워드 언급
+     * 50-69점: 기술 용어 0-1개, 문제와 관련 있지만 구체적 알고리즘 없음
+     * 0-49점: 기술 용어 0개, 문제와 무관한 요청
 
-    prompt = f"""[사용자 프롬프트]
+3. **예시 (Examples)**: 원하는 입출력 예시나 상황을 제공했는가? (멀티샷)
+   - 메트릭 참고: 예시 포함 {metrics['examples']['has_examples']}, 예시 개수 {metrics['examples']['example_count']}개
+   - 점수 범위별 기준:
+     * 90-100점: 예시 2개 이상, 입출력 쌍 포함, 엣지 케이스 포함
+     * 70-89점: 예시 1개, 기본 케이스만
+     * 50-69점: 예시 없지만 상황 설명
+     * 0-49점: 예시 없음, 추상적 표현만
+
+4. **규칙 (Rules)**: {criteria} (XML 태그 사용, 제약조건 명시 등)
+   - 메트릭 참고: XML 태그 {metrics['rules']['xml_tag_count']}개, 제약조건 {metrics['rules']['constraint_count']}개, 구조화 형식 {metrics['rules']['has_structured_format']}
+   - 점수 범위별 기준:
+     * 90-100점: XML 태그 2개 이상 또는 제약조건 2개 이상, 구조화 형식 사용
+     * 70-89점: XML 태그 1개 또는 제약조건 1개, 구조화 형식 사용
+     * 50-69점: 제약조건 언급 (XML 태그 없음), 간단한 구조화
+     * 0-49점: 제약조건 없음, 구조화 형식 없음
+
+5. **문맥 (Context)**: 이전 대화나 배경 지식을 적절히 활용했는가?
+   - 메트릭 참고: 이전 대화 참조 {metrics['context']['has_context_reference']}, 참조 횟수 {metrics['context']['context_reference_count']}회
+   - 점수 범위별 기준:
+     * 90-100점: 이전 대화 참조 2회 이상, 구체적 내용 언급
+     * 70-89점: 이전 대화 참조 1회, 간단한 언급
+     * 50-69점: 맥락 활용 시도 (불명확)
+     * 0-49점: 맥락 활용 없음
+
+위 기준과 메트릭을 바탕으로 0-100점 사이의 점수를 부여하고, 상세한 루브릭과 추론을 제공하세요.
+메트릭은 객관적 측정값이지만, 맥락과 의미를 종합적으로 고려하여 평가하세요."""
+
+    user_prompt = f"""[사용자 프롬프트]
 {human_message}
 
 [AI 응답 (참고용)]
@@ -42,19 +117,168 @@ AI의 응답은 참고용으로만 사용하고, 평가는 오직 '사용자의 
 
 위 사용자 프롬프트를 '{eval_type}' 관점에서 평가하세요."""
     
-    try:
-        result = await evaluator.ainvoke([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ])
+    return {
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+    }
+
+
+def format_evaluation_messages(inputs: Dict[str, Any]) -> list:
+    """메시지를 LangChain BaseMessage 객체로 변환 - 외부에서 재사용 가능"""
+    from langchain_core.messages import HumanMessage, SystemMessage
+    
+    messages = []
+    if inputs.get("system_prompt"):
+        messages.append(SystemMessage(content=inputs["system_prompt"]))
+    if inputs.get("user_prompt"):
+        messages.append(HumanMessage(content=inputs["user_prompt"]))
+    return messages
+
+
+def create_evaluation_chain(eval_type: str, criteria: str):
+    """
+    평가 Chain 생성 (Runnable & Chain 구조)
+    
+    [토큰 추적 개선]
+    - with_structured_output은 원본 응답 메타데이터를 보존하지 않음
+    - Chain 내부에서 원본 LLM을 먼저 호출하여 메타데이터 추출 후, 구조화된 출력으로 파싱
+    
+    Args:
+        eval_type: 평가 유형 (예: "코드 생성 요청")
+        criteria: 평가 기준 설명
+    
+    Returns:
+        평가 Chain
+    """
+    from app.domain.langgraph.nodes.turn_evaluator.utils import get_llm
+    llm = get_llm()
+    structured_llm = llm.with_structured_output(TurnEvaluation)
+    
+    def prepare_evaluation_input(inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """평가 입력 준비 (문제 정보 포함) - Chain 내부용"""
+        return prepare_evaluation_input_internal(inputs, eval_type, criteria)
+    
+    def format_messages(inputs: Dict[str, Any]) -> list:
+        """메시지를 LangChain BaseMessage 객체로 변환 - Chain 내부용"""
+        return format_evaluation_messages(inputs)
+    
+    async def call_llm_and_parse(inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        원본 LLM 호출 및 구조화된 출력 파싱 (비동기)
+        - 원본 LLM 응답에서 토큰 사용량 추출
+        - 구조화된 출력으로 파싱
+        """
+        messages = inputs.get("messages", [])
+        
+        # 원본 LLM 호출 (토큰 사용량 추출용)
+        # 주의: with_structured_output은 원본 응답 메타데이터를 보존하지 않으므로
+        # 원본 LLM을 먼저 호출하여 메타데이터 추출
+        # 하지만 이렇게 하면 LLM을 두 번 호출하게 되므로 비효율적
+        # 실제로는 구조화된 출력이 내부적으로 LLM을 다시 호출하므로
+        # LLM을 두 번 호출하게 됨 (비효율적이지만 토큰 추적을 위해 필요)
+        
+        # 원본 LLM 호출 (토큰 추출용)
+        raw_response = await llm.ainvoke(messages)
+        
+        # 구조화된 출력 호출
+        structured_result = await structured_llm.ainvoke(messages)
         
         return {
+            "structured_result": structured_result,
+            "raw_response": raw_response,  # 토큰 추출용
+        }
+    
+    def process_output_with_response(inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """출력 처리 (LLM 응답 객체 포함)"""
+        # Chain에서 전달되는 형태: {"llm_response": TurnEvaluation}
+        # 또는 직접 TurnEvaluation 객체가 전달될 수 있음
+        if isinstance(inputs, dict):
+            structured_result = inputs.get("llm_response") or inputs.get("structured_result")
+        else:
+            # 직접 TurnEvaluation 객체가 전달된 경우
+            structured_result = inputs
+        
+        if structured_result is None:
+            logger.error(f"[Chain] process_output_with_response - structured_result가 None입니다. inputs 타입: {type(inputs)}, inputs: {inputs}")
+            raise ValueError("평가 결과를 파싱할 수 없습니다.")
+        
+        result = structured_result  # structured_llm의 결과는 이미 TurnEvaluation 객체
+        
+        processed = {
             "intent": result.intent,
             "score": result.score,
             "average": result.score,  # 호환성 유지
             "rubrics": [r.dict() for r in result.rubrics],
-            "final_reasoning": result.final_reasoning
+            "final_reasoning": result.final_reasoning,
         }
+        return processed
+    
+    # Chain 구성 (토큰 추출을 위해 원본 LLM 응답도 전달)
+    # 주의: 비동기 함수를 Chain에 직접 사용할 수 없으므로
+    # Chain 외부에서 비동기 처리를 수행해야 함
+    chain = (
+        RunnableLambda(prepare_evaluation_input)
+        | RunnableLambda(format_messages)
+        | structured_llm  # 일단 구조화된 출력만 사용 (토큰 추적은 Chain 외부에서)
+        | RunnableLambda(lambda x: {"llm_response": x})
+        | RunnableLambda(process_output_with_response)
+    )
+    
+    return chain
+
+
+async def _evaluate_turn(state: EvalTurnState, eval_type: str, criteria: str) -> Dict[str, Any]:
+    """
+    공통 턴 평가 로직 (사용자 프롬프트 평가) - Chain 구조 사용
+    
+    Claude Prompt Engineering 기준:
+    1. 명확성 (Clarity)
+    2. 예시 사용 (Examples)
+    3. 규칙 및 제약조건 (Rules)
+    4. 사고 연쇄 유도 (Chain of Thought)
+    
+    [토큰 추적 개선]
+    - with_structured_output은 원본 응답 메타데이터를 보존하지 않음
+    - Chain 실행 전에 원본 LLM을 호출하여 메타데이터 추출
+    """
+    try:
+        # 평가 Chain 생성
+        chain = create_evaluation_chain(eval_type, criteria)
+        
+        # Chain 실행 전에 원본 LLM 호출하여 메타데이터 추출
+        # 주의: with_structured_output은 원본 응답 메타데이터를 보존하지 않으므로
+        # 원본 LLM을 먼저 호출하여 메타데이터 추출
+        chain_input = {"state": state}
+        
+        # 메시지 포맷팅 (토큰 추출용 원본 LLM 호출에 사용)
+        # Chain 내부의 prepare_evaluation_input과 format_messages를 재사용
+        prepared_input = prepare_evaluation_input_internal(chain_input, eval_type, criteria)
+        formatted_messages = format_evaluation_messages(prepared_input)
+        
+        # 원본 LLM 호출 (토큰 사용량 추출용)
+        from app.domain.langgraph.nodes.turn_evaluator.utils import get_llm
+        llm = get_llm()
+        raw_response = await llm.ainvoke(formatted_messages)
+        
+        # 토큰 사용량 추출 및 State에 누적 (원본 응답에서)
+        tokens = extract_token_usage(raw_response)
+        if tokens:
+            accumulate_tokens(state, tokens, token_type="eval")
+            logger.debug(f"[{eval_type} 평가] 토큰 사용량 - prompt: {tokens.get('prompt_tokens')}, completion: {tokens.get('completion_tokens')}, total: {tokens.get('total_tokens')}")
+        else:
+            logger.warning(f"[{eval_type} 평가] 토큰 사용량 추출 실패 - raw_response 타입: {type(raw_response)}")
+        
+        # 평가 Chain 실행 (구조화된 출력 파싱)
+        chain_result = await chain.ainvoke(chain_input)
+        
+        # _llm_response는 더 이상 필요 없음 (이미 원본 응답에서 토큰 추출 완료)
+        chain_result.pop("_llm_response", None)
+        
+        # State에 누적된 토큰 정보를 result에 포함 (LangGraph 병합을 위해)
+        if "eval_tokens" in state:
+            chain_result["eval_tokens"] = state["eval_tokens"]
+        
+        return chain_result
         
     except Exception as e:
         logger.error(f"평가 중 오류 발생: {str(e)}")

@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     JUDGE0_API_URL: str = "http://localhost:2358"
     JUDGE0_API_KEY: Optional[str] = None
     
+    # 큐 시스템 설정
+    USE_REDIS_QUEUE: bool = True  # True: Redis 큐, False: 메모리 큐
+    
     # Spring Boot 콜백 설정
     SPRING_CALLBACK_URL: str = "http://localhost:8080/api/ai/callback"
     SPRING_API_KEY: Optional[str] = None
@@ -77,6 +80,22 @@ class Settings(BaseSettings):
     
     # LangGraph 체크포인트 설정
     CHECKPOINT_TTL_SECONDS: int = 3600  # 1시간
+    
+    # LangSmith 설정 (개발 환경에서 사용)
+    # 공식 문서: https://docs.langchain.com/langsmith/create-account-api-key
+    LANGCHAIN_TRACING_V2: bool = False  # 개발 환경에서만 True로 설정
+    LANGCHAIN_API_KEY: Optional[str] = None  # LangSmith API Key
+    LANGCHAIN_PROJECT: str = "langgraph-eval-dev"  # LangSmith 프로젝트 이름
+    LANGCHAIN_ENDPOINT: str = "https://api.smith.langchain.com"  # LangSmith API 엔드포인트
+    
+    # Middleware 설정
+    MIDDLEWARE_RATE_LIMIT_MAX_CALLS: int = 15  # Rate limit 최대 호출 횟수
+    MIDDLEWARE_RATE_LIMIT_PERIOD: float = 60.0  # Rate limit 기간 (초)
+    MIDDLEWARE_RETRY_MAX_RETRIES: int = 3  # 최대 재시도 횟수
+    MIDDLEWARE_RETRY_INITIAL_DELAY: float = 1.0  # 초기 대기 시간 (초)
+    MIDDLEWARE_RETRY_MAX_DELAY: float = 60.0  # 최대 대기 시간 (초)
+    MIDDLEWARE_RETRY_BACKOFF_STRATEGY: str = "exponential"  # 백오프 전략 (exponential, linear, fixed)
+    MIDDLEWARE_LOGGING_ENABLED: bool = True  # Logging Middleware 활성화 여부
 
 
 @lru_cache()

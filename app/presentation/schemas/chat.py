@@ -36,7 +36,17 @@ class ChatResponse(BaseModel):
                 "ai_message": "피보나치 수열을 계산하는 함수입니다:\n\n```python\ndef fibonacci(n):\n    if n <= 1:\n        return n\n    return fibonacci(n-1) + fibonacci(n-2)\n```",
                 "is_submitted": False,
                 "error": False,
-                "error_message": None
+                "error_message": None,
+                "chat_tokens": {
+                    "prompt_tokens": 150,
+                    "completion_tokens": 200,
+                    "total_tokens": 350
+                },
+                "eval_tokens": {
+                    "prompt_tokens": 300,
+                    "completion_tokens": 400,
+                    "total_tokens": 700
+                }
             }
         }
     )
@@ -47,6 +57,9 @@ class ChatResponse(BaseModel):
     is_submitted: bool = Field(False, description="제출 여부")
     error: bool = Field(False, description="에러 발생 여부")
     error_message: Optional[str] = Field(None, description="에러 메시지")
+    chat_tokens: Optional[Dict[str, int]] = Field(None, description="채팅 검사 토큰 사용량 (Intent Analyzer, Writer LLM)")
+    eval_tokens: Optional[Dict[str, int]] = Field(None, description="평가 토큰 사용량 (Turn Evaluator, Holistic Evaluator)")
+    total_tokens: Optional[Dict[str, int]] = Field(None, description="전체 토큰 사용량 (chat + eval 합계, Core 전달용)")
 
 
 class SubmitRequest(BaseModel):
@@ -81,6 +94,11 @@ class FinalScores(BaseModel):
     grade: str = Field(..., description="등급 (A/B/C/D/F)")
 
 
+class EvaluationFeedback(BaseModel):
+    """평가 피드백"""
+    holistic_flow_analysis: Optional[str] = Field(None, description="체이닝 전략에 대한 상세 분석 (문제 분해, 피드백 수용성, 주도성, 전략적 탐색)")
+
+
 class SubmitResponse(BaseModel):
     """코드 제출 응답"""
     model_config = ConfigDict(
@@ -111,6 +129,9 @@ class SubmitResponse(BaseModel):
     is_submitted: bool = Field(True, description="제출 완료 여부")
     final_scores: Optional[FinalScores] = Field(None, description="최종 점수")
     turn_scores: Optional[Dict[str, Any]] = Field(None, description="턴별 점수")
+    feedback: Optional[EvaluationFeedback] = Field(None, description="평가 피드백 (체이닝 전략 분석 등)")
+    chat_tokens: Optional[Dict[str, int]] = Field(None, description="채팅 검사 토큰 사용량 (Intent Analyzer, Writer LLM)")
+    eval_tokens: Optional[Dict[str, int]] = Field(None, description="평가 토큰 사용량 (Turn Evaluator, Holistic Evaluator)")
     error: bool = Field(False, description="에러 발생 여부")
     error_message: Optional[str] = Field(None, description="에러 메시지")
 
