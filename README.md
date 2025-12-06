@@ -326,11 +326,16 @@ ai_vibe_worker/
 │   └── test_gemini.py                     # Gemini API 연결 테스트
 │
 ├── docs/                                   # 문서
-│   ├── README.md                           # 문서 가이드
-│   ├── Test_Guide.txt                      # 테스트 및 디버깅 가이드
-│   ├── Change_11_27_graph.txt             # 그래프 변경 이력
-│   ├── Timing_Issue_Analysis.md            # 타이밍 이슈 분석
-│   └── main_example.py                     # LangGraph 학습 예제
+│   ├── API_Specification.md                # API 명세서
+│   ├── Endpoint_Change_History.md          # 엔드포인트 변경 이력
+│   ├── Quick_DB_Guide.md                  # DB 빠른 가이드
+│   ├── Database_Changes_Summary.md         # DB 변경사항 요약
+│   ├── Test_Execution_Guide.md            # 테스트 실행 가이드
+│   ├── State_Flow_and_DB_Storage.md       # LangGraph State 흐름 및 DB 저장
+│   ├── Docker_PostgreSQL_Setup_Guide.md   # Docker 설정 가이드
+│   ├── Judge0_Complete_Guide.md           # Judge0 완전 가이드
+│   ├── Vertex_AI_Setup_Guide.md           # Vertex AI 설정 가이드
+│   └── archive/                            # 아카이브 문서
 │
 ├── data/                                   # 테스트 데이터
 │   └── turn_sessions.json                  # 저장된 세션 ID
@@ -434,29 +439,37 @@ docker-compose down
 - `GET /` - API 정보 및 버전
 - `GET /api/health` - 헬스 체크 (DB, Redis 상태)
 
-### 채팅 API (REST)
-- `POST /api/chat/message` - 메시지 전송
+### 세션 관리 API
+- `POST /api/session/start` - 응시자 채팅 세션 시작
   ```json
   {
-    "session_id": "session-123",
-    "exam_id": 1,
-    "participant_id": 100,
-    "spec_id": 10,
-    "message": "피보나치 수열을 계산하는 함수를 작성해주세요."
+    "examId": 1,
+    "participantId": 100,
+    "specId": 20
   }
   ```
 
-- `POST /api/chat/submit` - 코드 제출
+### 메시지 API
+- `POST /api/session/{sessionId}/messages` - 사용자 메시지 전송 & AI 응답
   ```json
   {
-    "session_id": "session-123",
-    "exam_id": 1,
-    "participant_id": 100,
-    "spec_id": 10,
+    "role": "USER",
+    "content": "문제 조건을 다시 설명해줘."
+  }
+  ```
+
+### 제출 API
+- `POST /api/session/{sessionId}/submit` - 응시자 코드 제출 및 평가
+  ```json
+  {
     "code": "def fibonacci(n): ...",
     "lang": "python"
   }
   ```
+
+### [DEPRECATED] 레거시 엔드포인트
+- `POST /api/chat/message` - ⚠️ 더 이상 사용되지 않음 (대신 `/api/session/{sessionId}/messages` 사용)
+- `POST /api/chat/submit` - ⚠️ 더 이상 사용되지 않음 (대신 `/api/session/{sessionId}/submit` 사용)
 
 ### WebSocket API
 - `WS /api/chat/ws` - WebSocket 스트리밍 채팅
@@ -510,16 +523,12 @@ docker-compose down
   }
   ```
 
-### 세션 API
-- `GET /api/session/{session_id}/state` - 세션 상태 조회
-- `GET /api/session/{session_id}/scores` - 점수 조회
-- `GET /api/session/{session_id}/history` - 대화 히스토리
-- `DELETE /api/session/{session_id}` - 세션 삭제
-
 ### API 문서
 서버 실행 후 자동 생성된 문서 확인:
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
+
+**상세 API 명세**: [API_Specification.md](./docs/API_Specification.md)
 
 ---
 
@@ -537,6 +546,12 @@ docker-compose down
 | `REDIS_PORT` | Redis 포트 | `6379` | ❌ |
 | `REDIS_PASSWORD` | Redis 비밀번호 | - | ❌ |
 | `GEMINI_API_KEY` | Gemini API 키 | - | ✅ |
+| `USE_VERTEX_AI` | Vertex AI 사용 여부 | `false` | ❌ |
+| `GOOGLE_PROJECT_ID` | GCP 프로젝트 ID | - | ⚠️ (Vertex AI 사용 시) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | 서비스 계정 JSON 문자열 | - | ⚠️ (Vertex AI 사용 시) |
+| `JUDGE0_API_URL` | Judge0 API URL | `http://localhost:2358` | ✅ |
+| `JUDGE0_API_KEY` | Judge0 API 키 (RapidAPI) | - | ⚠️ (RapidAPI 사용 시) |
+| `JUDGE0_USE_RAPIDAPI` | RapidAPI 사용 여부 | `false` | ❌ |
 | `SPRING_CALLBACK_URL` | Spring 콜백 URL | `http://localhost:8080/api/ai/callback` | ✅ |
 
 ---
@@ -548,8 +563,8 @@ docker-compose down
 | 항목 | 가중치 | 설명 | 평가 방법 |
 |------|--------|------|-----------|
 | **프롬프트 활용** | 25% | 턴별 프롬프트 품질 + Chaining 전략 | LLM 평가 |
-| **성능** | 25% | 시간/공간 복잡도 | Judge0 (예정) |
-| **정확성** | 50% | 테스트 케이스 통과율 | Judge0 (예정) |
+| **성능** | 25% | 실행 시간 및 메모리 사용량 | Judge0 |
+| **정확성** | 50% | 테스트 케이스 통과율 | Judge0 |
 
 ### 등급 기준
 - **A**: 90점 이상
@@ -641,6 +656,15 @@ uv run python test_scripts/test_gemini.py
 
 ### 테스트 가이드
 - **`test_scripts/README.md`**: 테스트 스크립트 상세 가이드
+- **`docs/Test_Execution_Guide.md`**: 테스트 실행 가이드
+
+### 주요 테스트 스크립트
+- `test_submit_tsp_full_flow.py`: 외판원 문제 전체 플로우 테스트
+- `test_fibonacci_full_flow.py`: 피보나치 문제 전체 플로우 테스트
+- `test_submit_only.py`: 코드 제출만 테스트
+- `test_judge0_with_db_problem.py`: Judge0 직접 테스트
+- `check_server.py`: 서버 상태 확인
+- `check_judge0_connection.py`: Judge0 연결 확인
 
 ---
 
@@ -657,13 +681,14 @@ uv run python test_scripts/test_gemini.py
 ### PostgreSQL 테이블
 
 핵심 테이블:
-- **`prompt_sessions`**: 프롬프트 세션 정보
+- **`prompt_sessions`**: 프롬프트 세션 정보 (세션 종료 처리 포함)
 - **`prompt_messages`**: 대화 메시지 기록
+- **`prompt_evaluations`**: 평가 결과 저장 (턴별 평가, Holistic 평가)
 - **`submissions`**: 코드 제출 정보
-- **`submission_runs`**: 실행 결과
-- **`scores`**: 평가 점수
+- **`submission_runs`**: Judge0 실행 결과
+- **`scores`**: 최종 평가 점수
 
-자세한 ERD는 프로젝트 문서를 참조하세요.
+**상세 가이드**: [Quick_DB_Guide.md](./docs/Quick_DB_Guide.md), [Database_Changes_Summary.md](./docs/Database_Changes_Summary.md)
 
 ---
 
@@ -688,6 +713,23 @@ docker-compose logs -f ai_worker
 
 ---
 
+## 📚 문서
+
+### 핵심 문서
+- [API 명세서](./docs/API_Specification.md) - REST API 상세 명세
+- [DB 가이드](./docs/Quick_DB_Guide.md) - 데이터베이스 사용 가이드
+- [테스트 가이드](./docs/Test_Execution_Guide.md) - 테스트 실행 방법
+- [Judge0 가이드](./docs/Judge0_Complete_Guide.md) - Judge0 설정 및 사용
+- [Vertex AI 가이드](./docs/Vertex_AI_Setup_Guide.md) - Vertex AI 설정
+
+### 추가 문서
+- [엔드포인트 변경 이력](./docs/Endpoint_Change_History.md)
+- [DB 변경사항](./docs/Database_Changes_Summary.md)
+- [LangGraph State 흐름](./docs/State_Flow_and_DB_Storage.md)
+- [Docker 설정](./docs/Docker_PostgreSQL_Setup_Guide.md)
+
+---
+
 ## 📚 기술 스택
 
 ### 백엔드
@@ -697,12 +739,18 @@ docker-compose logs -f ai_worker
 ### AI/LLM
 - **LangGraph** (0.6+): AI 워크플로우 오케스트레이션
 - **LangChain** (0.3+): LLM 통합 프레임워크
-- **Gemini API**: Google의 생성형 AI 모델
+- **Gemini API**: Google의 생성형 AI 모델 (Google AI Studio)
+- **Vertex AI**: GCP Vertex AI 지원 (ADC 인증)
+- **LLM Factory Pattern**: 중앙화된 LLM 관리
 
 ### 데이터베이스
 - **PostgreSQL** (14+): 영구 데이터 저장소 (Spring Boot와 공유)
 - **Redis** (7+): 세션 및 상태 관리
 - **SQLAlchemy** (2.0+): 비동기 ORM
+
+### 코드 실행 및 평가
+- **Judge0**: 코드 실행 및 테스트 케이스 평가 (RapidAPI 또는 로컬)
+- **Judge0 Worker**: 비동기 코드 실행 처리
 
 ### 유틸리티
 - **Pydantic** (2.0+): 데이터 검증
@@ -719,29 +767,35 @@ docker-compose logs -f ai_worker
 - [x] Redis 세션 상태 관리 (graph_state, turn_logs, turn_mapping)
 - [x] PostgreSQL 연동 (Spring Boot 공유 DB)
 - [x] Gemini LLM 통합 (Gemini 2.0 Flash)
+- [x] Vertex AI 지원 (GCP Vertex AI, ADC 인증)
+- [x] LLM Factory Pattern (중앙화된 LLM 관리)
+- [x] Judge0 연동 (코드 실행 및 테스트 케이스 평가)
+- [x] Judge0 Worker (비동기 코드 실행 처리)
 - [x] 가드레일 시스템 (직접 답 요청 차단, Jailbreak 방지)
 - [x] 실시간 프롬프트 평가 (Claude Prompt Engineering 기준)
 - [x] 제출 시 Eval Turn Guard (누락 턴 재평가 + 대기 메커니즘)
 - [x] Holistic Flow 평가 (Chaining 전략, 고급 프롬프트 기법)
-- [x] 최종 평가 시스템
-- [x] API 엔드포인트 (REST + WebSocket)
+- [x] 최종 평가 시스템 (프롬프트 25%, 성능 25%, 정확성 50%)
+- [x] RESTful API 엔드포인트 (`/api/session/start`, `/api/session/{id}/messages`, `/api/session/{id}/submit`)
 - [x] WebSocket 스트리밍 (LangGraph 기반 토큰 단위 스트리밍)
+- [x] 메시지 저장 (PostgreSQL `prompt_messages`)
+- [x] 평가 결과 저장 (PostgreSQL `prompt_evaluations`)
+- [x] 세션 종료 처리 (`prompt_sessions.ended_at`)
 - [x] Hybrid DDD 구조 마이그레이션
-- [x] Docker 지원
+- [x] Docker 지원 (PostgreSQL, Redis, Worker)
 - [x] 로깅 시스템
 
 ### 🔜 다음 단계 (우선순위 순)
 
 #### P1 (높음)
-- [ ] **Judge0 API 연동** - 코드 성능/정확성 평가를 LLM Mock에서 실제 실행 환경으로 전환
 - [ ] **Usage Callback 구현** - 토큰 사용량을 Spring Boot로 전송
-- [ ] **대화 저장 구현** - prompt_sessions/messages 저장 완성
 - [ ] **Rate Limiter 구현** - API 호출 제한 관리
+- [ ] **인증 시스템** - Authorization 토큰 기반 인증
 
 #### P2 (중간)
 - [ ] **Langsmith 추적 활성화** - LLM 호출 추적 및 디버깅
-- [ ] **Redis 키 구조 표준화** - 일관된 TTL 정책 수립
 - [ ] **성능 최적화** - LLM 호출 최소화, 캐싱 전략
+- [ ] **테스트 케이스 확장** - 다중 테스트 케이스 지원
 
 #### P3 (낮음)
 - [ ] **보안 강화** - API 키 관리, 입력 검증
@@ -751,6 +805,23 @@ docker-compose logs -f ai_worker
 ---
 
 ## 📝 변경 이력
+
+### v0.6.0 (2025-12-06)
+- **RESTful API 리팩토링**: 
+  * `/api/session/start` - 세션 시작
+  * `/api/session/{sessionId}/messages` - 메시지 전송
+  * `/api/session/{sessionId}/submit` - 코드 제출
+- **Judge0 연동 완료**: 코드 실행 및 테스트 케이스 평가
+- **Judge0 Worker 구현**: 비동기 코드 실행 처리
+- **Vertex AI 지원**: GCP Vertex AI 통합 (ADC 인증)
+- **LLM Factory Pattern**: 중앙화된 LLM 관리
+- **평가 결과 저장**: `prompt_evaluations` 테이블 추가
+- **세션 종료 처리**: `prompt_sessions.ended_at` 설정
+- **문서 통합**: API, DB, Test, Graph, Docker 가이드 통합
+
+### v0.5.0 (2025-12-XX)
+- **메시지 저장 구현**: PostgreSQL `prompt_messages` 저장
+- **세션 관리 개선**: 세션 생성 및 관리 로직 개선
 
 ### v0.4.0 (2025-12-XX)
 - **WebSocket 스트리밍 구현**: LangGraph 기반 실시간 토큰 스트리밍

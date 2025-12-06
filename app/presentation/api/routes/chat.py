@@ -7,11 +7,11 @@
 - WebSocket 스트리밍 지원
 
 [주요 엔드포인트]
-1. POST /api/chat/message
+1. POST/api/chat/message
    - 일반 채팅 메시지 전송
    - AI 응답 생성 및 턴별 평가 (백그라운드)
    
-2. POST /api/chat/submit
+2. POST/api/chat/submit
    - 최종 코드 제출
    - 전체 평가 실행 (Holistic Flow, 성능, 정확성)
    - 최종 점수 산출
@@ -33,12 +33,19 @@ import logging
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Query
 
-from app.presentation.schemas.chat import ChatRequest, ChatResponse, SubmitRequest, SubmitResponse
+from app.presentation.schemas.chat import (
+    ChatRequest, ChatResponse, SubmitRequest, SubmitResponse,
+    SaveChatMessageRequest, SaveChatMessageResponse
+)
 from app.presentation.schemas.common import ErrorResponse
 from app.application.services.eval_service import EvalService
 from app.infrastructure.cache.redis_client import redis_client, get_redis
 from app.core.config import settings
 from app.domain.langgraph.utils.problem_info import get_problem_info_sync
+from app.application.services.message_storage_service import MessageStorageService
+from app.infrastructure.persistence.session import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+import json
 
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -65,8 +72,12 @@ async def get_eval_service() -> EvalService:
     responses={
         500: {"model": ErrorResponse, "description": "서버 에러"}
     },
-    summary="메시지 전송",
+    summary="[DEPRECATED] 메시지 전송",
     description="""
+    ⚠️ **이 API는 더 이상 사용되지 않습니다.**
+    
+    **대신 사용하세요:** `POST /api/session/{sessionId}/messages`
+    
     AI 어시스턴트에게 메시지를 전송하고 응답을 받습니다.
     
     **처리 과정:**
@@ -80,21 +91,25 @@ async def get_eval_service() -> EvalService:
     - 가드레일 위반 시: 교육적 피드백 반환
     """
 )
-async def send_message(
+async def send_message_deprecated(
     request: ChatRequest,
-    eval_service: EvalService = Depends(get_eval_service)
+    eval_service: EvalService = Depends(get_eval_service),
+    db: AsyncSession = Depends(get_db)
 ) -> ChatResponse:
     """
     메시지 전송 및 AI 응답 받기
     
     [처리 흐름]
-    1. 요청 검증 (session_id, exam_id, etc.)
-    2. EvalService.process_message() 호출
+    1. 세션 생성/조회 (get_or_create_session)
+    2. 다음 턴 번호 계산 (get_next_turn_number)
+    3. 사용자 메시지 저장 (PostgreSQL)
+    4. EvalService.process_message() 호출
        - LangGraph 메인 플로우 실행
        - Redis에서 기존 상태 로드
        - Intent Analyzer → Writer LLM → 응답 반환
        - Eval Turn SubGraph는 백그라운드로 비동기 실행
-    3. 결과를 ChatResponse로 변환
+    5. AI 응답 저장 (PostgreSQL)
+    6. 결과를 ChatResponse로 변환
     
     [에러 처리]
     - Timeout (60초): 타임아웃 응답 반환
@@ -107,13 +122,68 @@ async def send_message(
     import logging
     logger = logging.getLogger(__name__)
     
+    # 변수 초기화 (에러 처리에서 사용)
+    session = None
+    session_id_int = None  # 에러 처리에서 사용할 session.id (int)
+    next_turn = 0
+    redis_session_id = request.session_id
+    
     try:
         logger.info(f"메시지 수신 - session_id: {request.session_id}, message: {request.message[:50]}...")
         
+        # [1] 세션 생성/조회 및 다음 턴 번호 계산
+        from app.infrastructure.repositories.session_repository import SessionRepository
+        session_repo = SessionRepository(db)
+        
+        # 세션 조회 또는 생성
+        session = await session_repo.get_or_create_session(
+            exam_id=request.exam_id,
+            participant_id=request.participant_id
+        )
+        
+        # 에러 처리에서 사용할 session.id를 미리 저장 (MissingGreenlet 방지)
+        session_id_int = session.id
+        
+        logger.info(
+            f"[SendMessage] 세션 확인 완료 - "
+            f"session_id: {session_id_int}, "
+            f"exam_id: {request.exam_id}, participant_id: {request.participant_id}"
+        )
+        
+        # [Step 1] 사용자 메시지 선저장 (Save First)
+        # turn=None을 넘겨서 DB가 자동으로 순차 번호를 할당하도록 함
+        from app.application.services.message_storage_service import MessageStorageService
+        from app.infrastructure.persistence.models.enums import PromptRoleEnum
+        
+        storage_service = MessageStorageService(db, redis_client)
+        
+        user_msg_result = await storage_service.save_message(
+            exam_id=request.exam_id,
+            participant_id=request.participant_id,
+            turn=None,  # DB에서 자동으로 MAX(turn) + 1 계산
+            role="user",
+            content=request.message
+        )
+        
+        await db.commit()  # 사용자 메시지 즉시 커밋
+        
+        # DB에서 할당된 실제 turn 번호 확인
+        user_turn = user_msg_result.get('turn')
+        
+        logger.info(
+            f"[SendMessage] 사용자 메시지 저장 완료 - "
+            f"session_id: {session_id_int}, message_id: {user_msg_result['message_id']}, turn: {user_turn}"
+        )
+        
+        # [Step 2] PostgreSQL session_id를 Redis session_id로 변환
+        # PostgreSQL: session.id (int) → Redis: "session_{id}" (str)
+        redis_session_id = f"session_{session_id_int}"
+        
+        # [Step 3] AI 응답 생성 (Generate)
         # 1분 타임아웃 설정 (LLM 응답 시간 고려)
         result = await asyncio.wait_for(
             eval_service.process_message(
-                session_id=request.session_id,
+                session_id=redis_session_id,  # PostgreSQL ID 기반 Redis session_id
                 exam_id=request.exam_id,
                 participant_id=request.participant_id,
                 spec_id=request.spec_id,
@@ -122,13 +192,57 @@ async def send_message(
             timeout=60.0  # 1분
         )
         
-        logger.info(f"처리 완료 - session_id: {request.session_id}, has_ai_message: {bool(result.get('ai_message'))}, error: {result.get('error')}")
+        logger.info(
+            f"[SendMessage] AI 응답 생성 완료 - session_id: {redis_session_id}, "
+            f"has_ai_message: {bool(result.get('ai_message'))}, "
+            f"error: {result.get('error')}"
+        )
+        
+        # [Step 4] AI 메시지 저장 (Save Second)
+        # turn=None을 넘겨서 DB가 자동으로 다음 순차 번호를 할당하도록 함
+        ai_turn = None
+        if result.get("ai_message") and not result.get("error"):
+            try:
+                # 토큰 사용량 추출
+                chat_tokens = result.get("chat_tokens", {})
+                total_tokens = chat_tokens.get("total_tokens", 0) if isinstance(chat_tokens, dict) else 0
+                
+                # turn=None을 넘겨서 DB에서 자동으로 MAX(turn) + 1 계산
+                ai_msg_result = await storage_service.save_message(
+                    exam_id=request.exam_id,
+                    participant_id=request.participant_id,
+                    turn=None,  # DB에서 자동으로 다음 turn 번호 계산
+                    role="assistant",
+                    content=result.get("ai_message"),
+                    token_count=total_tokens
+                )
+                await db.commit()
+                
+                # DB에서 할당된 실제 turn 번호 확인
+                ai_turn = ai_msg_result.get('turn')
+                
+                logger.info(
+                    f"[SendMessage] AI 응답 저장 완료 - "
+                    f"session_id: {session_id_int}, message_id: {ai_msg_result['message_id']}, turn: {ai_turn}"
+                )
+            except Exception as save_error:
+                # AI 응답 저장 실패해도 사용자 메시지는 이미 저장되어 있음
+                logger.error(
+                    f"[SendMessage] AI 응답 저장 실패 (사용자 메시지는 저장됨) - "
+                    f"session_id: {session_id_int}, error: {str(save_error)}",
+                    exc_info=True
+                )
+        
+        # [Step 5] 응답 반환 (Return Last)
+        # 저장이 완료된 후 확정된 정보를 반환
+        # AI 메시지가 저장된 경우 ai_turn 사용, 아니면 user_turn 사용
+        final_turn = ai_turn if ai_turn is not None else user_turn
         
         # 에러 발생 시
         if result.get("error"):
             return ChatResponse(
-                session_id=request.session_id,
-                turn=result.get("turn", 0),
+                session_id=redis_session_id,
+                turn=user_turn,  # 사용자 메시지의 turn 사용
                 ai_message=None,
                 is_submitted=False,
                 error=True,
@@ -142,10 +256,10 @@ async def send_message(
             eval_tokens=result.get("eval_tokens")
         )
         
-        # 정상 응답
+        # 정상 응답 (저장이 완료된 후 반환)
         return ChatResponse(
-            session_id=result.get("session_id", request.session_id),
-            turn=result.get("turn", 0),
+            session_id=redis_session_id,
+            turn=final_turn,  # AI 메시지가 저장된 경우 ai_turn, 아니면 user_turn
             ai_message=result.get("ai_message"),
             is_submitted=result.get("is_submitted", False),
             error=False,
@@ -157,10 +271,30 @@ async def send_message(
     except asyncio.TimeoutError:
         # LLM 응답이 60초 이내에 완료되지 않은 경우
         # 원인: LLM API 지연, 네트워크 문제, Rate Limit 초과 등
-        logger.error(f"메시지 처리 타임아웃 - session_id: {request.session_id}")
+        # 사용자 메시지는 이미 저장되어 있음
+        if session_id_int:
+            redis_session_id = f"session_{session_id_int}"
+        logger.error(f"메시지 처리 타임아웃 - session_id: {redis_session_id}")
+        
+        # 사용자 메시지의 turn 번호 조회 (저장된 경우)
+        user_turn_for_error = 0
+        try:
+            if session_id_int:
+                from sqlalchemy import select, func
+                from app.infrastructure.persistence.models.sessions import PromptMessage
+                from app.infrastructure.persistence.models.enums import PromptRoleEnum
+                max_turn_query = select(func.max(PromptMessage.turn)).where(
+                    PromptMessage.session_id == session_id_int,
+                    PromptMessage.role == PromptRoleEnum.USER
+                )
+                max_result = await db.execute(max_turn_query)
+                user_turn_for_error = max_result.scalar_one_or_none() or 0
+        except:
+            pass
+        
         return ChatResponse(
-            session_id=request.session_id,
-            turn=0,
+            session_id=redis_session_id,
+            turn=user_turn_for_error,
             ai_message=None,
             is_submitted=False,
             error=True,
@@ -169,10 +303,30 @@ async def send_message(
     except Exception as e:
         # 예상치 못한 모든 예외 처리
         # 예: Redis 연결 실패, LLM API 에러, 상태 직렬화 오류 등
+        # 사용자 메시지는 이미 저장되어 있음 (세션 생성 성공 시)
+        if session_id_int:
+            redis_session_id = f"session_{session_id_int}"
         logger.error(f"메시지 처리 중 예외 발생: {str(e)}", exc_info=True)
+        
+        # 사용자 메시지의 turn 번호 조회 (저장된 경우)
+        user_turn_for_error = 0
+        try:
+            if session_id_int:
+                from sqlalchemy import select, func
+                from app.infrastructure.persistence.models.sessions import PromptMessage
+                from app.infrastructure.persistence.models.enums import PromptRoleEnum
+                max_turn_query = select(func.max(PromptMessage.turn)).where(
+                    PromptMessage.session_id == session_id_int,
+                    PromptMessage.role == PromptRoleEnum.USER
+                )
+                max_result = await db.execute(max_turn_query)
+                user_turn_for_error = max_result.scalar_one_or_none() or 0
+        except:
+            pass
+        
         return ChatResponse(
-            session_id=request.session_id,
-            turn=0,
+            session_id=redis_session_id,
+            turn=user_turn_for_error,
             ai_message=None,
             is_submitted=False,
             error=True,
@@ -186,8 +340,12 @@ async def send_message(
     responses={
         500: {"model": ErrorResponse, "description": "서버 에러"}
     },
-    summary="코드 제출",
+    summary="[DEPRECATED] 코드 제출",
     description="""
+    ⚠️ **이 API는 더 이상 사용되지 않습니다.**
+    
+    **대신 사용하세요:** `POST /api/session/{sessionId}/submit`
+    
     최종 코드를 제출하고 평가 결과를 받습니다.
     
     **처리 과정:**
@@ -202,7 +360,7 @@ async def send_message(
     5. Final Score Aggregation (최종 점수 산출)
     
     **제한사항:**
-    - Timeout: 120초 (평가 시간 고려)
+    - Timeout: 300초 (5분, 평가 시간 고려)
     - 제출은 세션당 1회만 가능
     """
 )
@@ -242,8 +400,11 @@ async def submit_code(
     try:
         logger.info(f"코드 제출 수신 - session_id: {request.session_id}")
         
-        # 2분 타임아웃 설정 (평가 시간 고려)
+        # 5분 타임아웃 설정 (평가 시간 고려)
         # 평가 노드들이 순차적으로 실행되므로 충분한 시간 필요
+        # - Eval Turn Guard: 모든 턴 평가 (30-60초)
+        # - Holistic Flow: Chaining 평가 (10-20초)
+        # - Code Execution: Judge0 Worker 대기 (30-60초)
         result = await asyncio.wait_for(
             eval_service.submit_code(
                 session_id=request.session_id,
@@ -253,7 +414,7 @@ async def submit_code(
                 code_content=request.code,
                 lang=request.lang,
             ),
-            timeout=120.0  # 2분
+            timeout=300.0  # 5분
         )
         
         # 에러 발생 시
@@ -313,7 +474,7 @@ async def submit_code(
             final_scores=None,
             turn_scores=None,
             error=True,
-            error_message="요청 처리 시간이 초과되었습니다. (2분 타임아웃)",
+            error_message="요청 처리 시간이 초과되었습니다. (5분 타임아웃)",
         )
     except Exception as e:
         # 예상치 못한 모든 예외 처리
@@ -500,17 +661,19 @@ async def websocket_chat(websocket: WebSocket):
 @router.get(
     "/problem-info",
     summary="문제 정보 조회",
-    description="spec_id로 문제 정보를 조회합니다."
+    description="spec_id로 문제 정보를 DB에서 조회합니다."
 )
 async def get_problem_info(
-    spec_id: int = Query(..., description="문제 스펙 ID")
+    spec_id: int = Query(..., description="문제 스펙 ID"),
+    db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
-    """문제 정보 조회"""
+    """문제 정보 조회 (DB에서)"""
     import logging
     logger = logging.getLogger(__name__)
     
     try:
-        problem_info = get_problem_info_sync(spec_id)
+        from app.domain.langgraph.utils.problem_info import get_problem_info as get_problem_info_async
+        problem_info = await get_problem_info_async(spec_id, db)
         return {
             "spec_id": spec_id,
             "problem_info": problem_info,
@@ -518,12 +681,22 @@ async def get_problem_info(
         }
     except Exception as e:
         logger.error(f"문제 정보 조회 오류: {str(e)}", exc_info=True)
-        return {
-            "spec_id": spec_id,
-            "problem_info": None,
-            "error": True,
-            "error_message": str(e),
-        }
+        # Fallback: 동기 버전 사용
+        try:
+            problem_info = get_problem_info_sync(spec_id)
+            return {
+                "spec_id": spec_id,
+                "problem_info": problem_info,
+                "error": False,
+            }
+        except Exception as e2:
+            logger.error(f"Fallback 문제 정보 조회도 실패: {str(e2)}", exc_info=True)
+            return {
+                "spec_id": spec_id,
+                "problem_info": None,
+                "error": True,
+                "error_message": str(e),
+            }
 
 
 @router.get(
@@ -675,5 +848,104 @@ async def get_token_usage(
             "error": True,
             "error_message": str(e),
         }
+
+
+logger = logging.getLogger(__name__)
+
+
+@router.post(
+    "/save-message",
+    response_model=SaveChatMessageResponse,
+    summary="메시지 저장 (Spring Boot용)",
+    description="""
+    Spring Boot에서 메시지를 받아서 PostgreSQL과 Redis에 저장합니다.
+    
+    **저장 순서:**
+    1. PostgreSQL에 먼저 저장 (데이터 무결성)
+    2. Redis 체크포인트 업데이트
+    
+    **호출 시점:**
+    - Spring Boot에서 SaveChatMessageRequest 받을 때
+    - 매 메시지마다 호출 (USER, ASSISTANT 모두)
+    """
+)
+async def save_chat_message(
+    request: SaveChatMessageRequest,
+    db: AsyncSession = Depends(get_db)
+) -> SaveChatMessageResponse:
+    """
+    메시지 저장 (Spring Boot용)
+    
+    [처리 흐름]
+    1. exam_id, participant_id로 세션 조회/생성
+    2. PostgreSQL에 메시지 저장
+    3. Redis 체크포인트 업데이트
+    
+    [저장 순서]
+    - PostgreSQL 먼저 저장 (데이터 무결성)
+    - 성공하면 Redis 업데이트
+    
+    Args:
+        request: SaveChatMessageRequest (examId, participantId, turn, role, content, ...)
+        db: PostgreSQL 세션
+    
+    Returns:
+        SaveChatMessageResponse (session_id, message_id, success)
+    """
+    try:
+        # meta 파싱 (JSON 문자열 → dict)
+        meta_dict = None
+        if request.meta:
+            try:
+                meta_dict = json.loads(request.meta)
+            except json.JSONDecodeError:
+                logger.warning(f"[SaveMessage] meta JSON 파싱 실패: {request.meta}")
+                meta_dict = {"raw": request.meta}
+        
+        # MessageStorageService 생성
+        storage_service = MessageStorageService(db, redis_client)
+        
+        # 메시지 저장 (PostgreSQL 먼저 → Redis 업데이트)
+        result = await storage_service.save_message(
+            exam_id=request.examId,
+            participant_id=request.participantId,
+            turn=request.turn,
+            role=request.role,
+            content=request.content,
+            token_count=request.tokenCount,
+            meta=meta_dict
+        )
+        
+        logger.info(
+            f"[SaveMessage] 저장 완료 - "
+            f"session_id: {result['session_id']}, message_id: {result['message_id']}, "
+            f"turn: {request.turn}, role: {request.role}"
+        )
+        
+        return SaveChatMessageResponse(
+            session_id=result["session_id"],
+            message_id=result["message_id"],
+            success=True,
+            error_message=None
+        )
+        
+    except ValueError as e:
+        # exam_participants 없음 등 비즈니스 로직 오류
+        logger.error(f"[SaveMessage] 저장 실패: {str(e)}")
+        return SaveChatMessageResponse(
+            session_id=0,
+            message_id=0,
+            success=False,
+            error_message=str(e)
+        )
+    except Exception as e:
+        # 기타 오류
+        logger.error(f"[SaveMessage] 저장 오류: {str(e)}", exc_info=True)
+        return SaveChatMessageResponse(
+            session_id=0,
+            message_id=0,
+            success=False,
+            error_message=f"메시지 저장 실패: {str(e)}"
+        )
 
 

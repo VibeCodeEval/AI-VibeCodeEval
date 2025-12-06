@@ -85,7 +85,7 @@ class SubmissionRepository:
             participant_id=participant_id,
             spec_id=spec_id,
             lang=lang,
-            status=SubmissionStatusEnum.PENDING,
+            status=SubmissionStatusEnum.QUEUED,
             code_inline=code_inline,
             code_sha256=code_sha256,
             code_bytes=code_bytes or len(code_inline.encode('utf-8')),

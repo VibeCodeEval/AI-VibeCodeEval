@@ -53,17 +53,28 @@ class Settings(BaseSettings):
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     # LLM API 설정
-    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None  # Gemini API (구 방식, 하위 호환성)
     OPENAI_API_KEY: Optional[str] = None
     
+    # GCP Vertex AI 설정 (ADC 인증)
+    GOOGLE_PROJECT_ID: Optional[str] = None  # GCP 프로젝트 ID
+    GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None  # 서비스 계정 JSON 문자열 (한 줄) 또는 JSON 파일 경로
+    GOOGLE_SERVICE_ACCOUNT_PATH: Optional[str] = None  # 서비스 계정 JSON 파일 경로 (선택사항, 파일 경로 사용 시)
+    GOOGLE_LOCATION: str = "us-central1"  # Vertex AI 리전
+    
+    # LLM 사용 방식 선택
+    USE_VERTEX_AI: bool = False  # True: Vertex AI 사용, False: Gemini API 사용
+    
     # 기본 LLM 설정
-    DEFAULT_LLM_MODEL: str = "gemini-2.5-flash"  # .env에서 오버라이드 가능 (기본값)
+    DEFAULT_LLM_MODEL: str = "gemini-1.5-pro"  # Vertex AI 모델명 (gemini-1.5-pro, gemini-1.5-flash 등)
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 4096
     
     # Judge0 설정 (코드 실행 평가)
-    JUDGE0_API_URL: str = "http://localhost:2358"
+    JUDGE0_API_URL: str = "http://localhost:2358"  # 또는 "https://judge0-ce.p.rapidapi.com" (RapidAPI 사용 시)
     JUDGE0_API_KEY: Optional[str] = None
+    JUDGE0_USE_RAPIDAPI: bool = False  # RapidAPI 사용 여부
+    JUDGE0_RAPIDAPI_HOST: str = "judge0-ce.p.rapidapi.com"  # RapidAPI Host
     
     # 큐 시스템 설정
     USE_REDIS_QUEUE: bool = True  # True: Redis 큐, False: 메모리 큐
@@ -79,7 +90,7 @@ class Settings(BaseSettings):
     SQS_QUEUE_URL: Optional[str] = None
     
     # LangGraph 체크포인트 설정
-    CHECKPOINT_TTL_SECONDS: int = 3600  # 1시간
+    CHECKPOINT_TTL_SECONDS: int = 86400  # 24시간 (제출 완료 후 Redis 세션 자동 삭제)
     
     # LangSmith 설정 (개발 환경에서 사용)
     # 공식 문서: https://docs.langchain.com/langsmith/create-account-api-key

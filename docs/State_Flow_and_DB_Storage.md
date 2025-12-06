@@ -641,6 +641,187 @@ def convert_redis_to_postgres(redis_msg: dict, session_id: int) -> PromptMessage
 
 ---
 
+---
+
+## Node 6 플로우 상세 설명
+
+### 실행 순서
+
+```
+제출 플로우:
+4. Eval Turn Guard (모든 턴 평가 완료 대기)
+   ↓
+5. Main Router (제출 확인)
+   ↓
+6a. Holistic Flow 평가
+   ↓
+6b. Aggregate Turn Scores (턴별 점수 집계)
+   ↓
+6c. Code Performance 평가 (Judge0 연동) ⚡
+   ↓
+6d. Code Correctness 평가 (Judge0 연동) ⚡
+   ↓
+7. Final Score Aggregation (최종 점수 산출)
+   ↓
+END
+```
+
+**중요**: 6번 노드들은 **순차 실행**됩니다 (병렬 아님)
+
+### 6a. Holistic Flow 평가
+
+**파일**: `app/domain/langgraph/nodes/holistic_evaluator/flow.py`
+
+**역할**: 전체 대화 플로우의 Chaining 전략 평가
+
+**평가 항목**:
+1. 문제 분해 (Problem Decomposition)
+2. 피드백 수용성 (Feedback Integration)
+3. 주도성 및 오류 수정 (Proactiveness)
+4. 전략적 탐색 (Strategic Exploration)
+
+**입력**:
+- Redis에서 모든 `turn_logs` 조회
+- 문제 정보 (`problem_context`)
+
+**출력**:
+- `holistic_flow_score`: 0-100점
+- `holistic_flow_analysis`: 상세 분석 텍스트
+
+### 6b. Aggregate Turn Scores
+
+**파일**: `app/domain/langgraph/nodes/holistic_evaluator/turn_scores.py`
+
+**역할**: 모든 턴의 점수를 집계하여 평균 계산
+
+**입력**:
+- Redis에서 모든 `turn_scores` 조회
+
+**출력**:
+- `turn_scores`: `{"turn_1": {"turn_score": 85.0}, ...}`
+- `avg_turn_score`: 평균 턴 점수
+
+### 6c. Code Performance 평가
+
+**파일**: `app/domain/langgraph/nodes/holistic_evaluator/execution.py`
+
+**역할**: 코드 실행 성능 평가 (실행 시간, 메모리 사용량)
+
+**Judge0 연동**:
+1. 코드를 Judge0에 제출
+2. Judge0 Worker가 실행
+3. 결과를 Redis에서 대기
+4. 시간/메모리 제약 확인
+
+**출력**:
+- `performance_score`: 0-100점 (제약 만족 시 100점, 아니면 0점)
+- `execution_time`: 실행 시간 (초)
+- `memory_used`: 메모리 사용량 (MB)
+
+### 6d. Code Correctness 평가
+
+**파일**: `app/domain/langgraph/nodes/holistic_evaluator/correctness.py`
+
+**역할**: 코드 정확성 평가 (테스트 케이스 통과율)
+
+**Judge0 연동**:
+1. 각 테스트 케이스에 대해 코드 실행
+2. Judge0 Worker가 실행
+3. 결과를 Redis에서 대기
+4. 통과율 계산
+
+**출력**:
+- `correctness_score`: 0-100점 (통과율 기반)
+- `test_cases_passed`: 통과한 테스트 케이스 수
+- `test_cases_total`: 전체 테스트 케이스 수
+
+---
+
+## Redis Checkpoint와 Session 관리
+
+### Redis Checkpoint란?
+
+**Redis Checkpoint**는 **LangGraph 실행 중의 상태를 Redis에 저장한 것**입니다.
+
+### 저장되는 데이터
+
+#### 1. LangGraph State (그래프 상태)
+```
+키: langgraph:state:{session_id}
+값: MainGraphState (JSON)
+TTL: 24시간 (86400초)
+```
+
+**내용:**
+```json
+{
+  "session_id": "session_123",
+  "messages": [
+    {"role": "user", "content": "안녕하세요", "turn": 1},
+    {"role": "assistant", "content": "안녕하세요!", "turn": 1}
+  ],
+  "turn": 1,
+  "intent_type": "HINT_OR_QUERY",
+  "chat_tokens": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+  "eval_tokens": {"prompt_tokens": 200, "completion_tokens": 100, "total_tokens": 300},
+  "_meta": {
+    "updated_at": "2025-01-15T10:30:00Z",
+    "session_id": "session_123"
+  }
+}
+```
+
+#### 2. Checkpoint (체크포인트)
+```
+키: langgraph:checkpoint:{session_id}:{checkpoint_id}
+값: 체크포인트 데이터 (JSON)
+TTL: 24시간
+```
+
+#### 3. 턴별 평가 로그
+```
+키: turn_logs:{session_id}:{turn}
+값: 턴 평가 로그 (JSON)
+TTL: 24시간
+```
+
+#### 4. 턴-메시지 매핑
+```
+키: turn_mapping:{session_id}
+값: {"1": {"start_msg_idx": 0, "end_msg_idx": 1}, ...}
+TTL: 24시간
+```
+
+### PostgreSQL vs Redis 저장 분리
+
+| 항목 | Redis | PostgreSQL |
+|------|-------|------------|
+| **LangGraph State** | ✅ 저장 | ❌ 저장 안 함 |
+| **턴 평가 로그** | ✅ 임시 저장 | ✅ 영구 저장 (prompt_evaluations) |
+| **대화 메시지** | ✅ 임시 (State 내) | ✅ 영구 저장 |
+| **제출 코드** | ❌ 저장 안 함 | ✅ 영구 저장 |
+| **점수** | ✅ 임시 (State 내) | ✅ 영구 저장 |
+
+### 무결성 체크 방법
+
+#### Redis TTL 확인
+```bash
+# Redis TTL 확인
+docker exec -i ai_vibe_redis_dev redis-cli TTL "langgraph:state:session_123"
+```
+
+#### PostgreSQL 데이터 확인
+```sql
+-- 세션 확인
+SELECT * FROM ai_vibe_coding_test.prompt_sessions WHERE id = 123;
+
+-- 메시지 확인
+SELECT * FROM ai_vibe_coding_test.prompt_messages WHERE session_id = 123;
+
+-- 평가 결과 확인
+SELECT * FROM ai_vibe_coding_test.prompt_evaluations WHERE session_id = 123;
+```
+
 **작성일**: 2024-01-01  
 **버전**: 1.0
 

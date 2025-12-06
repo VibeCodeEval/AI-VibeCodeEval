@@ -24,6 +24,12 @@ engine = create_async_engine(
     pool_pre_ping=True,
 )
 
+# 세션마다 search_path 설정 함수
+async def _set_search_path(session: AsyncSession):
+    """세션마다 search_path 설정 (ai_vibe_coding_test 스키마만 사용)"""
+    from sqlalchemy import text
+    await session.execute(text("SET search_path TO ai_vibe_coding_test"))
+
 # 세션 팩토리
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
@@ -43,6 +49,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI 의존성 주입용 DB 세션 제공"""
     async with AsyncSessionLocal() as session:
         try:
+            # search_path 설정
+            await _set_search_path(session)
             yield session
         finally:
             await session.close()
@@ -53,6 +61,8 @@ async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
     """서비스에서 사용할 DB 컨텍스트 매니저"""
     async with AsyncSessionLocal() as session:
         try:
+            # search_path 설정
+            await _set_search_path(session)
             yield session
             await session.commit()
         except Exception:
@@ -69,6 +79,8 @@ async def init_db():
         # Spring Boot가 테이블을 관리하므로 여기서는 테이블 생성하지 않음
         # 연결 테스트만 수행
         await conn.execute(text("SELECT 1"))
+        # search_path 설정 (ai_vibe_coding_test 스키마만 사용)
+        await conn.execute(text("SET search_path TO ai_vibe_coding_test"))
 
 
 async def close_db():

@@ -31,14 +31,24 @@ class Judge0Client:
         "rust": 73,
     }
     
-    def __init__(self, api_url: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(
+        self, 
+        api_url: Optional[str] = None, 
+        api_key: Optional[str] = None,
+        use_rapidapi: Optional[bool] = None,
+        rapidapi_host: Optional[str] = None
+    ):
         """
         Args:
             api_url: Judge0 API URL (기본값: settings.JUDGE0_API_URL)
             api_key: Judge0 API Key (기본값: settings.JUDGE0_API_KEY)
+            use_rapidapi: RapidAPI 사용 여부 (기본값: settings.JUDGE0_USE_RAPIDAPI)
+            rapidapi_host: RapidAPI Host (기본값: settings.JUDGE0_RAPIDAPI_HOST)
         """
         self.api_url = (api_url or settings.JUDGE0_API_URL).rstrip('/')
         self.api_key = api_key or settings.JUDGE0_API_KEY
+        self.use_rapidapi = use_rapidapi if use_rapidapi is not None else settings.JUDGE0_USE_RAPIDAPI
+        self.rapidapi_host = rapidapi_host or settings.JUDGE0_RAPIDAPI_HOST
         self.client = httpx.AsyncClient(timeout=30.0)
     
     def _get_language_id(self, language: str) -> int:
@@ -58,8 +68,17 @@ class Judge0Client:
         headers = {
             "Content-Type": "application/json",
         }
-        if self.api_key:
-            headers["X-Auth-Token"] = self.api_key
+        
+        if self.use_rapidapi:
+            # RapidAPI 형식
+            if self.api_key:
+                headers["x-rapidapi-key"] = self.api_key
+            headers["x-rapidapi-host"] = self.rapidapi_host
+        else:
+            # 일반 Judge0 형식
+            if self.api_key:
+                headers["X-Auth-Token"] = self.api_key
+        
         return headers
     
     async def submit_code(
@@ -326,4 +345,5 @@ class Judge0Client:
     async def close(self):
         """클라이언트 종료"""
         await self.client.aclose()
+
 

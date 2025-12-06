@@ -1,0 +1,109 @@
+# AI Vibe Coding Test - 프로덕션 배포용
+# 배포 환경의 PostgreSQL 사용
+# 사용법: docker-compose -f docker-compose.prod.yml up -d
+
+version: '3.8'
+
+services:
+  # PostgreSQL 데이터베이스 (배포 환경에서는 외부 DB 사용)
+  # 이 서비스는 주석 처리하거나 제거 (외부 DB 사용 시)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: ai_vibe_postgres
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #     POSTGRES_DB: ai_vibe_coding_test
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - ai_vibe_network
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: ai_vibe_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai_vibe_network
+
+  # AI Worker (FastAPI + LangGraph)
+  # 배포 환경의 PostgreSQL에 연결
+  ai_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_vibe_worker
+    environment:
+      - DEBUG=false
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      # 배포 환경 PostgreSQL 설정 (환경 변수 또는 .env.prod에서 설정)
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SPRING_CALLBACK_URL=${SPRING_CALLBACK_URL}
+      - JUDGE0_API_URL=${JUDGE0_API_URL}
+      - JUDGE0_API_KEY=${JUDGE0_API_KEY}
+      - JUDGE0_USE_RAPIDAPI=${JUDGE0_USE_RAPIDAPI:-false}
+      - JUDGE0_RAPIDAPI_HOST=${JUDGE0_RAPIDAPI_HOST}
+      - USE_REDIS_QUEUE=${USE_REDIS_QUEUE:-true}
+    ports:
+      - "8001:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - ai_vibe_network
+    restart: unless-stopped
+
+  # Judge0 Worker (코드 실행 Worker)
+  judge_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_vibe_judge_worker
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JUDGE0_API_URL=${JUDGE0_API_URL}
+      - JUDGE0_API_KEY=${JUDGE0_API_KEY}
+      - JUDGE0_USE_RAPIDAPI=${JUDGE0_USE_RAPIDAPI:-false}
+      - JUDGE0_RAPIDAPI_HOST=${JUDGE0_RAPIDAPI_HOST}
+      - USE_REDIS_QUEUE=${USE_REDIS_QUEUE:-true}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - ai_vibe_network
+    restart: unless-stopped
+    command: python -m app.application.workers.judge_worker
+
+volumes:
+  redis_data:
+
+networks:
+  ai_vibe_network:
+    driver: bridge
+
+

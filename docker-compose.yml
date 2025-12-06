@@ -59,6 +59,11 @@ services:
       - REDIS_PORT=6379
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - SPRING_CALLBACK_URL=http://spring_boot:8080/api/ai/callback
+      - JUDGE0_API_URL=${JUDGE0_API_URL}
+      - JUDGE0_API_KEY=${JUDGE0_API_KEY}
+      - JUDGE0_USE_RAPIDAPI=${JUDGE0_USE_RAPIDAPI:-false}
+      - JUDGE0_RAPIDAPI_HOST=${JUDGE0_RAPIDAPI_HOST}
+      - USE_REDIS_QUEUE=${USE_REDIS_QUEUE:-true}
     ports:
       - "8001:8000"
     depends_on:
@@ -69,6 +74,28 @@ services:
     networks:
       - ai_vibe_network
     restart: unless-stopped
+
+  # Judge0 Worker (코드 실행 Worker)
+  judge_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_vibe_judge_worker
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JUDGE0_API_URL=${JUDGE0_API_URL}
+      - JUDGE0_API_KEY=${JUDGE0_API_KEY}
+      - JUDGE0_USE_RAPIDAPI=${JUDGE0_USE_RAPIDAPI:-false}
+      - JUDGE0_RAPIDAPI_HOST=${JUDGE0_RAPIDAPI_HOST}
+      - USE_REDIS_QUEUE=${USE_REDIS_QUEUE:-true}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - ai_vibe_network
+    restart: unless-stopped
+    command: python -m app.application.workers.judge_worker
 
   # Spring Boot Backend (참고용 - 별도 프로젝트)
   # spring_boot:

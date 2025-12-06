@@ -56,6 +56,7 @@ class MainGraphState(TypedDict):
     is_submitted: bool
     submission_id: Optional[int]
     code_content: Optional[str]
+    lang: Optional[str]  # 프로그래밍 언어 (python, java, cpp 등)
     
     # 평가 점수
     turn_scores: Dict[str, Any]

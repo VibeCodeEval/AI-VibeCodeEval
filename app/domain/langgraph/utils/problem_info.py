@@ -88,7 +88,135 @@ dp = [[-1] * (1 << N) for _ in range(N)]
 print(tsp(0, 1))
 """,
         
-        # 5. 가드레일용 키워드 (하위 호환성 및 Intent Analyzer에서 사용)
+        # 5. 테스트 케이스 (Judge0 코드 실행 평가용)
+        "test_cases": [
+    {
+        "input": "4\n0 10 15 20\n5 0 9 10\n6 13 0 12\n8 8 9 0\n",
+        "expected": "35",
+        "description": "기본 케이스: 4개 도시"
+    },
+    {
+        "input": "3\n0 1 2\n1 0 3\n2 3 0\n",
+        "expected": "6",
+        "description": "최소 케이스: 3개 도시"
+    },
+    {
+        "input": "2\n0 10\n10 0\n",
+        "expected": "20",
+        "description": "최소 케이스: 2개 도시"
+    },
+    {
+        "input": "5\n0 1 2 3 4\n1 0 5 6 7\n2 5 0 8 9\n3 6 8 0 10\n4 7 9 10 0\n",
+        "expected": "21",
+        "description": "5개 도시 케이스"
+    },
+    {
+        "input": "6\n0 1 2 3 4 5\n1 0 6 7 8 9\n2 6 0 10 11 12\n3 7 10 0 13 14\n4 8 11 13 0 15\n5 9 12 14 15 0\n",
+        "expected": "27",
+        "description": "6개 도시 케이스"
+    },
+    {
+        "input": "4\n0 1 100 100\n1 0 1 100\n100 1 0 1\n1 100 1 0\n",
+        "expected": "4",
+        "description": "비대칭 비용 행렬 (수정됨)"
+    },
+    {
+        "input": "4\n0 0 1 1\n0 0 1 1\n1 1 0 0\n1 1 0 0\n",
+        "expected": "4",
+        "description": "갈 수 없는 경로 포함 (0 처리)"
+    },
+    {
+        "input": "3\n0 5 10\n5 0 15\n10 15 0\n",
+        "expected": "30",
+        "description": "대칭 비용 행렬"
+    },
+    {
+        "input": "4\n0 2 9 10\n1 0 6 4\n15 7 0 8\n6 3 12 0\n",
+        "expected": "21",
+        "description": "복잡한 비용 행렬"
+    },
+    {
+        "input": "5\n0 3 4 2 7\n3 0 4 6 3\n4 4 0 5 8\n2 6 5 0 6\n7 3 8 6 0\n",
+        "expected": "19",
+        "description": "대규모 케이스: 5개 도시"
+    }
+],
+        
+        # 6. 채점 기준 (Rubric)
+        "rubric": {
+            "correctness": {
+                "weight": 0.5,
+                "description": "정확성 점수 (테스트 케이스 통과율)",
+                "criteria": {
+                    "all_passed": {
+                        "score": 100,
+                        "description": "모든 테스트 케이스 통과"
+                    },
+                    "partial_passed": {
+                        "score_formula": "(통과한_테스트_케이스_수 / 전체_테스트_케이스_수) * 100",
+                        "description": "일부 테스트 케이스 통과"
+                    },
+                    "none_passed": {
+                        "score": 0,
+                        "description": "테스트 케이스 통과 실패"
+                    }
+                }
+            },
+            "performance": {
+                "weight": 0.25,
+                "description": "성능 점수 (실행 시간 및 메모리 사용량)",
+                "time_limit_sec": 1.0,  # 백준과 동일: 1초 제한
+                "memory_limit_mb": 128,  # 백준과 동일: 128MB 제한
+                "criteria": {
+                    "time_score": {
+                        "weight": 0.6,
+                        "description": "실행 시간 점수",
+                        "limit_sec": 1.0,
+                        "scoring": {
+                            "within_limit": {
+                                "score": 100,
+                                "description": "1초 이내: 100점"
+                            },
+                            "exceeded": {
+                                "score_formula": "max(0, 100 * (1 - execution_time / time_limit))",
+                                "description": "1초 초과 시 감점 (초과 시간에 비례)"
+                            }
+                        }
+                    },
+                    "memory_score": {
+                        "weight": 0.4,
+                        "description": "메모리 사용량 점수",
+                        "limit_mb": 128,
+                        "scoring": {
+                            "within_limit": {
+                                "score": 100,
+                                "description": "128MB 이내: 100점"
+                            },
+                            "exceeded": {
+                                "score_formula": "max(0, 100 * (1 - memory_used / memory_limit))",
+                                "description": "128MB 초과 시 감점 (초과 메모리에 비례)"
+                            }
+                        }
+                    }
+                }
+            },
+            "code_quality": {
+                "weight": 0.25,
+                "description": "코드 품질 점수 (알고리즘 효율성, 가독성)",
+                "criteria": {
+                    "algorithm_efficiency": {
+                        "weight": 0.6,
+                        "description": "알고리즘 효율성 (비트마스킹 DP 사용: 100점, 완전 탐색: 50점, 그 외: 0점)"
+                    },
+                    "code_readability": {
+                        "weight": 0.4,
+                        "description": "코드 가독성 (변수명, 주석, 구조)"
+                    }
+                }
+            }
+        },
+        
+        # 7. 가드레일용 키워드 (하위 호환성 및 Intent Analyzer에서 사용)
         "keywords": [
             "외판원",
             "tsp",
@@ -163,53 +291,102 @@ async def get_problem_info(spec_id: int, db: Optional[Any] = None) -> Dict[str, 
     """
     spec_id로 문제 정보 가져오기 (비동기 버전)
     
-    [현재 구현]
-    - 하드코딩 딕셔너리 사용 (HARDCODED_PROBLEM_SPEC)
-    
-    [추후 DB 전환]
-    - db 파라미터를 받아서 DB 조회 가능
-    - ProblemSpec.meta (JSON) 컬럼에서 problem_context 조회
-    - 하드코딩 딕셔너리는 Fallback으로 사용
+    [구현]
+    - DB 조회 우선, 실패 시 하드코딩 딕셔너리 Fallback
+    - ProblemSpec과 Problem 테이블에서 정보 조회
+    - content_md, rubric_json 등을 활용하여 problem_context 구성
     
     Args:
         spec_id: 문제 스펙 ID
-        db: 데이터베이스 세션 (선택, 추후 DB 조회용)
+        db: 데이터베이스 세션 (필수)
     
     Returns:
         Dict[str, Any]: 상세한 문제 정보 (basic_info, constraints, ai_guide, solution_code 포함)
     """
-    # 현재: 하드코딩 딕셔너리 사용
+    # DB 조회 시도
+    if db:
+        try:
+            from app.infrastructure.repositories.exam_repository import ExamRepository
+            exam_repo = ExamRepository(db)
+            spec = await exam_repo.get_problem_spec_with_problem(spec_id)
+            
+            if spec and spec.problem:
+                problem = spec.problem
+                
+                # basic_info 구성
+                basic_info = {
+                    "problem_id": str(problem.id),
+                    "title": problem.title or "",
+                    "description_summary": spec.content_md[:200] if spec.content_md else None,  # 처음 200자
+                    "input_format": None,  # content_md에서 파싱 필요 시 추가
+                    "output_format": None  # content_md에서 파싱 필요 시 추가
+                }
+                
+                # constraints 구성 (rubric_json에서 가져오거나 기본값)
+                constraints = {
+                    "time_limit_sec": None,
+                    "memory_limit_mb": None,
+                    "variable_ranges": {},
+                    "logic_reasoning": None
+                }
+                if spec.rubric_json and isinstance(spec.rubric_json, dict):
+                    performance = spec.rubric_json.get("performance", {})
+                    if isinstance(performance, dict):
+                        constraints["time_limit_sec"] = performance.get("time_limit_sec")
+                        constraints["memory_limit_mb"] = performance.get("memory_limit_mb")
+                
+                # ai_guide 구성 (rubric_json에서 가져오거나 기본값)
+                ai_guide = {
+                    "key_algorithms": [],
+                    "solution_architecture": None,
+                    "hint_roadmap": {},
+                    "common_pitfalls": []
+                }
+                if spec.rubric_json and isinstance(spec.rubric_json, dict):
+                    code_quality = spec.rubric_json.get("code_quality", {})
+                    if isinstance(code_quality, dict):
+                        ai_guide["key_algorithms"] = code_quality.get("algorithms", [])
+                
+                # keywords 추출
+                keywords = _extract_keywords_from_problem_spec(spec)
+                
+                # checker_json에서 solution_code와 test_cases 추출
+                solution_code = None
+                test_cases = []
+                if spec.checker_json and isinstance(spec.checker_json, dict):
+                    solution_code = spec.checker_json.get("solution_code")
+                    test_cases = spec.checker_json.get("test_cases", [])
+                    if test_cases and not isinstance(test_cases, list):
+                        test_cases = []
+                
+                problem_context = {
+                    "basic_info": basic_info,
+                    "constraints": constraints,
+                    "ai_guide": ai_guide,
+                    "solution_code": solution_code,  # checker_json에서 추출
+                    "test_cases": test_cases,  # checker_json에서 추출
+                    "keywords": keywords,
+                    "content_md": spec.content_md  # 전체 내용도 포함
+                }
+                
+                problem_name = basic_info.get("title", "알 수 없음")
+                logger.debug(f"[Problem Info] DB에서 조회 - spec_id: {spec_id}, problem_name: {problem_name}")
+                return problem_context
+                
+        except Exception as e:
+            logger.warning(f"[Problem Info] DB 조회 실패 - spec_id: {spec_id}, error: {str(e)}")
+            # Fallback: 하드코딩 딕셔너리 재시도
+            if spec_id in HARDCODED_PROBLEM_SPEC:
+                problem_context = HARDCODED_PROBLEM_SPEC[spec_id].copy()
+                logger.debug(f"[Problem Info] Fallback 하드코딩 사용 - spec_id: {spec_id}")
+                return problem_context
+    
+    # Fallback: 하드코딩 딕셔너리 사용
     if spec_id in HARDCODED_PROBLEM_SPEC:
         problem_context = HARDCODED_PROBLEM_SPEC[spec_id].copy()
         problem_name = problem_context.get("basic_info", {}).get("title", "알 수 없음")
         logger.debug(f"[Problem Info] 하드코딩 딕셔너리에서 조회 - spec_id: {spec_id}, problem_name: {problem_name}")
         return problem_context
-    
-    # 추후: DB 조회로 교체 가능
-    # if db:
-    #     try:
-    #         from app.infrastructure.repositories.exam_repository import ExamRepository
-    #         exam_repo = ExamRepository(db)
-    #         spec = await exam_repo.get_problem_spec(spec_id)
-    #         
-    #         if spec and spec.meta:
-    #             # ProblemSpec.meta (JSON) 컬럼에서 problem_context 조회
-    #             # meta 구조: {"basic_info": {...}, "constraints": {...}, "ai_guide": {...}, "solution_code": "..."}
-    #             problem_context = spec.meta.copy()
-    #             
-    #             # keywords는 meta에 없을 수 있으므로 추출
-    #             if "keywords" not in problem_context:
-    #                 problem_context["keywords"] = _extract_keywords_from_problem_spec(spec)
-    #             
-    #             logger.debug(f"[Problem Info] DB에서 조회 - spec_id: {spec_id}, problem_name: {problem_context.get('basic_info', {}).get('title', '알 수 없음')}")
-    #             return problem_context
-    #     except Exception as e:
-    #         logger.warning(f"[Problem Info] DB 조회 실패 - spec_id: {spec_id}, error: {str(e)}")
-    #         # Fallback: 하드코딩 딕셔너리 재시도
-    #         if spec_id in HARDCODED_PROBLEM_SPEC:
-    #             problem_context = HARDCODED_PROBLEM_SPEC[spec_id].copy()
-    #             logger.debug(f"[Problem Info] Fallback 하드코딩 사용 - spec_id: {spec_id}")
-    #             return problem_context
     
     # 기본값 반환 (문제 정보 없음)
     logger.debug(f"[Problem Info] 기본값 반환 - spec_id: {spec_id} (문제 정보 없음)")
@@ -240,10 +417,10 @@ async def get_problem_info(spec_id: int, db: Optional[Any] = None) -> Dict[str, 
 
 def _extract_keywords_from_problem_spec(spec: Any) -> list[str]:
     """
-    ProblemSpec 모델에서 가드레일용 키워드 추출 (추후 DB 전환 시 사용)
+    ProblemSpec 모델에서 가드레일용 키워드 추출
     
     [사용 위치]
-    - get_problem_info()에서 DB 조회 시 keywords가 없을 경우 호출
+    - get_problem_info()에서 DB 조회 시 keywords 추출
     
     Args:
         spec: ProblemSpec 모델 인스턴스
@@ -253,31 +430,30 @@ def _extract_keywords_from_problem_spec(spec: Any) -> list[str]:
     """
     keywords = []
     
-    # meta에서 keywords 추출 (이미 있으면 사용)
-    if spec.meta and isinstance(spec.meta, dict):
-        if "keywords" in spec.meta and isinstance(spec.meta["keywords"], list):
-            keywords.extend(spec.meta["keywords"])
+    # Problem title에서 키워드 추출
+    if spec.problem and spec.problem.title:
+        title_lower = spec.problem.title.lower()
+        # 일반적인 알고리즘 키워드 체크
+        algorithm_keywords = ["tsp", "외판원", "dp", "그래프", "트리", "정렬", "피보나치", "fibonacci"]
+        for keyword in algorithm_keywords:
+            if keyword in title_lower:
+                keywords.append(keyword)
     
-    # ai_guide.key_algorithms에서 키워드 추출
-    if spec.meta and isinstance(spec.meta, dict):
-        ai_guide = spec.meta.get("ai_guide", {})
-        if isinstance(ai_guide, dict):
-            key_algorithms = ai_guide.get("key_algorithms", [])
-            if isinstance(key_algorithms, list):
-                keywords.extend([alg.lower() for alg in key_algorithms])
+    # rubric_json에서 algorithms 추출
+    if spec.rubric_json and isinstance(spec.rubric_json, dict):
+        code_quality = spec.rubric_json.get("code_quality", {})
+        if isinstance(code_quality, dict):
+            algorithms = code_quality.get("algorithms", [])
+            if isinstance(algorithms, list):
+                keywords.extend([alg.lower() for alg in algorithms])
     
-    # basic_info.title에서 키워드 추출
-    if spec.meta and isinstance(spec.meta, dict):
-        basic_info = spec.meta.get("basic_info", {})
-        if isinstance(basic_info, dict):
-            title = basic_info.get("title", "")
-            if title:
-                title_lower = title.lower()
-                # 일반적인 알고리즘 키워드 체크
-                algorithm_keywords = ["tsp", "외판원", "dp", "그래프", "트리", "정렬"]
-                for keyword in algorithm_keywords:
-                    if keyword in title_lower:
-                        keywords.append(keyword)
+    # content_md에서 일부 키워드 추출 (간단한 방식)
+    if spec.content_md:
+        content_lower = spec.content_md.lower()
+        common_terms = ["재귀", "반복", "동적", "그리디", "이분", "탐색"]
+        for term in common_terms:
+            if term in content_lower:
+                keywords.append(term)
     
     return list(set(keywords))  # 중복 제거
 

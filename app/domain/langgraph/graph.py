@@ -52,8 +52,7 @@ from app.domain.langgraph.nodes.holistic_evaluator.scores import (
     aggregate_turn_scores,
     aggregate_final_scores,
 )
-from app.domain.langgraph.nodes.holistic_evaluator.performance import eval_code_performance
-from app.domain.langgraph.nodes.holistic_evaluator.correctness import eval_code_correctness
+from app.domain.langgraph.nodes.holistic_evaluator.execution import eval_code_execution
 from app.domain.langgraph.subgraph_eval_turn import create_eval_turn_subgraph
 from app.domain.langgraph.utils.problem_info import get_problem_info_sync
 
@@ -139,11 +138,10 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     
     # 5. Main Router (조건부 분기 함수로 처리)
     
-    # 6a-6d. 평가 노드들
+    # 6a-6c. 평가 노드들
     builder.add_node("eval_holistic_flow", eval_holistic_flow)
     builder.add_node("aggregate_turn_scores", aggregate_turn_scores)
-    builder.add_node("eval_code_performance", eval_code_performance)
-    builder.add_node("eval_code_correctness", eval_code_correctness)
+    builder.add_node("eval_code_execution", eval_code_execution)  # 6c: Correctness + Performance 통합
     
     # 7. Aggregate Final Scores
     builder.add_node("aggregate_final_scores", aggregate_final_scores)
@@ -207,18 +205,15 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     # Summarize Memory -> Handle Request (재시도)
     builder.add_edge("summarize_memory", "handle_request")
     
-    # 평가 노드들 (병렬 실행 후 최종 집계)
-    # 6a -> 7
+    # 평가 노드들 (순차 실행)
+    # 6a -> 6b
     builder.add_edge("eval_holistic_flow", "aggregate_turn_scores")
     
-    # 6b -> 6c
-    builder.add_edge("aggregate_turn_scores", "eval_code_performance")
+    # 6b -> 6c (Correctness 먼저 평가, 통과 시 Performance 평가)
+    builder.add_edge("aggregate_turn_scores", "eval_code_execution")
     
-    # 6c -> 6d
-    builder.add_edge("eval_code_performance", "eval_code_correctness")
-    
-    # 6d -> 7
-    builder.add_edge("eval_code_correctness", "aggregate_final_scores")
+    # 6c -> 7
+    builder.add_edge("eval_code_execution", "aggregate_final_scores")
     
     # 7 -> END
     builder.add_edge("aggregate_final_scores", END)

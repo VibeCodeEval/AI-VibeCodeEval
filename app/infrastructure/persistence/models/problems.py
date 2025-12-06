@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    and_,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -45,7 +46,7 @@ class Problem(Base):
     )
     current_spec_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
-        ForeignKey("problem_specs.id"),
+        ForeignKey("problem_specs.spec_id"),
         nullable=True
     )
     
@@ -57,6 +58,7 @@ class Problem(Base):
     )
     current_spec: Mapped[Optional["ProblemSpec"]] = relationship(
         "ProblemSpec",
+        primaryjoin="and_(Problem.current_spec_id == ProblemSpec.id)",
         foreign_keys=[current_spec_id],
         post_update=True
     )
@@ -66,7 +68,8 @@ class ProblemSpec(Base):
     """문제 스펙 테이블 (버전 관리)"""
     __tablename__ = "problem_specs"
     
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # DB 스키마에서 spec_id가 PRIMARY KEY이므로 id 대신 spec_id 사용
+    id: Mapped[int] = mapped_column("spec_id", BigInteger, primary_key=True, autoincrement=True)
     problem_id: Mapped[int] = mapped_column(
         BigInteger, 
         ForeignKey("problems.id"), 

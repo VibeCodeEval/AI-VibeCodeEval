@@ -41,14 +41,14 @@ class Submission(Base):
     )
     spec_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("problem_specs.id"),
+        ForeignKey("problem_specs.spec_id"),
         nullable=False
     )
     lang: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[SubmissionStatusEnum] = mapped_column(
-        Enum(SubmissionStatusEnum, name="ai_vibe_coding_test.submission_status_enum"),
+        Enum(SubmissionStatusEnum, name="submission_status_enum", schema="ai_vibe_coding_test"),
         nullable=False,
-        default=SubmissionStatusEnum.PENDING
+        default=SubmissionStatusEnum.QUEUED
     )
     code_inline: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     code_sha256: Mapped[Optional[str]] = mapped_column(CHAR(64), nullable=True)
@@ -94,9 +94,9 @@ class SubmissionRun(Base):
         nullable=False
     )
     verdict: Mapped[VerdictEnum] = mapped_column(
-        Enum(VerdictEnum, name="ai_vibe_coding_test.verdict_enum"),
+        Enum(VerdictEnum, name="verdict_enum", schema="ai_vibe_coding_test"),
         nullable=False,
-        default=VerdictEnum.PENDING
+        default=VerdictEnum.AC
     )
     time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     mem_kb: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -119,12 +119,12 @@ class Score(Base):
     """점수 테이블"""
     __tablename__ = "scores"
     
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # DB 스키마에 따르면 submission_id가 PRIMARY KEY
     submission_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("submissions.id"),
-        nullable=False,
-        unique=True
+        primary_key=True,
+        nullable=False
     )
     prompt_score: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(5, 2),

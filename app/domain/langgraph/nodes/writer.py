@@ -19,13 +19,9 @@ from app.domain.langgraph.utils.token_tracking import extract_token_usage, accum
 
 
 def get_llm():
-    """LLM 인스턴스 생성"""
-    return ChatGoogleGenerativeAI(
-        model=settings.DEFAULT_LLM_MODEL,
-        google_api_key=settings.GEMINI_API_KEY,
-        temperature=settings.LLM_TEMPERATURE,
-        max_tokens=settings.LLM_MAX_TOKENS,
-    )
+    """LLM 인스턴스 생성 (Factory 사용)"""
+    from app.domain.langgraph.utils.llm_factory import get_llm as get_llm_from_factory
+    return get_llm_from_factory("writer")
 
 
 # 시스템 프롬프트 템플릿

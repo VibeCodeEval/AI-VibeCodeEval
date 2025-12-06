@@ -99,13 +99,38 @@ class EvaluationFeedback(BaseModel):
     holistic_flow_analysis: Optional[str] = Field(None, description="체이닝 전략에 대한 상세 분석 (문제 분해, 피드백 수용성, 주도성, 전략적 탐색)")
 
 
+class SubmissionInfo(BaseModel):
+    """제출 정보"""
+    id: int = Field(..., description="제출 ID")
+    examId: int = Field(..., description="시험 ID", alias="examId")
+    participantId: int = Field(..., description="참가자 ID", alias="participantId")
+    specId: int = Field(..., description="문제 스펙 ID", alias="specId")
+    lang: str = Field(..., description="프로그래밍 언어")
+    status: str = Field(..., description="제출 상태 (QUEUED, RUNNING, DONE, FAILED)")
+    codeSha256: Optional[str] = Field(None, description="코드 SHA256 해시", alias="codeSha256")
+    codeBytes: Optional[int] = Field(None, description="코드 바이트 수", alias="codeBytes")
+    codeLoc: Optional[int] = Field(None, description="코드 라인 수", alias="codeLoc")
+    createdAt: str = Field(..., description="생성 시간 (ISO 8601)", alias="createdAt")
+
+
 class SubmitResponse(BaseModel):
     """코드 제출 응답"""
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "session_id": "session-123",
-                "submission_id": 1,
+                "submission": {
+                    "id": 13,
+                    "examId": 1,
+                    "participantId": 100,
+                    "specId": 20,
+                    "lang": "python",
+                    "status": "DONE",
+                    "codeSha256": "a1b2c3...",
+                    "codeBytes": 231,
+                    "codeLoc": 15,
+                    "createdAt": "2025-12-06T15:27:06.796000"
+                },
                 "is_submitted": True,
                 "final_scores": {
                     "prompt_score": 85.5,
@@ -115,8 +140,11 @@ class SubmitResponse(BaseModel):
                     "grade": "B"
                 },
                 "turn_scores": {
-                    "1": {"turn_score": 82.0},
-                    "2": {"turn_score": 88.0}
+                    "turn_1": {"turn_score": 82.0},
+                    "turn_2": {"turn_score": 88.0}
+                },
+                "feedback": {
+                    "holistic_flow_analysis": "..."
                 },
                 "error": False,
                 "error_message": None
@@ -125,7 +153,7 @@ class SubmitResponse(BaseModel):
     )
     
     session_id: str = Field(..., description="세션 ID")
-    submission_id: Optional[int] = Field(None, description="제출 ID")
+    submission: Optional[SubmissionInfo] = Field(None, description="제출 정보")
     is_submitted: bool = Field(True, description="제출 완료 여부")
     final_scores: Optional[FinalScores] = Field(None, description="최종 점수")
     turn_scores: Optional[Dict[str, Any]] = Field(None, description="턴별 점수")
@@ -134,6 +162,61 @@ class SubmitResponse(BaseModel):
     eval_tokens: Optional[Dict[str, int]] = Field(None, description="평가 토큰 사용량 (Turn Evaluator, Holistic Evaluator)")
     error: bool = Field(False, description="에러 발생 여부")
     error_message: Optional[str] = Field(None, description="에러 메시지")
+
+
+class SaveChatMessageRequest(BaseModel):
+    """Spring Boot에서 메시지 저장 요청"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "examId": 1,
+                "participantId": 1,
+                "turn": 1,
+                "role": "user",
+                "content": "안녕하세요",
+                "tokenCount": 10,
+                "meta": "{\"key\": \"value\"}"
+            }
+        }
+    )
+    
+    examId: int = Field(..., description="시험 ID", alias="examId")
+    participantId: int = Field(..., description="참가자 ID", alias="participantId")
+    turn: int = Field(..., description="턴 번호")
+    role: str = Field(..., description="역할 (user, assistant)")
+    content: str = Field(..., description="메시지 내용")
+    tokenCount: Optional[int] = Field(None, description="토큰 사용량", alias="tokenCount")
+    meta: Optional[str] = Field(None, description="메타데이터 (JSON 문자열)")
+
+
+class SaveChatMessageResponse(BaseModel):
+    """메시지 저장 응답"""
+    session_id: int = Field(..., description="세션 ID")
+    message_id: int = Field(..., description="메시지 ID")
+    success: bool = Field(True, description="저장 성공 여부")
+    error_message: Optional[str] = Field(None, description="에러 메시지")
+
+
+class MessageInfo(BaseModel):
+    """메시지 정보"""
+    id: int = Field(..., description="메시지 ID")
+    turn: int = Field(..., description="턴 번호")
+    role: str = Field(..., description="역할 (USER, AI)")
+    content: str = Field(..., description="메시지 내용")
+    tokenCount: Optional[int] = Field(None, description="토큰 사용량", alias="tokenCount")
+
+
+class SessionInfo(BaseModel):
+    """세션 정보"""
+    id: int = Field(..., description="세션 ID")
+    totalTokens: int = Field(0, description="총 토큰 사용량", alias="totalTokens")
+
+
+class SendMessageResponse(BaseModel):
+    """메시지 전송 응답 (새 형식)"""
+    userMessage: Optional[MessageInfo] = Field(None, description="사용자 메시지", alias="userMessage")
+    aiMessage: Optional[MessageInfo] = Field(None, description="AI 응답 메시지", alias="aiMessage")
+    session: Optional[SessionInfo] = Field(None, description="세션 정보")
 
 
 

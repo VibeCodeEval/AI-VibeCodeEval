@@ -84,9 +84,15 @@ async def _eval_code_correctness_impl(state: MainGraphState) -> Dict[str, Any]:
         timeout = constraints.get("time_limit_sec") or 5
         memory_limit = constraints.get("memory_limit_mb") or 128
         
-        # 테스트 케이스 준비 (현재는 빈 리스트, 추후 problem_context에서 가져오기)
-        test_cases = []  # TODO: problem_context에서 테스트 케이스 가져오기
-        # 예시: test_cases = [{"input": "5", "expected": "10"}, ...]
+        # 테스트 케이스 준비 (problem_context에서 가져오기)
+        test_cases_raw = problem_context.get("test_cases", [])
+        test_cases = [
+            {
+                "input": tc.get("input", ""),
+                "expected": tc.get("expected", "")
+            }
+            for tc in test_cases_raw
+        ]
         
         # 언어 정보 가져오기 (기본값: python)
         language = "python"  # TODO: state에서 언어 정보 가져오기

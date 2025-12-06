@@ -39,36 +39,33 @@ class ExamParticipantStateEnum(str, enum.Enum):
 
 
 class SubmissionStatusEnum(str, enum.Enum):
-    """제출 상태"""
-    PENDING = "pending"
-    EVALUATING = "evaluating"
-    COMPLETED = "completed"
-    ERROR = "error"
+    """제출 상태 (DB ENUM과 일치: 'QUEUED', 'RUNNING', 'DONE', 'FAILED')"""
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    DONE = "DONE"
+    FAILED = "FAILED"
 
 
 class PromptRoleEnum(str, enum.Enum):
-    """프롬프트 역할"""
-    SYSTEM = "system"
-    USER = "user"
-    ASSISTANT = "assistant"
+    """프롬프트 역할 (DB ENUM과 일치: 'USER', 'AI')"""
+    USER = "USER"
+    AI = "AI"
 
 
 class TestRunGrpEnum(str, enum.Enum):
-    """테스트 실행 그룹"""
-    SAMPLE = "sample"
-    HIDDEN = "hidden"
+    """테스트 실행 그룹 (DB ENUM과 일치: 'SAMPLE', 'PUBLIC', 'PRIVATE')"""
+    SAMPLE = "SAMPLE"
+    PUBLIC = "PUBLIC"
+    PRIVATE = "PRIVATE"
 
 
 class VerdictEnum(str, enum.Enum):
-    """평가 결과"""
-    PENDING = "pending"
-    ACCEPTED = "accepted"
-    WRONG_ANSWER = "wrong_answer"
-    TIME_LIMIT_EXCEEDED = "time_limit_exceeded"
-    MEMORY_LIMIT_EXCEEDED = "memory_limit_exceeded"
-    RUNTIME_ERROR = "runtime_error"
-    COMPILATION_ERROR = "compilation_error"
-    INTERNAL_ERROR = "internal_error"
+    """평가 결과 (DB ENUM과 일치: 'AC', 'WA', 'TLE', 'MLE', 'RE')"""
+    AC = "AC"
+    WA = "WA"
+    TLE = "TLE"
+    MLE = "MLE"
+    RE = "RE"
 
 
 class WriterResponseStatus(str, enum.Enum):

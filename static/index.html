@@ -451,6 +451,31 @@
             border-top: 2px solid rgba(255, 255, 255, 0.3);
         }
 
+        .detail-section {
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .detail-section h4 {
+            margin-bottom: 12px;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .detail-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            font-size: 13px;
+            opacity: 0.9;
+        }
+
+        .detail-item.warning {
+            color: #fef3c7;
+            font-weight: bold;
+        }
+
         .loading {
             display: inline-block;
             width: 16px;
@@ -497,6 +522,26 @@
                 <h1>🤖 AI Vibe Coding Test</h1>
                 <div class="session-info">
                     Session: <span id="sessionId">-</span> | Turn: <span id="currentTurn">0</span>
+                </div>
+                <div class="config-section" style="margin-top: 12px; padding: 12px; background: rgba(255, 255, 255, 0.15); border-radius: 8px; font-size: 13px;">
+                    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                        <label style="display: flex; align-items: center; gap: 4px;">
+                            <span>Exam ID:</span>
+                            <input type="number" id="examIdInput" value="1" min="1" style="width: 60px; padding: 4px 8px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; background: rgba(255,255,255,0.2); color: white; font-size: 13px;">
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 4px;">
+                            <span>Participant ID:</span>
+                            <input type="number" id="participantIdInput" value="100" min="1" style="width: 60px; padding: 4px 8px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; background: rgba(255,255,255,0.2); color: white; font-size: 13px;">
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 4px;">
+                            <span>Spec ID:</span>
+                            <input type="number" id="specIdInput" value="10" min="1" style="width: 60px; padding: 4px 8px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; background: rgba(255,255,255,0.2); color: white; font-size: 13px;">
+                        </label>
+                        <button onclick="updateConfig()" style="padding: 4px 12px; background: rgba(255,255,255,0.3); border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; color: white; cursor: pointer; font-size: 12px;">적용</button>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 11px; opacity: 0.85;">
+                        ⚠️ 일반 채팅은 Redis에만 저장 (TTL 24시간), 제출 시에만 PostgreSQL 저장
+                    </div>
                 </div>
                 <div class="token-usage">
                     <div class="token-usage-header">
@@ -575,7 +620,11 @@
         let refreshInterval = null;
         let openTurnLogs = new Set(); // 열려있는 턴 로그 ID 저장
         let problemPanelOpen = false;
-        const SPEC_ID = 10; // 기본 spec_id
+        
+        // 설정 값 (입력 필드에서 가져옴)
+        let EXAM_ID = 1;
+        let PARTICIPANT_ID = 100;
+        let SPEC_ID = 10;
         
         // 토큰 사용량 추적
         const TOKEN_LIMIT = 20000; // 20K 제한
@@ -584,6 +633,9 @@
 
         // 초기화
         document.getElementById('sessionId').textContent = sessionId;
+        
+        // 설정 값 로드
+        updateConfig();
         
         // 문제 정보 로드
         loadProblemInfo();
@@ -608,9 +660,9 @@
                     },
                     body: JSON.stringify({
                         session_id: sessionId,
-                        exam_id: 1,
-                        participant_id: 100,
-                        spec_id: 10,
+                        exam_id: EXAM_ID,
+                        participant_id: PARTICIPANT_ID,
+                        spec_id: SPEC_ID,
                         message: message
                     })
                 });
@@ -660,9 +712,9 @@
                     },
                     body: JSON.stringify({
                         session_id: sessionId,
-                        exam_id: 1,
-                        participant_id: 100,
-                        spec_id: 10,
+                        exam_id: EXAM_ID,
+                        participant_id: PARTICIPANT_ID,
+                        spec_id: SPEC_ID,
                         code: code,
                         lang: 'python'
                     })
@@ -673,12 +725,43 @@
                 if (data.error) {
                     addMessage('assistant', `❌ 제출 오류: ${data.error_message || '알 수 없는 오류'}`);
                 } else {
-                    addMessage('assistant', '✅ 코드 제출 완료! 평가가 진행되었습니다.');
+                    // 제출 성공 메시지
+                    let successMsg = '✅ 코드 제출 완료! 평가가 진행되었습니다.\n\n';
+                    
+                    if (data.final_scores) {
+                        const scores = data.final_scores;
+                        successMsg += `📊 최종 점수: ${scores.total_score?.toFixed(1) || 0}점 (등급: ${scores.grade || 'N/A'})\n`;
+                        
+                        // 6번 노드 상세 정보
+                        if (scores.correctness_details) {
+                            const cd = scores.correctness_details;
+                            successMsg += `\n📋 정확성 평가:\n`;
+                            successMsg += `  - 테스트 케이스: ${cd.test_cases_passed || 0}/${cd.test_cases_total || 0} 통과\n`;
+                            successMsg += `  - 통과율: ${cd.pass_rate || 0}%\n`;
+                        }
+                        
+                        if (scores.performance_details) {
+                            const pd = scores.performance_details;
+                            if (pd.skip_performance) {
+                                successMsg += `\n⚡ 성능 평가: 건너뜀 (${pd.skip_reason || 'Correctness 실패'})\n`;
+                            } else {
+                                successMsg += `\n⚡ 성능 평가:\n`;
+                                if (pd.execution_time) {
+                                    successMsg += `  - 실행 시간: ${pd.execution_time.toFixed(3)}초\n`;
+                                }
+                                if (pd.memory_used_mb) {
+                                    successMsg += `  - 메모리 사용량: ${pd.memory_used_mb.toFixed(2)}MB\n`;
+                                }
+                            }
+                        }
+                    }
+                    
+                    addMessage('assistant', successMsg);
                     
                     // 토큰 사용량 업데이트
                     updateTokenUsage(data);
                     
-                    // 최종 점수 표시
+                    // 최종 점수 표시 (상세 정보 포함)
                     if (data.final_scores) {
                         displayFinalScores(data.final_scores);
                     }
@@ -760,12 +843,62 @@ ${escapeHtml(fullLogJson)}
             }
         }
 
-        // 최종 점수 표시
+        // 최종 점수 표시 (6번 노드 상세 정보 포함)
         function displayFinalScores(scores) {
             const section = document.getElementById('finalScoresSection');
             const container = document.getElementById('finalScores');
 
             section.style.display = 'block';
+
+            // Correctness 상세 정보
+            let correctnessDetails = '';
+            if (scores.correctness_details) {
+                const cd = scores.correctness_details;
+                correctnessDetails = `
+                    <div class="detail-section">
+                        <h4>📊 정확성 평가 상세</h4>
+                        <div class="detail-item">
+                            <span>테스트 케이스 통과</span>
+                            <span>${cd.test_cases_passed || 0} / ${cd.test_cases_total || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span>통과율</span>
+                            <span>${cd.pass_rate || 0}%</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Performance 상세 정보
+            let performanceDetails = '';
+            if (scores.performance_details) {
+                const pd = scores.performance_details;
+                if (pd.skip_performance) {
+                    performanceDetails = `
+                        <div class="detail-section">
+                            <h4>⚡ 성능 평가</h4>
+                            <div class="detail-item warning">
+                                <span>평가 건너뜀</span>
+                                <span>${pd.skip_reason || 'Correctness 실패'}</span>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    performanceDetails = `
+                        <div class="detail-section">
+                            <h4>⚡ 성능 평가 상세</h4>
+                            <div class="detail-item">
+                                <span>실행 시간</span>
+                                <span>${pd.execution_time ? pd.execution_time.toFixed(3) + '초' : 'N/A'}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span>메모리 사용량</span>
+                                <span>${pd.memory_used_mb ? pd.memory_used_mb.toFixed(2) + 'MB' : 'N/A'}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
 
             container.innerHTML = `
                 <div class="final-scores">
@@ -789,6 +922,8 @@ ${escapeHtml(fullLogJson)}
                     <div style="margin-top: 12px; text-align: center; font-size: 18px; font-weight: bold;">
                         등급: ${scores.grade || 'N/A'}
                     </div>
+                    ${correctnessDetails}
+                    ${performanceDetails}
                 </div>
             `;
         }
@@ -976,6 +1111,16 @@ ${escapeHtml(fullLogJson)}
                 panel.classList.remove('open');
                 toggle.textContent = '📋 문제 보기';
             }
+        }
+
+        // 설정 업데이트
+        function updateConfig() {
+            EXAM_ID = parseInt(document.getElementById('examIdInput').value) || 1;
+            PARTICIPANT_ID = parseInt(document.getElementById('participantIdInput').value) || 100;
+            SPEC_ID = parseInt(document.getElementById('specIdInput').value) || 10;
+            
+            // 문제 정보 다시 로드
+            loadProblemInfo();
         }
 
         // 문제 정보 로드

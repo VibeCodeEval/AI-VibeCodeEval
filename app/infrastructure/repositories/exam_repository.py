@@ -47,8 +47,17 @@ class ExamRepository:
         return result.scalar_one_or_none()
     
     async def get_problem_spec(self, spec_id: int) -> Optional[ProblemSpec]:
-        """문제 스펙 조회"""
+        """문제 스펙 조회 (spec_id로 조회)"""
+        # DB 스키마에서 spec_id가 PRIMARY KEY이므로 id 필드로 조회
         query = select(ProblemSpec).where(ProblemSpec.id == spec_id)
+        result = await self.db.execute(query)
+        return result.scalar_one_or_none()
+    
+    async def get_problem_spec_with_problem(self, spec_id: int) -> Optional[ProblemSpec]:
+        """문제 스펙과 문제 정보를 함께 조회"""
+        query = select(ProblemSpec).options(
+            selectinload(ProblemSpec.problem)
+        ).where(ProblemSpec.id == spec_id)
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
     

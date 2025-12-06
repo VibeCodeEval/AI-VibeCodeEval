@@ -7,13 +7,18 @@ LLM Factory Pattern
 - 노드별로 다른 LLM 설정 사용 가능
 - 인스턴스 재사용 (싱글톤 패턴)
 - 확장 가능한 구조
+- GCP Vertex AI 지원 (ADC 인증)
 """
 import logging
+import json
+import os
 from typing import Dict, Any, Optional, Literal
 from functools import lru_cache
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_vertexai import ChatVertexAI
 from langchain_openai import ChatOpenAI
+from google.oauth2 import service_account
 # from langchain_anthropic import ChatAnthropic  # 필요시 추가
 
 from app.core.config import settings
@@ -64,14 +69,82 @@ def _create_cache_key(node_name: str, llm_type: str, **kwargs) -> str:
     return f"{node_name}_{llm_type}_{config_str}"
 
 
-def _create_gemini_llm(**kwargs) -> ChatGoogleGenerativeAI:
-    """Gemini LLM 생성"""
-    return ChatGoogleGenerativeAI(
-        model=kwargs.get("model", settings.DEFAULT_LLM_MODEL),
-        google_api_key=kwargs.get("api_key", settings.GEMINI_API_KEY),
-        temperature=kwargs.get("temperature", 0.3),
-        max_output_tokens=kwargs.get("max_tokens"),
-    )
+def _get_vertex_ai_credentials():
+    """
+    GCP Vertex AI 인증 정보 생성 (ADC)
+    
+    지원 방식:
+    1. JSON 파일 경로: GOOGLE_SERVICE_ACCOUNT_PATH 설정
+    2. JSON 문자열: GOOGLE_SERVICE_ACCOUNT_JSON 설정 (한 줄 또는 여러 줄)
+    """
+    service_account_info = None
+    
+    # 방법 1: 파일 경로 사용
+    if settings.GOOGLE_SERVICE_ACCOUNT_PATH:
+        try:
+            with open(settings.GOOGLE_SERVICE_ACCOUNT_PATH, 'r', encoding='utf-8') as f:
+                service_account_info = json.load(f)
+            logger.debug(f"[LLM Factory] 서비스 계정 파일에서 로드: {settings.GOOGLE_SERVICE_ACCOUNT_PATH}")
+        except FileNotFoundError:
+            raise ValueError(f"서비스 계정 파일을 찾을 수 없습니다: {settings.GOOGLE_SERVICE_ACCOUNT_PATH}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"서비스 계정 파일 JSON 파싱 실패: {str(e)}")
+    
+    # 방법 2: JSON 문자열 사용
+    elif settings.GOOGLE_SERVICE_ACCOUNT_JSON:
+        try:
+            # JSON 문자열 파싱 (여러 줄도 지원)
+            service_account_info = json.loads(settings.GOOGLE_SERVICE_ACCOUNT_JSON)
+            logger.debug("[LLM Factory] 서비스 계정 JSON 문자열에서 로드")
+        except json.JSONDecodeError as e:
+            logger.error(f"[LLM Factory] 서비스 계정 JSON 파싱 실패: {str(e)}")
+            raise ValueError(f"GOOGLE_SERVICE_ACCOUNT_JSON 파싱 실패: {str(e)}")
+    
+    else:
+        raise ValueError(
+            "GOOGLE_SERVICE_ACCOUNT_JSON 또는 GOOGLE_SERVICE_ACCOUNT_PATH 중 하나를 설정해야 합니다."
+        )
+    
+    # 서비스 계정 인증 객체 생성
+    try:
+        credentials = service_account.Credentials.from_service_account_info(service_account_info)
+        return credentials
+    except Exception as e:
+        logger.error(f"[LLM Factory] 인증 정보 생성 실패: {str(e)}")
+        raise ValueError(f"인증 정보 생성 실패: {str(e)}")
+
+
+def _create_gemini_llm(**kwargs) -> ChatGoogleGenerativeAI | ChatVertexAI:
+    """
+    Gemini LLM 생성
+    - USE_VERTEX_AI=True: ChatVertexAI 사용 (GCP Vertex AI, ADC 인증)
+    - USE_VERTEX_AI=False: ChatGoogleGenerativeAI 사용 (Gemini API)
+    """
+    use_vertex_ai = kwargs.get("use_vertex_ai", settings.USE_VERTEX_AI)
+    
+    if use_vertex_ai:
+        # GCP Vertex AI 사용
+        if not settings.GOOGLE_PROJECT_ID:
+            raise ValueError("USE_VERTEX_AI=True인데 GOOGLE_PROJECT_ID가 설정되지 않았습니다.")
+        
+        credentials = _get_vertex_ai_credentials()
+        
+        return ChatVertexAI(
+            model_name=kwargs.get("model", settings.DEFAULT_LLM_MODEL),
+            project=settings.GOOGLE_PROJECT_ID,
+            credentials=credentials,
+            location=kwargs.get("location", settings.GOOGLE_LOCATION),
+            temperature=kwargs.get("temperature", 0.3),
+            max_output_tokens=kwargs.get("max_tokens"),
+        )
+    else:
+        # Gemini API 사용 (기존 방식)
+        return ChatGoogleGenerativeAI(
+            model=kwargs.get("model", settings.DEFAULT_LLM_MODEL),
+            google_api_key=kwargs.get("api_key", settings.GEMINI_API_KEY),
+            temperature=kwargs.get("temperature", 0.3),
+            max_output_tokens=kwargs.get("max_tokens"),
+        )
 
 
 def _create_openai_llm(**kwargs) -> ChatOpenAI:
@@ -181,5 +254,6 @@ def get_cache_info() -> Dict[str, Any]:
         "cache_size": len(_llm_cache),
         "cached_keys": list(_llm_cache.keys()),
     }
+
 
 

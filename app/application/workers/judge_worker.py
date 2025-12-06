@@ -9,6 +9,7 @@ from typing import Optional
 
 from app.domain.queue import create_queue_adapter, JudgeTask, JudgeResult
 from app.infrastructure.judge0.client import Judge0Client
+from app.infrastructure.cache.redis_client import redis_client
 from app.core.config import settings
 
 
@@ -28,6 +29,15 @@ class JudgeWorker:
         self.running = True
         logger.info("[JudgeWorker] Worker 시작")
         
+        # Redis 연결 초기화 (Redis Queue 사용 시)
+        if settings.USE_REDIS_QUEUE:
+            try:
+                await redis_client.connect()
+                logger.info("[JudgeWorker] Redis 연결 완료")
+            except Exception as e:
+                logger.error(f"[JudgeWorker] Redis 연결 실패: {str(e)}")
+                raise
+        
         try:
             await self._worker_loop()
         except KeyboardInterrupt:
@@ -41,11 +51,23 @@ class JudgeWorker:
         """Worker 중지"""
         self.running = False
         await self.judge0_client.close()
+        
+        # Redis 연결 종료 (Redis Queue 사용 시)
+        if settings.USE_REDIS_QUEUE:
+            try:
+                await redis_client.close()
+                logger.info("[JudgeWorker] Redis 연결 종료")
+            except Exception as e:
+                logger.warning(f"[JudgeWorker] Redis 연결 종료 중 오류: {str(e)}")
+        
         logger.info("[JudgeWorker] Worker 중지")
     
     async def _worker_loop(self):
         """Worker 메인 루프"""
+        task: Optional[JudgeTask] = None  # 변수 초기화
+        
         while self.running:
+            task = None  # 루프 시작 시 초기화
             try:
                 # 큐에서 작업 가져오기
                 task = await self.queue.dequeue()
@@ -74,8 +96,8 @@ class JudgeWorker:
             except Exception as e:
                 logger.error(f"[JudgeWorker] 작업 처리 중 오류: {str(e)}", exc_info=True)
                 
-                # 에러 발생 시 실패 결과 저장
-                if task:
+                # 에러 발생 시 실패 결과 저장 (task가 할당된 경우만)
+                if task is not None:
                     error_result = JudgeResult(
                         task_id=task.task_id,
                         status="error",
@@ -135,15 +157,13 @@ class JudgeWorker:
                     failed_tests = [r for r in test_case_results if not r["passed"]]
                     error = f"{total_count - passed_count}/{total_count} 테스트 실패: {failed_tests[0].get('status_description', 'Unknown error')}"
                 
-                # 출력 (모든 테스트 케이스 결과)
-                output_lines = []
-                for i, r in enumerate(test_case_results):
-                    output_lines.append(f"Test {i+1}: {r['status_description']}")
-                    if r.get("actual"):
-                        output_lines.append(f"  Output: {r['actual']}")
-                    if r.get("stderr"):
-                        output_lines.append(f"  Error: {r['stderr']}")
-                output = "\n".join(output_lines)
+                # 출력 (첫 번째 테스트 케이스의 실제 출력만 사용)
+                # 여러 테스트 케이스가 있어도 첫 번째 것만 반환 (execution.py에서 1개만 사용)
+                if test_case_results:
+                    first_result = test_case_results[0]
+                    output = first_result.get("actual", "").strip()
+                else:
+                    output = ""
                 
                 return JudgeResult(
                     task_id=task.task_id,
@@ -230,4 +250,7 @@ if __name__ == "__main__":
     
     # Worker 실행
     asyncio.run(main())
+
+
+
 

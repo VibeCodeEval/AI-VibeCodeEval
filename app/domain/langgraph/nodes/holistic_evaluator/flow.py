@@ -248,7 +248,57 @@ async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
             if "eval_tokens" in state:
                 result["eval_tokens"] = state["eval_tokens"]
             
-            logger.info(f"[6a. Eval Holistic Flow] 평가 완료 - session_id: {session_id}, score: {result['holistic_flow_score']}")
+            # 평가 결과 로깅 (상세 분석 포함)
+            analysis = result.get("holistic_flow_analysis", "")
+            score = result.get("holistic_flow_score")
+            logger.info(
+                f"[6a. Eval Holistic Flow] 평가 완료 - "
+                f"session_id: {session_id}, score: {score}"
+            )
+            if analysis:
+                # 전체 분석 내용을 로그에 출력
+                logger.info(f"[6a. Eval Holistic Flow] 전체 분석 내용 (점수: {score}):")
+                logger.info(f"[6a. Analysis] {analysis}")
+            else:
+                logger.warning(f"[6a. Eval Holistic Flow] 분석 내용 없음 - session_id: {session_id}")
+            
+            # PostgreSQL에 평가 결과 저장
+            try:
+                from app.infrastructure.persistence.session import get_db_context
+                from app.application.services.evaluation_storage_service import EvaluationStorageService
+                
+                # session_id를 PostgreSQL id로 변환 (Redis session_id: "session_123" -> PostgreSQL id: 123)
+                postgres_session_id = int(session_id.replace("session_", "")) if session_id.startswith("session_") else None
+                
+                if postgres_session_id and score is not None:
+                    async with get_db_context() as db:
+                        storage_service = EvaluationStorageService(db)
+                        
+                        # 상세 정보 구성
+                        details = {
+                            "strategy_coherence": result.get("strategy_coherence"),
+                            "problem_solving_approach": result.get("problem_solving_approach"),
+                            "iteration_quality": result.get("iteration_quality"),
+                            "structured_logs": structured_logs,  # 턴별 로그 정보
+                        }
+                        
+                        await storage_service.save_holistic_flow_evaluation(
+                            session_id=postgres_session_id,
+                            holistic_flow_score=score,
+                            holistic_flow_analysis=analysis or "",
+                            details=details
+                        )
+                        await db.commit()
+                        logger.info(
+                            f"[6a. Eval Holistic Flow] PostgreSQL 저장 완료 - "
+                            f"session_id: {postgres_session_id}, score: {score}"
+                        )
+            except Exception as pg_error:
+                # PostgreSQL 저장 실패해도 Redis는 저장되었으므로 경고만
+                logger.warning(
+                    f"[6a. Eval Holistic Flow] PostgreSQL 저장 실패 (Redis는 저장됨) - "
+                    f"session_id: {session_id}, error: {str(pg_error)}"
+                )
             
             # LangSmith 추적 정보 로깅
             if should_enable_langsmith(state):

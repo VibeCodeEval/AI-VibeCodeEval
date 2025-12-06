@@ -5,3 +5,4 @@ from app.infrastructure.judge0.client import Judge0Client
 
 __all__ = ["Judge0Client"]
 
+
