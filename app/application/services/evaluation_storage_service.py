@@ -18,8 +18,9 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.repositories.session_repository import SessionRepository
-from app.infrastructure.persistence.models.sessions import PromptEvaluation
+from app.infrastructure.persistence.models.sessions import PromptEvaluation, PromptMessage
 from app.infrastructure.persistence.models.enums import EvaluationTypeEnum
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,31 @@ class EvaluationStorageService:
                 )
                 return existing
             else:
+                # 제약 조건 검증: TURN_EVAL이면 turn은 NOT NULL이어야 함
+                if turn is None:
+                    logger.error(
+                        f"[EvaluationStorage] 제약 조건 위반 - "
+                        f"TURN_EVAL은 turn이 NOT NULL이어야 합니다. session_id: {session_id}"
+                    )
+                    return None
+                
+                # Foreign Key 제약 조건을 위해 메시지가 존재하는지 확인
+                # (백엔드에서 메시지를 생성하므로, 평가 저장 시점에는 메시지가 이미 존재해야 함)
+                message_query = select(PromptMessage).where(
+                    PromptMessage.session_id == session_id,
+                    PromptMessage.turn == turn
+                )
+                existing_message = await self.db.execute(message_query)
+                message = existing_message.scalar_one_or_none()
+                
+                if not message:
+                    logger.error(
+                        f"[EvaluationStorage] Foreign Key 제약 조건 위반 - "
+                        f"메시지가 존재하지 않습니다. session_id: {session_id}, turn: {turn}. "
+                        f"백엔드에서 먼저 메시지를 생성해야 합니다."
+                    )
+                    return None
+                
                 # 새 평가 결과 생성
                 evaluation = PromptEvaluation(
                     session_id=session_id,
@@ -173,7 +199,7 @@ class EvaluationStorageService:
                 )
                 return existing
             else:
-                # 새 평가 결과 생성
+                # 새 평가 결과 생성 (HOLISTIC_FLOW는 항상 turn=None)
                 evaluation = PromptEvaluation(
                     session_id=session_id,
                     turn=None,  # holistic 평가는 turn이 NULL
@@ -216,12 +242,15 @@ class EvaluationStorageService:
         Returns:
             기존 PromptEvaluation 또는 None
         """
-        from sqlalchemy import select, and_
+        from sqlalchemy import select, and_, text
         
+        # PostgreSQL ENUM 타입과 비교하기 위해 text()를 사용하여 원시 SQL 작성
+        # evaluation_type.value를 사용하여 문자열 값으로 비교
         query = select(PromptEvaluation).where(
             and_(
                 PromptEvaluation.session_id == session_id,
-                PromptEvaluation.evaluation_type == evaluation_type
+                # ENUM 값을 문자열로 변환하여 비교 (PostgreSQL의 ::text 캐스팅 사용)
+                text("prompt_evaluations.evaluation_type::text = :eval_type")
             )
         )
         
@@ -231,7 +260,10 @@ class EvaluationStorageService:
         else:
             query = query.where(PromptEvaluation.turn == turn)
         
-        result = await self.db.execute(query)
+        # 파라미터 바인딩
+        result = await self.db.execute(
+            query.params(eval_type=evaluation_type.value)
+        )
         return result.scalar_one_or_none()
     
     async def save_turn_evaluations_batch(

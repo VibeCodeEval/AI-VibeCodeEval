@@ -226,18 +226,26 @@ async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
             formatted_messages = format_holistic_messages(prepared_input)
             
             # 원본 LLM 호출 (토큰 사용량 추출용)
+            logger.info(f"[6a. Eval Holistic Flow] ===== LLM 호출 시작 =====")
+            logger.info(f"[6a. Eval Holistic Flow] 평가 대상 턴 수: {len(structured_logs)}")
             raw_response = await llm.ainvoke(formatted_messages)
+            
+            # LLM 원본 응답 로그
+            if hasattr(raw_response, 'content'):
+                logger.info(f"[6a. Eval Holistic Flow] LLM 원본 응답 (처음 500자): {raw_response.content[:500]}...")
             
             # 토큰 사용량 추출 및 State에 누적 (원본 응답에서)
             tokens = extract_token_usage(raw_response)
             if tokens:
                 accumulate_tokens(state, tokens, token_type="eval")
-                logger.debug(f"[6a. Eval Holistic Flow] 토큰 사용량 - prompt: {tokens.get('prompt_tokens')}, completion: {tokens.get('completion_tokens')}, total: {tokens.get('total_tokens')}")
+                logger.info(f"[6a. Eval Holistic Flow] 토큰 사용량 - prompt: {tokens.get('prompt_tokens')}, completion: {tokens.get('completion_tokens')}, total: {tokens.get('total_tokens')}")
             else:
                 logger.warning(f"[6a. Eval Holistic Flow] 토큰 사용량 추출 실패 - raw_response 타입: {type(raw_response)}")
             
             # Chain 실행 (구조화된 출력 파싱)
+            logger.info(f"[6a. Eval Holistic Flow] 구조화된 출력 파싱 시작...")
             chain_result = await holistic_chain.ainvoke(chain_input)
+            logger.info(f"[6a. Eval Holistic Flow] 구조화된 출력 파싱 완료")
             
             # _llm_response는 더 이상 필요 없음 (이미 원본 응답에서 토큰 추출 완료)
             chain_result.pop("_llm_response", None)
@@ -251,14 +259,14 @@ async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
             # 평가 결과 로깅 (상세 분석 포함)
             analysis = result.get("holistic_flow_analysis", "")
             score = result.get("holistic_flow_score")
-            logger.info(
-                f"[6a. Eval Holistic Flow] 평가 완료 - "
-                f"session_id: {session_id}, score: {score}"
-            )
+            logger.info(f"[6a. Eval Holistic Flow] ===== 평가 완료 =====")
+            logger.info(f"[6a. Eval Holistic Flow] Holistic Flow Score: {score}")
+            logger.info(f"[6a. Eval Holistic Flow] Strategy Coherence: {result.get('strategy_coherence')}")
+            logger.info(f"[6a. Eval Holistic Flow] Problem Solving Approach: {result.get('problem_solving_approach')}")
+            logger.info(f"[6a. Eval Holistic Flow] Iteration Quality: {result.get('iteration_quality')}")
             if analysis:
-                # 전체 분석 내용을 로그에 출력
-                logger.info(f"[6a. Eval Holistic Flow] 전체 분석 내용 (점수: {score}):")
-                logger.info(f"[6a. Analysis] {analysis}")
+                logger.info(f"[6a. Eval Holistic Flow] Analysis (처음 500자): {analysis[:500]}...")
+                logger.info(f"[6a. Eval Holistic Flow] 전체 Analysis 길이: {len(analysis)} 문자")
             else:
                 logger.warning(f"[6a. Eval Holistic Flow] 분석 내용 없음 - session_id: {session_id}")
             

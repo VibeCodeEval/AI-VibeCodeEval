@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_vertexai import ChatVertexAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -19,13 +20,35 @@ from app.domain.langgraph.utils.token_tracking import extract_token_usage, accum
 
 
 def get_llm():
-    """LLM 인스턴스 생성"""
-    return ChatGoogleGenerativeAI(
-        model=settings.DEFAULT_LLM_MODEL,
-        google_api_key=settings.GEMINI_API_KEY,
-        temperature=settings.LLM_TEMPERATURE,
-        max_tokens=settings.LLM_MAX_TOKENS,
-    )
+    """LLM 인스턴스 생성 (Vertex AI 또는 AI Studio)"""
+    if settings.USE_VERTEX_AI:
+        # Vertex AI 사용 (GCP 크레딧 사용)
+        import json
+        from google.oauth2 import service_account
+        
+        credentials = None
+        if settings.GOOGLE_SERVICE_ACCOUNT_JSON:
+            service_account_info = json.loads(settings.GOOGLE_SERVICE_ACCOUNT_JSON)
+            credentials = service_account.Credentials.from_service_account_info(
+                service_account_info
+            )
+        
+        return ChatVertexAI(
+            model=settings.DEFAULT_LLM_MODEL,
+            project=settings.GOOGLE_PROJECT_ID,
+            location=settings.GOOGLE_LOCATION,
+            credentials=credentials,
+            temperature=settings.LLM_TEMPERATURE,
+            max_output_tokens=settings.LLM_MAX_TOKENS,
+        )
+    else:
+        # AI Studio 사용 (API Key 방식, Free Tier)
+        return ChatGoogleGenerativeAI(
+            model=settings.DEFAULT_LLM_MODEL,
+            google_api_key=settings.GEMINI_API_KEY,
+            temperature=settings.LLM_TEMPERATURE,
+            max_output_tokens=settings.LLM_MAX_TOKENS,
+        )
 
 
 # 시스템 프롬프트 템플릿
@@ -497,21 +520,21 @@ async def writer_llm(state: MainGraphState) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"[Writer LLM] 턴 매핑 저장 실패 (무시): {str(e)}")
         
-        # messages 배열에 turn 정보 포함 (백그라운드 4번 평가를 위해)
-        new_messages = [
-            {
-                "turn": current_turn,
-                "role": "user",
-                "content": human_message,
-                "timestamp": datetime.utcnow().isoformat()
-            },
-            {
-                "turn": current_turn,
-                "role": "assistant", 
-                "content": ai_content,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        ]
+        # messages 배열에 turn 정보 포함 (4번 노드 평가를 위해)
+        # LangChain BaseMessage 객체를 직접 생성하여 turn 속성 보존
+        from langchain_core.messages import HumanMessage, AIMessage
+        
+        human_msg = HumanMessage(content=human_message)
+        human_msg.turn = current_turn  # turn 속성 추가
+        human_msg.role = "user"  # role 속성 추가
+        human_msg.timestamp = datetime.utcnow().isoformat()
+        
+        ai_msg = AIMessage(content=ai_content)
+        ai_msg.turn = current_turn  # turn 속성 추가
+        ai_msg.role = "assistant"  # role 속성 추가
+        ai_msg.timestamp = datetime.utcnow().isoformat()
+        
+        new_messages = [human_msg, ai_msg]
         
         # State에 누적된 토큰 정보를 result에 포함 (LangGraph 병합을 위해)
         result = {

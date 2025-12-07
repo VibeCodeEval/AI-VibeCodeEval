@@ -37,6 +37,17 @@ services:
       timeout: 5s
       retries: 5
 
+  # Adminer (DB 관리 도구)
+  adminer:
+    image: adminer:latest
+    container_name: ai_vibe_adminer_dev
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+
 volumes:
   postgres_dev_data:
   redis_dev_data:

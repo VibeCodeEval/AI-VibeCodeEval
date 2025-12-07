@@ -63,7 +63,7 @@ class ChatResponse(BaseModel):
 
 
 class SubmitRequest(BaseModel):
-    """코드 제출 요청"""
+    """코드 제출 요청 (레거시 - 주석처리 예정)"""
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -85,6 +85,29 @@ class SubmitRequest(BaseModel):
     lang: str = Field("python", description="프로그래밍 언어")
 
 
+class SubmitCodeRequest(BaseModel):
+    """코드 제출 요청 (신규)"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "problemId": 1,
+                "specVersion": 1,
+                "examParticipantId": 9001,
+                "finalCode": "def solve():\n    print('hello')",
+                "language": "python3.11",
+                "submissionId": 88001
+            }
+        }
+    )
+    
+    problemId: int = Field(..., description="문제 ID")
+    specVersion: int = Field(..., description="스펙 버전")
+    examParticipantId: int = Field(..., description="참가자 식별값")
+    finalCode: str = Field(..., description="제출 코드")
+    language: str = Field(..., description="프로그래밍 언어 (예: python3.11)")
+    submissionId: int = Field(..., description="제출 ID (백엔드에서 생성)")
+
+
 class FinalScores(BaseModel):
     """최종 점수"""
     prompt_score: float = Field(..., description="프롬프트 점수 (0-100)")
@@ -100,7 +123,7 @@ class EvaluationFeedback(BaseModel):
 
 
 class SubmitResponse(BaseModel):
-    """코드 제출 응답"""
+    """코드 제출 응답 (레거시 - 주석처리 예정)"""
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -136,6 +159,21 @@ class SubmitResponse(BaseModel):
     error_message: Optional[str] = Field(None, description="에러 메시지")
 
 
+class SubmitCodeResponse(BaseModel):
+    """코드 제출 응답 (신규)"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "submissionId": 88001,
+                "status": "successed"
+            }
+        }
+    )
+    
+    submissionId: int = Field(..., description="제출 ID")
+    status: str = Field(..., description="처리 상태 (successed 또는 failed)")
+
+
 class SaveChatMessageRequest(BaseModel):
     """Spring Boot에서 메시지 저장 요청"""
     model_config = ConfigDict(
@@ -167,6 +205,83 @@ class SaveChatMessageResponse(BaseModel):
     message_id: int = Field(..., description="메시지 ID")
     success: bool = Field(True, description="저장 성공 여부")
     error_message: Optional[str] = Field(None, description="에러 메시지")
+
+
+# ===== 신규 API 스키마 (2024-12-07) =====
+
+class ProblemContext(BaseModel):
+    """문제 컨텍스트"""
+    problemId: int = Field(..., description="문제 ID", alias="problemId")
+    specVersion: int = Field(..., description="스펙 버전", alias="specVersion")
+
+
+class ChatMessagesRequest(BaseModel):
+    """메시지 전송 요청 (신규)"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "sessionId": 1,
+                "examParticipantId": 9001,
+                "turnId": 1,
+                "role": "USER",
+                "content": "이 문제를 DP로 푸는 힌트를 줘",
+                "context": {
+                    "problemId": 1,
+                    "specVersion": 1
+                }
+            }
+        }
+    )
+    
+    sessionId: int = Field(..., description="세션 ID", alias="sessionId")
+    examParticipantId: int = Field(..., description="참가자 식별값", alias="examParticipantId")
+    turnId: int = Field(..., description="DB의 prompt_messages.turn", alias="turnId")
+    role: str = Field(..., description="역할 (USER)")
+    content: str = Field(..., description="메시지 내용")
+    context: ProblemContext = Field(..., description="문제 컨텍스트")
+
+
+class AIMessageInfo(BaseModel):
+    """AI 메시지 정보"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "sessionId": 1,
+                "turn": 2,
+                "role": "AI",
+                "content": "다음은 문제 조건입니다...",
+                "tokenCount": 120,
+                "totalToken": 135
+            }
+        }
+    )
+    
+    sessionId: int = Field(..., description="세션 ID", alias="sessionId")
+    turn: int = Field(..., description="AI 응답 턴 (이전 대화 Turn + 1)")
+    role: str = Field("AI", description="역할")
+    content: str = Field(..., description="LLM이 생성한 응답")
+    tokenCount: int = Field(..., description="현재 턴 대화 토큰 (사용자 메시지 + AI 응답)", alias="tokenCount")
+    totalToken: int = Field(..., description="한 세션의 모든 대화 token_count의 합", alias="totalToken")
+
+
+class ChatMessagesResponse(BaseModel):
+    """메시지 전송 응답 (신규)"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "aiMessage": {
+                    "sessionId": 1,
+                    "turn": 2,
+                    "role": "AI",
+                    "content": "다음은 문제 조건입니다...",
+                    "tokenCount": 120,
+                    "totalToken": 135
+                }
+            }
+        }
+    )
+    
+    aiMessage: AIMessageInfo = Field(..., description="AI 응답 메시지")
 
 
 

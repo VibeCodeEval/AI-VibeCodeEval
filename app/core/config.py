@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=True
+        case_sensitive=True,
+        extra="ignore"  # 알 수 없는 환경 변수는 무시
     )
     
     # 앱 기본 설정
@@ -55,6 +56,12 @@ class Settings(BaseSettings):
     # LLM API 설정
     GEMINI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
+    
+    # Vertex AI 설정 (Google Cloud)
+    USE_VERTEX_AI: bool = False  # Vertex AI 사용 여부
+    GOOGLE_PROJECT_ID: Optional[str] = None  # GCP 프로젝트 ID
+    GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None  # Service Account JSON (문자열)
+    GOOGLE_LOCATION: str = "us-central1"  # GCP 리전
     
     # 기본 LLM 설정
     DEFAULT_LLM_MODEL: str = "gemini-2.5-flash"  # .env에서 오버라이드 가능 (기본값)

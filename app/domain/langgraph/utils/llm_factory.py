@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional, Literal
 from functools import lru_cache
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_vertexai import ChatVertexAI
 from langchain_openai import ChatOpenAI
 # from langchain_anthropic import ChatAnthropic  # 필요시 추가
 
@@ -64,14 +65,39 @@ def _create_cache_key(node_name: str, llm_type: str, **kwargs) -> str:
     return f"{node_name}_{llm_type}_{config_str}"
 
 
-def _create_gemini_llm(**kwargs) -> ChatGoogleGenerativeAI:
-    """Gemini LLM 생성"""
-    return ChatGoogleGenerativeAI(
-        model=kwargs.get("model", settings.DEFAULT_LLM_MODEL),
-        google_api_key=kwargs.get("api_key", settings.GEMINI_API_KEY),
-        temperature=kwargs.get("temperature", 0.3),
-        max_output_tokens=kwargs.get("max_tokens"),
-    )
+def _create_gemini_llm(**kwargs) -> ChatGoogleGenerativeAI | ChatVertexAI:
+    """Gemini LLM 생성 (Vertex AI 또는 AI Studio)"""
+    use_vertex_ai = kwargs.get("use_vertex_ai", settings.USE_VERTEX_AI)
+    
+    if use_vertex_ai:
+        # Vertex AI 사용 (GCP 크레딧 사용)
+        import json
+        from google.oauth2 import service_account
+        
+        credentials = None
+        if settings.GOOGLE_SERVICE_ACCOUNT_JSON:
+            # Service Account JSON 문자열을 파싱
+            service_account_info = json.loads(settings.GOOGLE_SERVICE_ACCOUNT_JSON)
+            credentials = service_account.Credentials.from_service_account_info(
+                service_account_info
+            )
+        
+        return ChatVertexAI(
+            model=kwargs.get("model", settings.DEFAULT_LLM_MODEL),
+            project=settings.GOOGLE_PROJECT_ID,
+            location=settings.GOOGLE_LOCATION,
+            credentials=credentials,  # None이면 ADC(Application Default Credentials) 사용
+            temperature=kwargs.get("temperature", 0.3),
+            max_output_tokens=kwargs.get("max_tokens"),
+        )
+    else:
+        # AI Studio 사용 (API Key 방식, Free Tier)
+        return ChatGoogleGenerativeAI(
+            model=kwargs.get("model", settings.DEFAULT_LLM_MODEL),
+            google_api_key=kwargs.get("api_key", settings.GEMINI_API_KEY),
+            temperature=kwargs.get("temperature", 0.3),
+            max_output_tokens=kwargs.get("max_tokens"),
+        )
 
 
 def _create_openai_llm(**kwargs) -> ChatOpenAI:
