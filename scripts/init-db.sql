@@ -215,14 +215,15 @@ ON DELETE CASCADE;
 
 -- 안전장치 1: Check Constraint (ENUM 값에 맞춰 수정)
 -- "Holistic 평가면 turn은 NULL, Turn 평가면 turn은 NOT NULL"
+-- ENUM을 텍스트로 명시적 캐스팅하여 타입 불일치 방지
 ALTER TABLE ai_vibe_coding_test.prompt_evaluations
 ADD CONSTRAINT check_valid_turn_logic
 CHECK (
     -- 경우 1: 전체 평가(HOLISTIC_FLOW)면 -> turn은 반드시 NULL
-    (evaluation_type = 'HOLISTIC_FLOW' AND turn IS NULL)
+    (evaluation_type::text = 'HOLISTIC_FLOW' AND turn IS NULL)
     OR
     -- 경우 2: 턴 평가(TURN_EVAL)면 -> turn은 반드시 NOT NULL
-    (evaluation_type = 'TURN_EVAL' AND turn IS NOT NULL)
+    (evaluation_type::text = 'TURN_EVAL' AND turn IS NOT NULL)
 );
 
 -- 안전장치 2-1: 턴 평가용 유니크 인덱스 (ENUM 값 적용)

@@ -64,7 +64,8 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
     모든 평가 점수를 취합하여 최종 점수 계산
     """
     session_id = state.get("session_id", "unknown")
-    logger.info(f"[7. Aggregate Final Scores] 진입 - session_id: {session_id}")
+    logger.info(f"[7. Aggregate Final Scores] ===== 최종 점수 집계 시작 =====")
+    logger.info(f"[7. Aggregate Final Scores] session_id: {session_id}")
     
     try:
         holistic_flow_score = state.get("holistic_flow_score")
@@ -72,11 +73,17 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         code_performance_score = state.get("code_performance_score")
         code_correctness_score = state.get("code_correctness_score")
         
+        logger.info(f"[7. Aggregate Final Scores] 입력 점수:")
+        logger.info(f"[7. Aggregate Final Scores]   - Holistic Flow Score: {holistic_flow_score}")
+        logger.info(f"[7. Aggregate Final Scores]   - Aggregate Turn Score: {aggregate_turn_score}")
+        logger.info(f"[7. Aggregate Final Scores]   - Code Performance Score: {code_performance_score}")
+        logger.info(f"[7. Aggregate Final Scores]   - Code Correctness Score: {code_correctness_score}")
+        
         # 가중치 설정
         weights = {
-            "prompt": 0.25,  # 프롬프트 활용 (턴 점수 + 플로우)
-            "performance": 0.25,  # 성능
-            "correctness": 0.50,  # 정확성
+            "prompt": 0.40,  # 프롬프트 활용 (턴 점수 + 플로우)
+            "performance": 0.30,  # 성능
+            "correctness": 0.30,  # 정확성
         }
         
         # 프롬프트 점수 계산
@@ -149,7 +156,12 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         if holistic_flow_analysis:
             feedback["holistic_flow_analysis"] = holistic_flow_analysis
         
-        logger.info(f"[7. Aggregate Final Scores] 완료 - session_id: {session_id}, 총점: {total_score:.2f}, 등급: {grade}")
+        logger.info(f"[7. Aggregate Final Scores] ===== 최종 점수 집계 완료 =====")
+        logger.info(f"[7. Aggregate Final Scores] Prompt Score: {prompt_score:.2f} (가중치: 40%)")
+        logger.info(f"[7. Aggregate Final Scores] Performance Score: {perf_score:.2f} (가중치: 30%)")
+        logger.info(f"[7. Aggregate Final Scores] Correctness Score: {correctness_score:.2f} (가중치: 30%)")
+        logger.info(f"[7. Aggregate Final Scores] Total Score: {total_score:.2f}")
+        logger.info(f"[7. Aggregate Final Scores] Grade: {grade}")
         
         # 제출 완료 시 Submission 생성 및 Score 저장
         submission_id = state.get("submission_id")

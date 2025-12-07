@@ -429,9 +429,20 @@ class EvalService:
             }
         }
         
-        logger.info(f"LangGraph 실행 시작 (제출) - session_id: {session_id}, lang: {lang}")
+        logger.info(f"[SubmitCode] ===== LangGraph 실행 시작 (제출) =====")
+        logger.info(f"[SubmitCode] session_id: {session_id}, exam_id: {exam_id}, participant_id: {participant_id}")
+        logger.info(f"[SubmitCode] spec_id: {spec_id}, lang: {lang}, code_length: {len(code_content)}")
+        # f-string 내부에서 backslash 사용 불가하므로 변수로 분리
+        code_preview = code_content[:200].replace('\n', '\\n')
+        logger.info(f"[SubmitCode] 코드 미리보기 (처음 200자): {code_preview}")
+        
         result = await self.graph.ainvoke(existing_state, config)
-        logger.info(f"LangGraph 실행 완료 (제출) - session_id: {session_id}")
+        
+        logger.info(f"[SubmitCode] ===== LangGraph 실행 완료 (제출) =====")
+        logger.info(f"[SubmitCode] session_id: {session_id}")
+        logger.info(f"[SubmitCode] is_submitted: {result.get('is_submitted', False)}")
+        logger.info(f"[SubmitCode] final_scores: {result.get('final_scores')}")
+        logger.info(f"[SubmitCode] submission_id: {result.get('submission_id')}")
         
         # 상태 저장
         await self.state_repo.save_state(session_id, result)

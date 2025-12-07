@@ -123,17 +123,16 @@ async def _eval_code_performance_impl(state: MainGraphState) -> Dict[str, Any]:
                 
                 if result and result.status == "success":
                     # 성능 점수 계산 (실행 시간과 메모리 기반)
-                    # 실행 시간이 짧을수록, 메모리가 적을수록 높은 점수
                     execution_time = result.execution_time
                     memory_used_mb = result.memory_used / (1024 * 1024)  # bytes -> MB
                     
-                    # 점수 계산 (0-100 스케일)
-                    # 시간 점수: 5초 기준으로 계산 (5초 이상이면 0점)
-                    time_score = max(0, 100 * (1 - execution_time / timeout))
-                    # 메모리 점수: 128MB 기준으로 계산
-                    memory_score = max(0, 100 * (1 - memory_used_mb / memory_limit))
-                    # 성능 점수: 시간 60%, 메모리 40%
-                    performance_score = time_score * 0.6 + memory_score * 0.4
+                    # 점수 계산 (합격 기준 기반)
+                    # 시간 점수: 코드 걸린 시간 < 합격 시간이면 50점, 아니면 0점
+                    time_score = 50.0 if execution_time < timeout else 0.0
+                    # 메모리 점수: 코드 메모리 소모량 < 메모리 소모량이면 50점, 아니면 0점
+                    memory_score = 50.0 if memory_used_mb < memory_limit else 0.0
+                    # 성능 점수: 시간 점수 + 메모리 점수 (최대 100점)
+                    performance_score = time_score + memory_score
                     
                     logger.info(
                         f"[6c] Judge0 실행 완료 - task_id: {task_id}, "

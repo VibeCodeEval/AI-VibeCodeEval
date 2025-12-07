@@ -102,6 +102,18 @@ async def setup_test_data():
             """))
             print("✅ ExamParticipant 생성 완료 (exam_id=1, participant_id=1,100, spec_id=10)")
             
+            # 6. PromptSession 생성 (테스트용 세션)
+            await db.execute(text("""
+                INSERT INTO ai_vibe_coding_test.prompt_sessions 
+                (id, exam_id, participant_id, spec_id, total_tokens, started_at)
+                VALUES (1, 1, 1, 10, 0, NOW())
+                ON CONFLICT (id) DO UPDATE
+                SET exam_id = EXCLUDED.exam_id,
+                    participant_id = EXCLUDED.participant_id,
+                    spec_id = EXCLUDED.spec_id
+            """))
+            print("✅ PromptSession 생성 완료 (id=1, exam_id=1, participant_id=1, spec_id=10)")
+            
             # 확인
             print("\n" + "=" * 80)
             print("생성된 데이터 확인")
@@ -109,6 +121,7 @@ async def setup_test_data():
             
             result = await db.execute(text("""
                 SELECT 
+                    ep.id as exam_participant_id,
                     ep.exam_id,
                     ep.participant_id,
                     ep.spec_id,
@@ -126,10 +139,29 @@ async def setup_test_data():
             row = result.fetchone()
             
             if row:
+                print(f"✅ ExamParticipant ID: {row.exam_participant_id} (API에서 examParticipantId로 사용)")
                 print(f"✅ Exam: {row.exam_title} (ID: {row.exam_id})")
                 print(f"✅ Participant: {row.participant_name} (ID: {row.participant_id})")
                 print(f"✅ Problem: {row.problem_title} (Spec ID: {row.spec_id})")
                 print(f"✅ State: {row.state}")
+            
+            # 세션 확인
+            session_result = await db.execute(text("""
+                SELECT 
+                    ps.id,
+                    ps.exam_id,
+                    ps.participant_id,
+                    ps.spec_id,
+                    ps.total_tokens,
+                    ps.started_at
+                FROM ai_vibe_coding_test.prompt_sessions ps
+                WHERE ps.id = 1
+            """))
+            session_row = session_result.fetchone()
+            
+            if session_row:
+                print(f"\n✅ Session: ID={session_row.id}, exam_id={session_row.exam_id}, participant_id={session_row.participant_id}, spec_id={session_row.spec_id}")
+                print(f"   - API 테스트 시 sessionId={session_row.id}, examParticipantId={row.exam_participant_id} 사용")
             
             print("\n" + "=" * 80)
             print("✅ 테스트 데이터 준비 완료!")

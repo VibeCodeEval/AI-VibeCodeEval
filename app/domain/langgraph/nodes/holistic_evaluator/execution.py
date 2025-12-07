@@ -84,11 +84,16 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
     language = "python"  # TODO: state에서 언어 정보 가져오기
     
     # ===== 1단계: Correctness 평가 =====
-    logger.info(f"[6c] 1단계: Correctness 평가 시작 - test_cases: {len(test_cases)} (API 제한: 1개만 사용)")
+    logger.info(f"[6c. Eval Code Execution] ===== 1단계: Correctness 평가 시작 =====")
+    logger.info(f"[6c. Eval Code Execution] test_cases: {len(test_cases)} (API 제한: 1개만 사용)")
+    logger.info(f"[6c. Eval Code Execution] timeout: {timeout}초, memory_limit: {memory_limit}MB")
     
     correctness_score = None
     test_cases_passed = None
     correctness_result = None
+    # Correctness 결과에서도 execution_time과 memory_used_mb 추출 (Performance 실패 시 대비)
+    correctness_execution_time = None
+    correctness_memory_used_mb = None
     
     try:
         from app.domain.queue import create_queue_adapter, JudgeTask
@@ -138,10 +143,25 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
                         correctness_score = 100.0 if correctness_result.status == "success" else 0.0
                         test_cases_passed = len(test_cases) if correctness_result.status == "success" else 0
                         
-                        logger.info(
-                            f"[6c] Correctness 평가 완료 - task_id: {correctness_task_id}, "
-                            f"status: {correctness_result.status}, score: {correctness_score}"
-                        )
+                        # Correctness 결과에서 execution_time과 memory_used 추출
+                        if correctness_result.execution_time is not None:
+                            correctness_execution_time = correctness_result.execution_time
+                        if correctness_result.memory_used is not None:
+                            correctness_memory_used_mb = correctness_result.memory_used / (1024 * 1024)  # bytes -> MB
+                        
+                        logger.info(f"[6c. Eval Code Execution] ===== Correctness 평가 완료 =====")
+                        logger.info(f"[6c. Eval Code Execution] task_id: {correctness_task_id}")
+                        logger.info(f"[6c. Eval Code Execution] status: {correctness_result.status}")
+                        logger.info(f"[6c. Eval Code Execution] Correctness Score: {correctness_score}")
+                        logger.info(f"[6c. Eval Code Execution] test_cases_passed: {test_cases_passed}/{len(test_cases)}")
+                        if correctness_execution_time is not None:
+                            logger.info(f"[6c. Eval Code Execution] 실행 시간: {correctness_execution_time:.3f}초")
+                        if correctness_memory_used_mb is not None:
+                            logger.info(f"[6c. Eval Code Execution] 메모리 사용: {correctness_memory_used_mb:.2f}MB")
+                        if correctness_result.output:
+                            logger.info(f"[6c. Eval Code Execution] 출력 (처음 200자): {correctness_result.output[:200]}...")
+                        if correctness_result.error:
+                            logger.warning(f"[6c. Eval Code Execution] 에러: {correctness_result.error}")
                         break
                     elif correctness_result.status == "success" and not test_cases:
                         # 테스트 케이스가 없으면 실행만 확인
@@ -209,7 +229,8 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         }
     
     # ===== 2단계: Performance 평가 (Correctness 통과 시에만) =====
-    logger.info(f"[6c] 2단계: Performance 평가 시작 (Correctness 통과)")
+    logger.info(f"[6c. Eval Code Execution] ===== 2단계: Performance 평가 시작 =====")
+    logger.info(f"[6c. Eval Code Execution] Correctness 통과 여부: {correctness_score is not None and correctness_score > 0}")
     
     performance_score = None
     execution_time = None
@@ -254,18 +275,19 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
                     execution_time = performance_result.execution_time
                     memory_used_mb = performance_result.memory_used / (1024 * 1024)  # bytes -> MB
                     
-                    # 점수 계산 (0-100 스케일)
-                    # 시간 점수: timeout 기준으로 계산
-                    time_score = max(0, 100 * (1 - execution_time / timeout))
-                    # 메모리 점수: memory_limit 기준으로 계산
-                    memory_score = max(0, 100 * (1 - memory_used_mb / memory_limit))
-                    # 성능 점수: 시간 60%, 메모리 40%
-                    performance_score = time_score * 0.6 + memory_score * 0.4
+                    # 점수 계산 (합격 기준 기반)
+                    # 시간 점수: 코드 걸린 시간 < 합격 시간이면 50점, 아니면 0점
+                    time_score = 50.0 if execution_time < timeout else 0.0
+                    # 메모리 점수: 코드 메모리 소모량 < 메모리 소모량이면 50점, 아니면 0점
+                    memory_score = 50.0 if memory_used_mb < memory_limit else 0.0
+                    # 성능 점수: 시간 점수 + 메모리 점수 (최대 100점)
+                    performance_score = time_score + memory_score
                     
-                    logger.info(
-                        f"[6c] Performance 평가 완료 - task_id: {performance_task_id}, "
-                        f"time: {execution_time}s, memory: {memory_used_mb:.2f}MB, score: {performance_score:.2f}"
-                    )
+                    logger.info(f"[6c. Eval Code Execution] ===== Performance 평가 완료 =====")
+                    logger.info(f"[6c. Eval Code Execution] task_id: {performance_task_id}")
+                    logger.info(f"[6c. Eval Code Execution] 실행 시간: {execution_time:.3f}초 (합격 기준: {timeout}초) → 시간 점수: {time_score}점")
+                    logger.info(f"[6c. Eval Code Execution] 메모리 사용: {memory_used_mb:.2f}MB (합격 기준: {memory_limit}MB) → 메모리 점수: {memory_score}점")
+                    logger.info(f"[6c. Eval Code Execution] Performance Score: {performance_score:.2f}점 (시간 {time_score}점 + 메모리 {memory_score}점)")
                     break
                 else:
                     # 실행 실패
@@ -292,13 +314,17 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         performance_score = 0.0
     
     # ===== 결과 반환 =====
+    # Performance 결과가 없으면 Correctness 결과에서 가져온 값 사용
+    final_execution_time = execution_time if execution_time is not None else correctness_execution_time
+    final_memory_used_mb = memory_used_mb if memory_used_mb is not None else correctness_memory_used_mb
+    
     result = {
         "code_correctness_score": round(correctness_score, 2) if correctness_score is not None else 0.0,
         "code_performance_score": round(performance_score, 2) if performance_score is not None else 0.0,
         "test_cases_passed": test_cases_passed or 0,
         "test_cases_total": test_cases_total,
-        "execution_time": execution_time,
-        "memory_used_mb": round(memory_used_mb, 2) if memory_used_mb is not None else None,
+        "execution_time": final_execution_time,
+        "memory_used_mb": round(final_memory_used_mb, 2) if final_memory_used_mb is not None else None,
         "updated_at": datetime.utcnow().isoformat(),
     }
     

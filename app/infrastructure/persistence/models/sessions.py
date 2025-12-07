@@ -125,7 +125,13 @@ class PromptEvaluation(Base):
         nullable=True  # NULL이면 세션 전체 평가 (HOLISTIC_FLOW)
     )
     evaluation_type: Mapped[EvaluationTypeEnum] = mapped_column(
-        Enum(EvaluationTypeEnum, name="evaluation_type_enum", schema="ai_vibe_coding_test"),
+        Enum(
+            EvaluationTypeEnum, 
+            name="evaluation_type_enum", 
+            schema="ai_vibe_coding_test",
+            create_type=False,  # 기존 ENUM 타입 사용 (DB에 이미 존재)
+            native_enum=True   # PostgreSQL 네이티브 ENUM 사용
+        ),
         nullable=False
     )  # 'TURN_EVAL', 'HOLISTIC_FLOW'
     details: Mapped[dict] = mapped_column(JSONB, nullable=False)  # 모든 평가 데이터(점수, 분석 내용 등) 저장

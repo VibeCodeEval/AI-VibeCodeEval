@@ -73,9 +73,69 @@ class StateRepository:
             ttl_seconds
         )
     
+    def _deserialize_messages(self, messages: list) -> list:
+        """
+        Redis dict를 LangChain BaseMessage 객체로 역직렬화
+        
+        Redis에서 가져온 dict 형태의 messages를 LangGraph가 사용하는
+        LangChain BaseMessage 객체로 변환합니다.
+        """
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+        
+        deserialized = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                # Redis에서 가져온 dict 형태
+                msg_type = msg.get("type", "unknown")
+                content = msg.get("content", "")
+                
+                # LangChain BaseMessage 객체 생성
+                if msg_type == "human" or msg.get("role") == "user":
+                    langchain_msg = HumanMessage(content=content)
+                elif msg_type == "ai" or msg.get("role") in ["assistant", "ai"]:
+                    langchain_msg = AIMessage(content=content)
+                elif msg_type == "system" or msg.get("role") == "system":
+                    langchain_msg = SystemMessage(content=content)
+                else:
+                    # 기본값: HumanMessage
+                    langchain_msg = HumanMessage(content=content)
+                
+                # 커스텀 속성 추가 (turn, timestamp 등)
+                if "turn" in msg:
+                    langchain_msg.turn = msg["turn"]
+                if "timestamp" in msg:
+                    langchain_msg.timestamp = msg["timestamp"]
+                if "role" in msg:
+                    langchain_msg.role = msg["role"]
+                
+                deserialized.append(langchain_msg)
+            elif hasattr(msg, 'content'):
+                # 이미 LangChain BaseMessage 객체인 경우
+                deserialized.append(msg)
+            else:
+                # 기타: 문자열 등
+                deserialized.append(HumanMessage(content=str(msg)))
+        
+        return deserialized
+    
     async def get_state(self, session_id: str) -> Optional[dict]:
-        """그래프 상태 조회"""
-        return await self.redis.get_graph_state(session_id)
+        """
+        그래프 상태 조회 (Redis → LangGraph State 변환)
+        
+        Redis에서 가져온 dict를 LangGraph가 사용할 수 있는 형태로 변환합니다.
+        - messages: dict → LangChain BaseMessage 객체로 역직렬화
+        - 기타 필드: 그대로 유지
+        """
+        state = await self.redis.get_graph_state(session_id)
+        
+        if state is None:
+            return None
+        
+        # messages 역직렬화 (dict → LangChain BaseMessage 객체)
+        if 'messages' in state and isinstance(state['messages'], list):
+            state['messages'] = self._deserialize_messages(state['messages'])
+        
+        return state
     
     async def delete_state(self, session_id: str) -> bool:
         """그래프 상태 삭제"""

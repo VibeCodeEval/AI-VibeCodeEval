@@ -28,7 +28,11 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
     session_id = state.get("session_id", "unknown")
     current_turn = state.get("current_turn", 0)
     
+    logger.info("")
+    logger.info("=" * 80)
     logger.info(f"[4. Eval Turn Guard] 진입 - session_id: {session_id}, 현재 턴: {current_turn}")
+    logger.info("=" * 80)
+    logger.info("")
     
     try:
         # ★ Submit 시 State의 messages에서 모든 턴을 추출하여 확실하게 평가
@@ -39,74 +43,99 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
         messages = state.get("messages", [])
         logger.info(f"[4. Eval Turn Guard] 전체 messages 개수: {len(messages)}")
         
+        # 디버깅: 메시지 구조 확인
+        for idx, msg in enumerate(messages):
+            if isinstance(msg, dict):
+                logger.debug(f"[4. Eval Turn Guard] 메시지 {idx} (dict): turn={msg.get('turn')}, role={msg.get('role')}, type={msg.get('type')}, content_len={len(str(msg.get('content', '')))}")
+            else:
+                msg_turn = getattr(msg, "turn", None)
+                msg_role = getattr(msg, "role", None)
+                msg_type = getattr(msg, "type", None) if hasattr(msg, "type") else None
+                msg_content = getattr(msg, "content", None)
+                logger.debug(f"[4. Eval Turn Guard] 메시지 {idx} (object): turn={msg_turn}, role={msg_role}, type={msg_type}, content_len={len(str(msg_content)) if msg_content else 0}")
+        
         # 제출 턴(current_turn)은 평가하지 않으므로, 1 ~ (current_turn - 1)만 평가
         turns_to_evaluate = list(range(1, current_turn))
-        logger.info(f"[4. Eval Turn Guard] 평가 대상 턴: {turns_to_evaluate}")
+        logger.info("")
+        logger.info(f"[4. Eval Turn Guard] ⭐ 평가 대상 턴: {turns_to_evaluate}")
+        logger.info(f"[4. Eval Turn Guard] ⭐ 총 {len(turns_to_evaluate)}개 턴 평가 예정")
+        logger.info("")
         
         if not turns_to_evaluate:
             logger.info(f"[4. Eval Turn Guard] 평가할 턴이 없음 (첫 제출)")
+            logger.info("")
             return {
                 "turn_scores": {},
                 "updated_at": datetime.utcnow().isoformat(),
             }
         
-        # Redis에서 턴-메시지 매핑 조회
-        turn_mapping = await redis_client.get_turn_mapping(session_id)
-        logger.info(f"[4. Eval Turn Guard] 턴 매핑 조회 - 존재: {turn_mapping is not None}, 턴 개수: {len(turn_mapping) if turn_mapping else 0}")
-        
         # 모든 턴 평가
-        for turn in turns_to_evaluate:
-            logger.info(f"[4. Eval Turn Guard] 턴 {turn} 평가 시작...")
+        # State의 messages에서 turn 정보로 직접 메시지 찾기 (Redis turn_mapping 불필요)
+        logger.info("-" * 80)
+        for idx, turn in enumerate(turns_to_evaluate, 1):
+            logger.info("")
+            logger.info(f"[4. Eval Turn Guard] [{idx}/{len(turns_to_evaluate)}] 턴 {turn} 평가 시작...")
+            logger.info("")
             
             human_msg = None
             ai_msg = None
             
-            # 방법 1: 턴 매핑 사용 (추천)
-            if turn_mapping and str(turn) in turn_mapping:
-                indices = turn_mapping[str(turn)]
-                start_idx = indices.get("start_msg_idx")
-                end_idx = indices.get("end_msg_idx")
+            # State의 messages에서 turn 정보로 직접 검색
+            # dict 형태 또는 LangChain BaseMessage 객체 모두 지원
+            for msg in messages:
+                # turn 정보 추출
+                msg_turn = None
+                msg_role = None
+                msg_content = None
                 
-                logger.info(f"[4. Eval Turn Guard] 턴 {turn} 매핑 발견 - indices: [{start_idx}, {end_idx}]")
-                
-                if start_idx is not None and end_idx is not None:
-                    if start_idx < len(messages) and end_idx < len(messages):
-                        user_msg_obj = messages[start_idx]
-                        ai_msg_obj = messages[end_idx]
-                        
-                        # content 추출 (dict 또는 객체 모두 지원)
-                        human_msg = user_msg_obj.get("content") if isinstance(user_msg_obj, dict) else getattr(user_msg_obj, "content", None)
-                        ai_msg = ai_msg_obj.get("content") if isinstance(ai_msg_obj, dict) else getattr(ai_msg_obj, "content", None)
-                        
-                        logger.info(f"[4. Eval Turn Guard] 턴 {turn} 메시지 추출 성공 (매핑 사용)")
+                if isinstance(msg, dict):
+                    msg_turn = msg.get("turn")
+                    msg_role = msg.get("role") or msg.get("type")  # role 우선, 없으면 type
+                    msg_content = msg.get("content")
+                else:
+                    # LangChain BaseMessage 객체
+                    msg_turn = getattr(msg, "turn", None)
+                    # role 속성 사용 (writer.py에서 role 속성을 추가함)
+                    msg_role = getattr(msg, "role", None)
+                    # content 추출
+                    if hasattr(msg, "content"):
+                        msg_content = msg.content
                     else:
-                        logger.warning(f"[4. Eval Turn Guard] 턴 {turn} 인덱스 범위 초과 - start: {start_idx}, end: {end_idx}, total: {len(messages)}")
-                else:
-                    logger.warning(f"[4. Eval Turn Guard] 턴 {turn} 매핑 인덱스 누락")
-            
-            # 방법 2: turn 키로 직접 검색 (fallback)
-            if not human_msg or not ai_msg:
-                logger.info(f"[4. Eval Turn Guard] 턴 {turn} - turn 키로 직접 검색 시도")
-                turn_messages = [
-                    msg for msg in messages 
-                    if isinstance(msg, dict) and msg.get("turn") == turn
-                ]
+                        msg_content = str(msg)
                 
-                if len(turn_messages) >= 2:
-                    for msg in turn_messages:
-                        if msg.get("role") == "user":
-                            human_msg = msg.get("content")
-                        elif msg.get("role") == "assistant":
-                            ai_msg = msg.get("content")
+                # 디버깅: 메시지 정보 로깅
+                logger.debug(f"[4. Eval Turn Guard] 메시지 확인 - turn: {msg_turn}, role: {msg_role}, content_len: {len(msg_content) if msg_content else 0}")
+                
+                # 해당 턴의 메시지인지 확인
+                # turn이 None이면 메시지 순서로 추론 (인덱스 0,1 = turn 1, 인덱스 2,3 = turn 2, ...)
+                msg_idx = messages.index(msg) if msg in messages else -1
+                inferred_turn = (msg_idx // 2) + 1 if msg_idx >= 0 else None
+                
+                # turn이 일치하거나, turn이 None이고 추론된 turn이 일치하는 경우
+                if msg_turn == turn or (msg_turn is None and inferred_turn == turn):
+                    # role 매핑: "user"/"human" -> human, "assistant"/"ai" -> ai
+                    if msg_role in ["user", "human"]:
+                        human_msg = msg_content
+                        logger.debug(f"[4. Eval Turn Guard] 턴 {turn} Human 메시지 발견 (turn: {msg_turn}, 추론: {inferred_turn})")
+                    elif msg_role in ["assistant", "ai"]:
+                        ai_msg = msg_content
+                        logger.debug(f"[4. Eval Turn Guard] 턴 {turn} AI 메시지 발견 (turn: {msg_turn}, 추론: {inferred_turn})")
                     
+                    # 둘 다 찾았으면 중단
                     if human_msg and ai_msg:
-                        logger.info(f"[4. Eval Turn Guard] 턴 {turn} 메시지 추출 성공 (turn 키 사용)")
-                else:
-                    logger.warning(f"[4. Eval Turn Guard] 턴 {turn} - turn 키로 발견된 메시지: {len(turn_messages)}개")
+                        break
+            
+            if human_msg and ai_msg:
+                logger.info(f"[4. Eval Turn Guard] 턴 {turn} 메시지 추출 성공 - State에서 직접 조회")
+            else:
+                logger.warning(f"[4. Eval Turn Guard] 턴 {turn} - State에서 메시지 찾기 실패 (human: {bool(human_msg)}, ai: {bool(ai_msg)})")
             
             # 평가 실행
             if human_msg and ai_msg:
-                logger.info(f"[4. Eval Turn Guard] 턴 {turn} 동기 평가 실행")
+                logger.info(f"[4. Eval Turn Guard] ===== 턴 {turn} 평가 시작 =====")
+                logger.info(f"[4. Eval Turn Guard] 사용자 메시지: {human_msg[:100]}...")
+                logger.info(f"[4. Eval Turn Guard] AI 응답: {ai_msg[:100]}...")
+                logger.info("")
                 
                 await _evaluate_turn_sync(
                     session_id=session_id,
@@ -116,12 +145,20 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                     problem_context=state.get("problem_context")
                 )
                 
-                logger.info(f"[4. Eval Turn Guard] 턴 {turn} 평가 완료 ✓")
+                logger.info("")
+                logger.info(f"[4. Eval Turn Guard] ===== 턴 {turn} 평가 완료 ✓ =====")
+                logger.info("")
             else:
+                logger.error("")
                 logger.error(f"[4. Eval Turn Guard] 턴 {turn} 메시지 추출 실패 - human: {bool(human_msg)}, ai: {bool(ai_msg)}")
                 logger.error(f"[4. Eval Turn Guard] 턴 {turn} - 평가 불가능 ✗")
+                logger.error("")
         
-        logger.info(f"[4. Eval Turn Guard] 모든 턴 평가 완료 - session_id: {session_id}, 평가 완료: {len(turns_to_evaluate)}턴")
+        logger.info("")
+        logger.info("-" * 80)
+        logger.info(f"[4. Eval Turn Guard] ✅ 모든 턴 평가 완료 - session_id: {session_id}, 평가 완료: {len(turns_to_evaluate)}턴")
+        logger.info("-" * 80)
+        logger.info("")
         
         # Redis에서 최신 turn_logs 조회 (평가 결과 반영)
         updated_turn_logs = await redis_client.get_all_turn_logs(session_id)
@@ -137,6 +174,11 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                 }
         
         logger.info(f"[4. Eval Turn Guard] 완료 - session_id: {session_id}, 최종 턴 로그 개수: {len(updated_turn_logs)}, turn_scores: {turn_scores}")
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info(f"[4. Eval Turn Guard] 종료")
+        logger.info("=" * 80)
+        logger.info("")
         
         return {
             "turn_scores": turn_scores,
@@ -144,7 +186,9 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
         }
         
     except Exception as e:
+        logger.error("")
         logger.error(f"[4. Eval Turn Guard] 오류 - session_id: {session_id}, error: {str(e)}", exc_info=True)
+        logger.error("")
         return {
             "error_message": f"턴 평가 가드 오류: {str(e)}",
             "updated_at": datetime.utcnow().isoformat(),
@@ -194,10 +238,21 @@ async def _evaluate_turn_sync(
         }
         
         # SubGraph 실행 (동기)
+        logger.info(f"[Eval Turn Sync] Eval Turn SubGraph 실행 시작 - turn: {turn}")
         result = await eval_turn_subgraph.ainvoke(turn_state)
+        logger.info(f"[Eval Turn Sync] Eval Turn SubGraph 실행 완료 - turn: {turn}")
         
         intent_type = result.get("intent_type", "UNKNOWN")
         turn_score = result.get("turn_score", 0)
+        
+        logger.info(f"[Eval Turn Sync] 턴 {turn} 평가 결과:")
+        logger.info(f"[Eval Turn Sync]   - Intent Type: {intent_type}")
+        logger.info(f"[Eval Turn Sync]   - Turn Score: {turn_score}")
+        
+        # LLM 응답 요약 로그
+        answer_summary = result.get("answer_summary", "")
+        if answer_summary:
+            logger.info(f"[Eval Turn Sync]   - Answer Summary: {answer_summary[:200]}...")
         
         # 개별 평가 결과에서 rubrics 생성
         eval_mapping = {
@@ -278,7 +333,7 @@ async def _evaluate_turn_sync(
                 f"[Eval Turn Sync] PostgreSQL 턴 평가 저장 실패 (Redis는 저장됨) - "
                 f"session_id: {session_id}, turn: {turn}, error: {str(pg_error)}"
             )
-        
+                    
         logger.info(f"[Eval Turn Sync] 턴 {turn} 평가 저장 완료 - session_id: {session_id}, score: {turn_score}")
         
     except Exception as e:
