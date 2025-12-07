@@ -97,7 +97,7 @@ class ExamParticipant(Base):
     token_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     spec_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
-        ForeignKey("problem_specs.spec_id"),
+        ForeignKey("problem_specs.id"),
         nullable=True
     )
     joined_at: Mapped[Optional[datetime]] = mapped_column(

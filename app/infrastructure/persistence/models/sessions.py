@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.persistence.session import Base
-from app.infrastructure.persistence.models.enums import PromptRoleEnum
+from app.infrastructure.persistence.models.enums import PromptRoleEnum, EvaluationTypeEnum
 
 
 class PromptSession(Base):
@@ -40,7 +40,7 @@ class PromptSession(Base):
     )
     spec_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
-        ForeignKey("problem_specs.spec_id"),
+        ForeignKey("problem_specs.id"),
         nullable=True
     )
     started_at: Mapped[datetime] = mapped_column(
@@ -122,22 +122,13 @@ class PromptEvaluation(Base):
     )
     turn: Mapped[Optional[int]] = mapped_column(
         Integer,
-        nullable=True  # NULL이면 세션 전체 평가 (holistic_flow, holistic_performance)
+        nullable=True  # NULL이면 세션 전체 평가 (HOLISTIC_FLOW)
     )
-    evaluation_type: Mapped[str] = mapped_column(
-        String(50),
+    evaluation_type: Mapped[EvaluationTypeEnum] = mapped_column(
+        Enum(EvaluationTypeEnum, name="evaluation_type_enum", schema="ai_vibe_coding_test"),
         nullable=False
-    )  # 'turn_eval', 'holistic_flow', 'holistic_performance'
-    node_name: Mapped[Optional[str]] = mapped_column(
-        String(100),
-        nullable=True
-    )  # 'eval_turn', 'eval_holistic_flow', 'eval_code_execution'
-    score: Mapped[Optional[float]] = mapped_column(
-        Numeric(5, 2),
-        nullable=True
-    )
-    analysis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    details: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    )  # 'TURN_EVAL', 'HOLISTIC_FLOW'
+    details: Mapped[dict] = mapped_column(JSONB, nullable=False)  # 모든 평가 데이터(점수, 분석 내용 등) 저장
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

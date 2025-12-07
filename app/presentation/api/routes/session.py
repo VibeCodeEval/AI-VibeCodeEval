@@ -7,11 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.presentation.schemas.session import (
     SessionState, SessionScores, ConversationHistory, Message,
-    StartSessionRequest, StartSessionResponse, SendMessageRequest,
-    SubmitCodeRequest
+    StartSessionRequest, StartSessionResponse, SendMessageRequest
 )
 from app.presentation.schemas.chat import (
-    SendMessageResponse, MessageInfo, SessionInfo, SubmitResponse
+    SendMessageResponse, MessageInfo, SessionInfo
 )
 from app.presentation.schemas.common import ErrorResponse
 from app.application.services.eval_service import EvalService
@@ -61,9 +60,6 @@ async def start_session(
             exam_id=request.examId,
             participant_id=request.participantId
         )
-        
-        # 세션 생성 후 커밋 (새로 생성된 경우)
-        await db.commit()
         
         # spec_id 확인 (요청의 specId와 일치하는지 확인)
         if session.spec_id != request.specId:
@@ -369,174 +365,6 @@ async def send_message(
                 "error_code": "INTERNAL_ERROR",
                 "error_message": f"메시지 전송 중 오류가 발생했습니다: {str(e)}"
             }
-        )
-
-
-@router.post(
-    "/{session_id}/submit",
-    response_model=SubmitResponse,
-    summary="응시자 코드 제출",
-    description="""
-    응시자가 코드를 제출하고 평가 결과를 받습니다.
-    
-    **처리 과정:**
-    1. 세션 정보 조회 (exam_id, participant_id, spec_id)
-    2. EvalService.submit_code() 호출
-       - Intent Analyzer: 제출 의도 감지 (PASSED_SUBMIT)
-       - Eval Turn Guard: 모든 턴 평가 완료 대기 & 누락 턴 재평가
-       - Main Router: 제출 확인 및 평가 플로우 진입
-       - 평가 노드 실행:
-         * 6a. Holistic Flow Evaluation (Chaining 전략)
-         * 6b. Aggregate Turn Scores (턴별 점수 집계)
-         * 6c. Code Performance (성능 평가)
-         * 6d. Code Correctness (정확성 평가)
-       * 7. Final Score Aggregation (최종 점수 산출)
-    3. 최종 점수 반환
-    
-    **제한사항:**
-    - Timeout: 300초 (5분, 평가 시간 고려)
-    - 제출은 세션당 1회만 가능
-    """
-)
-async def submit_code(
-    session_id: int,
-    request: SubmitCodeRequest,
-    db: AsyncSession = Depends(get_db),
-    eval_service: EvalService = Depends(get_eval_service)
-) -> SubmitResponse:
-    """응시자 코드 제출"""
-    import asyncio
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    try:
-        # 1. 세션 정보 조회
-        session_repo = SessionRepository(db)
-        session = await session_repo.get_session_by_id(session_id)
-        
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    "error": True,
-                    "error_code": "SESSION_NOT_FOUND",
-                    "error_message": f"세션을 찾을 수 없습니다. (session_id: {session_id})"
-                }
-            )
-        
-        # 2. Redis session_id 형식으로 변환
-        redis_session_id = f"session_{session_id}"
-        
-        logger.info(
-            f"[SubmitCode] 코드 제출 수신 - "
-            f"session_id: {session_id}, exam_id: {session.exam_id}, "
-            f"participant_id: {session.participant_id}, spec_id: {session.spec_id}"
-        )
-        
-        # 3. EvalService.submit_code() 호출 (5분 타임아웃)
-        result = await asyncio.wait_for(
-            eval_service.submit_code(
-                session_id=redis_session_id,
-                exam_id=session.exam_id,
-                participant_id=session.participant_id,
-                spec_id=session.spec_id,
-                code_content=request.code,
-                lang=request.lang,
-            ),
-            timeout=300.0  # 5분
-        )
-        
-        # 4. 에러 발생 시
-        if result.get("error"):
-            return SubmitResponse(
-                session_id=redis_session_id,
-                submission=None,
-                is_submitted=False,
-                final_scores=None,
-                turn_scores=None,
-                error=True,
-                error_message=result.get("error_message"),
-            )
-        
-        # 5. Submission 정보 조회 (submission_id가 있으면)
-        submission_info = None
-        submission_id = result.get("submission_id")
-        if submission_id:
-            try:
-                from app.infrastructure.repositories.submission_repository import SubmissionRepository
-                submission_repo = SubmissionRepository(db)
-                submission = await submission_repo.get_submission_by_id(submission_id)
-                
-                if submission:
-                    from app.presentation.schemas.chat import SubmissionInfo
-                    submission_info = SubmissionInfo(
-                        id=submission.id,
-                        examId=submission.exam_id,
-                        participantId=submission.participant_id,
-                        specId=submission.spec_id,
-                        lang=submission.lang,
-                        status=submission.status.value if submission.status else "UNKNOWN",
-                        codeSha256=submission.code_sha256,
-                        codeBytes=submission.code_bytes,
-                        codeLoc=submission.code_loc,
-                        createdAt=submission.created_at.isoformat() if submission.created_at else ""
-                    )
-            except Exception as e:
-                logger.warning(f"[SubmitCode] Submission 정보 조회 실패 - submission_id: {submission_id}, error: {str(e)}")
-        
-        # 6. 피드백 정보 추출
-        feedback_data = result.get("feedback", {})
-        from app.presentation.schemas.chat import EvaluationFeedback
-        feedback = None
-        if feedback_data:
-            feedback = EvaluationFeedback(
-                holistic_flow_analysis=feedback_data.get("holistic_flow_analysis")
-            )
-        
-        # 7. 토큰 사용량을 Core 전달 형식으로 변환
-        from app.domain.langgraph.utils.token_tracking import format_tokens_for_core
-        core_tokens = format_tokens_for_core(
-            chat_tokens=result.get("chat_tokens"),
-            eval_tokens=result.get("eval_tokens")
-        )
-        
-        # 8. 정상 응답
-        return SubmitResponse(
-            session_id=redis_session_id,
-            submission=submission_info,
-            is_submitted=True,
-            final_scores=result.get("final_scores"),
-            turn_scores=result.get("turn_scores"),
-            feedback=feedback,
-            chat_tokens=core_tokens.get("chat_tokens"),
-            eval_tokens=core_tokens.get("eval_tokens"),
-            error=False,
-            error_message=None,
-        )
-        
-    except asyncio.TimeoutError:
-        logger.error(f"[SubmitCode] 코드 제출 타임아웃 - session_id: {session_id}")
-        return SubmitResponse(
-            session_id=f"session_{session_id}",
-            submission=None,
-            is_submitted=False,
-            final_scores=None,
-            turn_scores=None,
-            error=True,
-            error_message="요청 처리 시간이 초과되었습니다. (5분 타임아웃)",
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[SubmitCode] 코드 제출 중 예외 발생: {str(e)}", exc_info=True)
-        return SubmitResponse(
-            session_id=f"session_{session_id}",
-            submission=None,
-            is_submitted=False,
-            final_scores=None,
-            turn_scores=None,
-            error=True,
-            error_message=f"코드 제출 중 오류가 발생했습니다: {str(e)}",
         )
 
 

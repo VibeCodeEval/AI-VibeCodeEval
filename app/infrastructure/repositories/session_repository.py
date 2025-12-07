@@ -279,35 +279,6 @@ class SessionRepository:
         result = await self.db.execute(query)
         return list(result.scalars().all())
     
-    async def get_sessions_by_exam_participant(
-        self,
-        exam_id: int,
-        participant_id: int
-    ) -> List[PromptSession]:
-        """
-        참가자의 모든 세션 조회 (exam_id, participant_id 기반)
-        
-        [사용처]
-        - 백엔드에서 참가자의 모든 세션 조회
-        - 세션 히스토리 확인
-        
-        Args:
-            exam_id: 시험 ID
-            participant_id: 참가자 ID
-        
-        Returns:
-            PromptSession 리스트 (시간순 정렬)
-        """
-        query = select(PromptSession).where(
-            and_(
-                PromptSession.exam_id == exam_id,
-                PromptSession.participant_id == participant_id
-            )
-        ).order_by(PromptSession.started_at.desc())
-        
-        result = await self.db.execute(query)
-        return list(result.scalars().all())
-    
     async def get_last_n_messages(
         self,
         session_id: int,
@@ -347,7 +318,7 @@ class SessionRepository:
     async def add_message(
         self,
         session_id: int,
-        turn: Optional[int],
+        turn: int,
         role: PromptRoleEnum,
         content: str,
         token_count: int = 0,
@@ -356,31 +327,15 @@ class SessionRepository:
         """
         메시지 추가 (단일)
         
-        [Atomic Increment 방식]
-        - turn=None일 경우: DB에서 자동으로 MAX(turn) + 1 계산하여 저장
-        - turn이 지정된 경우: 지정된 turn 번호로 저장
-        
-        ⚠️ **중요**: turn=None은 파라미터 의미일 뿐, DB에는 항상 정수값이 저장됩니다.
-        - DB 스키마: `turn INTEGER NOT NULL` (NULL 불가능)
-        - SQL 서브쿼리: `COALESCE(MAX(turn), 0) + 1` → 항상 정수 반환 (최소 1)
-        - 따라서 실제 저장되는 turn 값은 절대 NULL이 아닙니다.
-        
-        [동시성 안전]
-        - DB 레벨에서 원자적(Atomic) 처리로 동시성 문제 방지
-        - 서브쿼리를 사용하여 MAX(turn) + 1을 계산
-        - UNIQUE 제약조건과 함께 사용하여 중복 방지
-        
         [호출 시점]
-        1. Handle Request에서 사용자 메시지 처리 후: role=USER, turn=None
-        2. Writer LLM 응답 생성 후: role=AI, turn=None
-        3. SYSTEM 프롬프트 기록 시: role=SYSTEM, turn=None (선택)
+        1. Handle Request에서 사용자 메시지 처리 후: role=USER
+        2. Writer LLM 응답 생성 후: role=ASSISTANT
+        3. SYSTEM 프롬프트 기록 시: role=SYSTEM (선택)
         
         [turn과 role 관계]
-        - Turn 1: USER (사용자 질문)
-        - Turn 2: AI (AI 답변)
-        - Turn 3: USER
-        - Turn 4: AI
-        - 순차적으로 저장 (같은 turn에 USER/AI 페어 저장 불가)
+        - Turn 1: USER (사용자 질문), ASSISTANT (AI 답변)
+        - Turn 2: USER, ASSISTANT
+        - 같은 turn에 user/assistant 페어로 저장
         
         [meta 필드 활용]
         meta 필드(JSONB)에 추가 정보 저장 가능:
@@ -389,140 +344,33 @@ class SessionRepository:
         - meta.llm_model: 사용한 LLM 모델명
         - meta.timestamp: 생성 시각 (ISO 8601)
         
+        [현재 상태]
+        - ⏳ 아직 API에서 호출 안 함
+        - 향후 writer.py 또는 submit_code()에서 호출 예정
+        
         Args:
             session_id: 세션 ID
-            turn: 턴 번호 
-                - None: DB에서 자동 계산 (MAX(turn) + 1, 최소 1)
-                - int: 지정된 번호로 저장
-                - ⚠️ 실제 DB 저장값은 항상 정수 (NULL 불가능)
-            role: 메시지 역할 (USER/AI)
+            turn: 턴 번호 (1, 2, 3...)
+            role: 메시지 역할 (USER/ASSISTANT/SYSTEM)
             content: 메시지 내용
             token_count: 토큰 수 (LLM 응답 시 필수)
             meta: 메타데이터 (JSON, 선택)
         
         Returns:
-            생성된 PromptMessage (id, turn 포함, turn은 항상 정수)
+            생성된 PromptMessage (id 포함)
         """
-        from sqlalchemy import text, func
-        
-        if turn is None:
-            # Atomic Increment: DB에서 자동으로 다음 turn 번호 계산
-            # 서브쿼리를 사용하여 동시성 안전 보장
-            # meta를 JSON 문자열로 변환
-            import json
-            meta_json = json.dumps(meta) if meta else None
-            
-            # SQLAlchemy의 text()는 named parameter를 지원하며,
-            # asyncpg 드라이버가 이를 자동으로 positional parameter로 변환합니다.
-            insert_query = text("""
-                INSERT INTO ai_vibe_coding_test.prompt_messages 
-                (session_id, turn, role, content, token_count, meta, created_at)
-                VALUES (
-                    :session_id,
-                    (SELECT COALESCE(MAX(turn), 0) + 1 
-                     FROM ai_vibe_coding_test.prompt_messages 
-                     WHERE session_id = :session_id),
-                    CAST(:role AS ai_vibe_coding_test.prompt_role_enum),
-                    :content,
-                    :token_count,
-                    CAST(:meta AS jsonb),
-                    NOW()
-                )
-                RETURNING id, turn, session_id, role, content, token_count, meta, created_at
-            """)
-            
-            result = await self.db.execute(
-                insert_query,
-                {
-                    "session_id": session_id,
-                    "role": role.value,  # Enum 값을 문자열로 변환
-                    "content": content,
-                    "token_count": token_count,
-                    "meta": meta_json
-                }
-            )
-            row = result.fetchone()
-            
-            # 반환된 행을 PromptMessage 객체로 변환
-            message = PromptMessage(
-                id=row.id,
-                session_id=row.session_id,
-                turn=row.turn,
-                role=role,
-                content=row.content,
-                token_count=row.token_count,
-                meta=json.loads(row.meta) if row.meta else None,
-                created_at=row.created_at
-            )
-            # 이미 DB에 저장된 객체이므로 merge를 사용하여 세션에 등록
-            # (이후 조회 시 사용 가능하도록)
-            message = await self.db.merge(message)
-            await self.db.flush()
-            return message
-        else:
-            # turn이 지정된 경우: 기존 방식 사용
-            message = PromptMessage(
-                session_id=session_id,
-                turn=turn,
-                role=role,
-                content=content,
-                token_count=token_count,
-                meta=meta,
-                created_at=datetime.utcnow()
-            )
-            self.db.add(message)
-            await self.db.flush()
-            return message
-    
-    async def get_next_turn_number(self, session_id: int) -> int:
-        """
-        다음 턴 번호 계산
-        
-        ⚠️ **DEPRECATED**: 이 메서드는 더 이상 사용하지 않습니다.
-        대신 `add_message(turn=None)`을 사용하여 DB에서 자동으로 turn 번호를 계산하세요.
-        
-        [Atomic Increment 방식으로 변경됨]
-        - `add_message(turn=None)`을 호출하면 DB에서 자동으로 MAX(turn) + 1 계산
-        - 동시성 안전 보장 (DB 레벨에서 원자적 처리)
-        - UPDATE 없이 INSERT만 사용
-        
-        [계산 방법]
-        1. DB에서 해당 세션의 최대 turn 번호 조회
-        2. 없으면 1 (첫 턴)
-        3. 있으면 MAX(turn) + 1
-        
-        [사용처]
-        - ⚠️ 레거시 코드 및 테스트 스크립트에서만 사용
-        - 새로운 코드에서는 `add_message(turn=None)` 사용 권장
-        
-        Args:
-            session_id: 세션 ID
-            
-        Returns:
-            다음 턴 번호 (1부터 시작)
-        """
-        import warnings
-        warnings.warn(
-            "get_next_turn_number() is deprecated. Use add_message(turn=None) instead.",
-            DeprecationWarning,
-            stacklevel=2
+        message = PromptMessage(
+            session_id=session_id,
+            turn=turn,
+            role=role,
+            content=content,
+            token_count=token_count,
+            meta=meta,
+            created_at=datetime.utcnow()
         )
-        
-        from sqlalchemy import func
-        
-        # 해당 세션의 최대 turn 번호 조회
-        query = select(func.max(PromptMessage.turn)).where(
-            PromptMessage.session_id == session_id
-        )
-        result = await self.db.execute(query)
-        max_turn = result.scalar_one_or_none()
-        
-        # 최대 turn이 없으면 첫 턴 (1)
-        if max_turn is None:
-            return 1
-        
-        # 최대 turn이 있으면 다음 턴 (max_turn + 1)
-        return max_turn + 1
+        self.db.add(message)
+        await self.db.flush()
+        return message
     
     async def save_messages_batch(
         self,
@@ -558,7 +406,7 @@ class SessionRepository:
             {
                 "session_id": 123,
                 "turn": 1,
-                "role": PromptRoleEnum.AI,  # DB ENUM 정의에 맞춰 'AI' 사용
+                "role": PromptRoleEnum.ASSISTANT,
                 "content": "...",
                 "token_count": 120
             }

@@ -53,20 +53,11 @@ class Settings(BaseSettings):
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     # LLM API 설정
-    GEMINI_API_KEY: Optional[str] = None  # Gemini API (구 방식, 하위 호환성)
+    GEMINI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     
-    # GCP Vertex AI 설정 (ADC 인증)
-    GOOGLE_PROJECT_ID: Optional[str] = None  # GCP 프로젝트 ID
-    GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None  # 서비스 계정 JSON 문자열 (한 줄) 또는 JSON 파일 경로
-    GOOGLE_SERVICE_ACCOUNT_PATH: Optional[str] = None  # 서비스 계정 JSON 파일 경로 (선택사항, 파일 경로 사용 시)
-    GOOGLE_LOCATION: str = "us-central1"  # Vertex AI 리전
-    
-    # LLM 사용 방식 선택
-    USE_VERTEX_AI: bool = False  # True: Vertex AI 사용, False: Gemini API 사용
-    
     # 기본 LLM 설정
-    DEFAULT_LLM_MODEL: str = "gemini-1.5-pro"  # Vertex AI 모델명 (gemini-1.5-pro, gemini-1.5-flash 등)
+    DEFAULT_LLM_MODEL: str = "gemini-2.5-flash"  # .env에서 오버라이드 가능 (기본값)
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 4096
     

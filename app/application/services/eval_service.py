@@ -4,27 +4,24 @@
 [목적]
 - LangGraph 메인 플로우의 실행을 관리하는 핵심 서비스
 - Redis를 통한 상태 관리
-- Submit 시 턴별 평가 실행
+- 제출 시 모든 턴 평가 실행
 
 [주요 역할]
 1. process_message(): 일반 채팅 메시지 처리
    - LangGraph 메인 플로우 실행
    - Redis 상태 로드/저장
-   - 평가는 하지 않음 (Submit 시에만 평가)
+   - 평가 실행하지 않음 (응답만 반환)
    
 2. submit_code(): 코드 제출 및 최종 평가
    - is_submission=True로 설정
-   - 전체 평가 플로우 실행 (4번 노드 포함)
+   - Eval Turn Guard에서 모든 턴 평가
+   - 전체 평가 플로우 실행
    - 최종 점수 산출
-
-3. _run_eval_turn_background(): 백그라운드 평가 (Deprecated)
-   - 현재 사용하지 않음
-   - Submit 시에만 평가하도록 변경됨
 
 [아키텍처]
 API 요청 → EvalService → LangGraph → Redis
-                     ↓
-            Submit 시: Eval Turn Guard (4번 노드) → 평가 노드들
+                     ↓ (제출 시)
+            Eval Turn Guard → Eval Turn SubGraph (동기 실행)
 """
 from typing import Optional, Dict, Any, AsyncIterator
 from datetime import datetime
@@ -60,7 +57,8 @@ class EvalService:
        - Redis 클라이언트 주입
        - LangGraph 컴파일
     2. process_message() / submit_code(): 요청 처리
-    3. 평가는 Submit 시에만 실행 (4번 노드: eval_turn_guard)
+       - 일반 채팅: 평가 없이 응답만 반환
+       - 제출: Eval Turn Guard에서 모든 턴 평가 후 최종 평가 진행
     """
     
     def __init__(self, redis: RedisClient):
@@ -91,14 +89,14 @@ class EvalService:
         [처리 흐름]
         1. Redis에서 기존 상태 로드 (또는 초기 상태 생성)
         2. LangGraph 메인 플로우 실행
-           - Handle Request → Intent Analyzer → Writer LLM → END
-           - 또는 제출 시: Intent Analyzer → Eval Turn Guard (4번) → 평가 노드들 → END
+           - 일반 채팅: Handle Request → Intent Analyzer → Writer LLM → END
+           - 제출: Intent Analyzer → Eval Turn Guard (모든 턴 평가) → 평가 노드들 → END
         3. 결과를 Redis에 저장
         4. 응답 반환
         
         [평가 실행 시점]
-        - 일반 채팅(is_submission=False): 평가하지 않음
-        - 제출(is_submission=True): 4번 노드(Eval Turn Guard)에서 모든 턴 평가 실행
+        - 일반 채팅(is_submission=False): 평가 실행하지 않음 (응답만 반환)
+        - 제출(is_submission=True): Eval Turn Guard에서 모든 턴을 동기적으로 평가
         
         Args:
             session_id: 세션 ID (고유)
@@ -161,8 +159,8 @@ class EvalService:
             if result.get('messages'):
                 logger.info(f"마지막 메시지: {result.get('messages')[-1] if result.get('messages') else 'None'}")
             
-            # 평가는 Submit 시에만 실행됨 (4번 노드: eval_turn_guard에서 처리)
-            # 일반 채팅에서는 평가하지 않음
+            # ⚠️ 일반 채팅에서는 Eval Turn SubGraph를 실행하지 않음
+            # 평가는 제출 시 Eval Turn Guard에서 모든 턴을 동기적으로 실행
             
             # 상태 저장
             await self.state_repo.save_state(session_id, result)
@@ -271,8 +269,8 @@ class EvalService:
         - 토큰 단위로 yield
         
         [평가 실행 시점]
-        - 일반 채팅(is_submission=False): 평가하지 않음
-        - 제출(is_submission=True): 4번 노드(Eval Turn Guard)에서 모든 턴 평가 실행
+        - 일반 채팅(is_submission=False): 평가 실행하지 않음 (스트리밍만 수행)
+        - 제출(is_submission=True): Eval Turn Guard에서 모든 턴을 동기적으로 평가
         
         Args:
             session_id: 세션 ID (고유)
@@ -365,8 +363,8 @@ class EvalService:
             # 디버깅: 결과 로깅
             logger.info(f"LangGraph 결과 - session_id: {session_id}, keys: {list(final_result.keys()) if final_result else 'None'}")
             
-            # 평가는 Submit 시에만 실행됨 (4번 노드: eval_turn_guard에서 처리)
-            # 일반 채팅에서는 평가하지 않음
+            # ⚠️ 일반 채팅에서는 Eval Turn SubGraph를 실행하지 않음
+            # 평가는 제출 시 Eval Turn Guard에서 모든 턴을 동기적으로 실행
             
             # 상태 저장
             if final_result:
@@ -404,55 +402,12 @@ class EvalService:
         # 기존 상태 로드 또는 초기 상태 생성
         existing_state = await self.state_repo.get_state(session_id)
         
-        # 제출 시점에 DB에서 이전 메시지를 로드하여 State에 추가
-        # 4번 노드에서 턴 평가를 위해 messages가 필요함
         if existing_state:
             # 기존 상태 업데이트
-            # ★ 중요: exam_id, participant_id, spec_id도 업데이트 (Submission 저장을 위해)
-            existing_state["exam_id"] = exam_id
-            existing_state["participant_id"] = participant_id
-            existing_state["spec_id"] = spec_id
             existing_state["human_message"] = "코드를 제출합니다."
             existing_state["is_submitted"] = True
             existing_state["code_content"] = code_content
             existing_state["lang"] = lang
-            
-            # State의 messages가 비어있으면 DB에서 로드
-            if not existing_state.get("messages") or len(existing_state.get("messages", [])) == 0:
-                try:
-                    from app.infrastructure.persistence.session import get_db_context
-                    from app.infrastructure.repositories.session_repository import SessionRepository
-                    
-                    # session_id를 PostgreSQL id로 변환
-                    postgres_session_id = None
-                    if session_id.startswith("session_"):
-                        remaining = session_id.replace("session_", "", 1)
-                        if remaining.startswith("test_"):
-                            remaining = remaining.replace("test_", "", 1)
-                        try:
-                            postgres_session_id = int(remaining)
-                        except ValueError:
-                            pass
-                    
-                    if postgres_session_id:
-                        async with get_db_context() as db:
-                            session_repo = SessionRepository(db)
-                            messages = await session_repo.get_session_messages(postgres_session_id)
-                            
-                            # DB 메시지를 State messages 형식으로 변환
-                            state_messages = []
-                            for msg in messages:
-                                state_messages.append({
-                                    "turn": msg.turn,
-                                    "role": msg.role.value.lower() if hasattr(msg.role, 'value') else str(msg.role).lower(),
-                                    "content": msg.content,
-                                    "timestamp": msg.created_at.isoformat() if msg.created_at else None
-                                })
-                            
-                            existing_state["messages"] = state_messages
-                            logger.info(f"[EvalService.submit_code] DB에서 메시지 로드 완료 - session_id: {session_id}, messages: {len(state_messages)}개")
-                except Exception as e:
-                    logger.warning(f"[EvalService.submit_code] DB 메시지 로드 실패 (계속 진행) - session_id: {session_id}, error: {str(e)}")
         else:
             # 초기 상태 생성
             state = get_initial_state(
@@ -466,42 +421,6 @@ class EvalService:
             state["code_content"] = code_content
             state["lang"] = lang
             existing_state = state
-            
-            # existing_state가 없을 때도 DB에서 메시지 로드 시도
-            try:
-                from app.infrastructure.persistence.session import get_db_context
-                from app.infrastructure.repositories.session_repository import SessionRepository
-                
-                # session_id를 PostgreSQL id로 변환
-                postgres_session_id = None
-                if session_id.startswith("session_"):
-                    remaining = session_id.replace("session_", "", 1)
-                    if remaining.startswith("test_"):
-                        remaining = remaining.replace("test_", "", 1)
-                    try:
-                        postgres_session_id = int(remaining)
-                    except ValueError:
-                        pass
-                
-                if postgres_session_id:
-                    async with get_db_context() as db:
-                        session_repo = SessionRepository(db)
-                        messages = await session_repo.get_session_messages(postgres_session_id)
-                        
-                        # DB 메시지를 State messages 형식으로 변환
-                        state_messages = []
-                        for msg in messages:
-                            state_messages.append({
-                                "turn": msg.turn,
-                                "role": msg.role.value.lower() if hasattr(msg.role, 'value') else str(msg.role).lower(),
-                                "content": msg.content,
-                                "timestamp": msg.created_at.isoformat() if msg.created_at else None
-                            })
-                        
-                        existing_state["messages"] = state_messages
-                        logger.info(f"[EvalService.submit_code] DB에서 메시지 로드 완료 (초기 상태) - session_id: {session_id}, messages: {len(state_messages)}개")
-            except Exception as e:
-                logger.warning(f"[EvalService.submit_code] DB 메시지 로드 실패 (계속 진행) - session_id: {session_id}, error: {str(e)}")
         
         # 그래프 실행
         config = {
@@ -585,12 +504,9 @@ class EvalService:
         main_state: Dict[str, Any]
     ) -> None:
         """
-        [Deprecated] 4번 노드(Eval Turn SubGraph)를 백그라운드에서 실행
+        4번 노드(Eval Turn SubGraph)를 백그라운드에서 실행
         
-        ⚠️ 이 함수는 더 이상 사용되지 않습니다.
-        평가는 Submit 시에만 실행됩니다 (4번 노드: eval_turn_guard).
-        
-        [이전 목적]
+        [목적]
         - 일반 채팅의 각 턴마다 비동기로 평가 수행
         - 사용자 응답 지연 없이 실시간 평가
         

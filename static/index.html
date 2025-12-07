@@ -523,26 +523,6 @@
                 <div class="session-info">
                     Session: <span id="sessionId">-</span> | Turn: <span id="currentTurn">0</span>
                 </div>
-                <div class="config-section" style="margin-top: 12px; padding: 12px; background: rgba(255, 255, 255, 0.15); border-radius: 8px; font-size: 13px;">
-                    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-                        <label style="display: flex; align-items: center; gap: 4px;">
-                            <span>Exam ID:</span>
-                            <input type="number" id="examIdInput" value="1" min="1" style="width: 60px; padding: 4px 8px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; background: rgba(255,255,255,0.2); color: white; font-size: 13px;">
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 4px;">
-                            <span>Participant ID:</span>
-                            <input type="number" id="participantIdInput" value="100" min="1" style="width: 60px; padding: 4px 8px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; background: rgba(255,255,255,0.2); color: white; font-size: 13px;">
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 4px;">
-                            <span>Spec ID:</span>
-                            <input type="number" id="specIdInput" value="10" min="1" style="width: 60px; padding: 4px 8px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; background: rgba(255,255,255,0.2); color: white; font-size: 13px;">
-                        </label>
-                        <button onclick="updateConfig()" style="padding: 4px 12px; background: rgba(255,255,255,0.3); border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; color: white; cursor: pointer; font-size: 12px;">적용</button>
-                    </div>
-                    <div style="margin-top: 8px; font-size: 11px; opacity: 0.85;">
-                        ⚠️ 일반 채팅은 Redis에만 저장 (TTL 24시간), 제출 시에만 PostgreSQL 저장
-                    </div>
-                </div>
                 <div class="token-usage">
                     <div class="token-usage-header">
                         <span class="token-usage-label">토큰 사용량</span>
@@ -620,11 +600,7 @@
         let refreshInterval = null;
         let openTurnLogs = new Set(); // 열려있는 턴 로그 ID 저장
         let problemPanelOpen = false;
-        
-        // 설정 값 (입력 필드에서 가져옴)
-        let EXAM_ID = 1;
-        let PARTICIPANT_ID = 100;
-        let SPEC_ID = 10;
+        const SPEC_ID = 10; // 기본 spec_id
         
         // 토큰 사용량 추적
         const TOKEN_LIMIT = 20000; // 20K 제한
@@ -633,9 +609,6 @@
 
         // 초기화
         document.getElementById('sessionId').textContent = sessionId;
-        
-        // 설정 값 로드
-        updateConfig();
         
         // 문제 정보 로드
         loadProblemInfo();
@@ -660,9 +633,9 @@
                     },
                     body: JSON.stringify({
                         session_id: sessionId,
-                        exam_id: EXAM_ID,
-                        participant_id: PARTICIPANT_ID,
-                        spec_id: SPEC_ID,
+                        exam_id: 1,
+                        participant_id: 100,
+                        spec_id: 10,
                         message: message
                     })
                 });
@@ -712,9 +685,9 @@
                     },
                     body: JSON.stringify({
                         session_id: sessionId,
-                        exam_id: EXAM_ID,
-                        participant_id: PARTICIPANT_ID,
-                        spec_id: SPEC_ID,
+                        exam_id: 1,
+                        participant_id: 100,
+                        spec_id: 10,
                         code: code,
                         lang: 'python'
                     })
@@ -1111,16 +1084,6 @@ ${escapeHtml(fullLogJson)}
                 panel.classList.remove('open');
                 toggle.textContent = '📋 문제 보기';
             }
-        }
-
-        // 설정 업데이트
-        function updateConfig() {
-            EXAM_ID = parseInt(document.getElementById('examIdInput').value) || 1;
-            PARTICIPANT_ID = parseInt(document.getElementById('participantIdInput').value) || 100;
-            SPEC_ID = parseInt(document.getElementById('specIdInput').value) || 10;
-            
-            // 문제 정보 다시 로드
-            loadProblemInfo();
         }
 
         // 문제 정보 로드

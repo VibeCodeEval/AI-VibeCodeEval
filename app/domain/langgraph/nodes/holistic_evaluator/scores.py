@@ -166,20 +166,8 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             from decimal import Decimal
             import hashlib
             
-            # session_id를 PostgreSQL id로 변환
-            # Redis session_id 형식: "session_123" 또는 "session_test_123"
-            postgres_session_id = None
-            if session_id.startswith("session_"):
-                # "session_" 제거
-                remaining = session_id.replace("session_", "", 1)
-                # "test_" 접두사가 있으면 제거
-                if remaining.startswith("test_"):
-                    remaining = remaining.replace("test_", "", 1)
-                try:
-                    postgres_session_id = int(remaining)
-                except ValueError:
-                    logger.warning(f"[7. Aggregate Final Scores] session_id 파싱 실패 - session_id: {session_id}, remaining: {remaining}")
-                    postgres_session_id = None
+            # session_id를 PostgreSQL id로 변환 (Redis session_id: "session_123" -> PostgreSQL id: 123)
+            postgres_session_id = int(session_id.replace("session_", "")) if session_id.startswith("session_") else None
             
             if postgres_session_id and exam_id and participant_id and spec_id and code_content:
                 async with get_db_context() as db:

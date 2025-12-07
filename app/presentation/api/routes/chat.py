@@ -72,12 +72,8 @@ async def get_eval_service() -> EvalService:
     responses={
         500: {"model": ErrorResponse, "description": "서버 에러"}
     },
-    summary="[DEPRECATED] 메시지 전송",
+    summary="메시지 전송",
     description="""
-    ⚠️ **이 API는 더 이상 사용되지 않습니다.**
-    
-    **대신 사용하세요:** `POST /api/session/{sessionId}/messages`
-    
     AI 어시스턴트에게 메시지를 전송하고 응답을 받습니다.
     
     **처리 과정:**
@@ -91,7 +87,7 @@ async def get_eval_service() -> EvalService:
     - 가드레일 위반 시: 교육적 피드백 반환
     """
 )
-async def send_message_deprecated(
+async def send_message(
     request: ChatRequest,
     eval_service: EvalService = Depends(get_eval_service),
     db: AsyncSession = Depends(get_db)
@@ -340,12 +336,8 @@ async def send_message_deprecated(
     responses={
         500: {"model": ErrorResponse, "description": "서버 에러"}
     },
-    summary="[DEPRECATED] 코드 제출",
+    summary="코드 제출",
     description="""
-    ⚠️ **이 API는 더 이상 사용되지 않습니다.**
-    
-    **대신 사용하세요:** `POST /api/session/{sessionId}/submit`
-    
     최종 코드를 제출하고 평가 결과를 받습니다.
     
     **처리 과정:**
@@ -360,7 +352,7 @@ async def send_message_deprecated(
     5. Final Score Aggregation (최종 점수 산출)
     
     **제한사항:**
-    - Timeout: 300초 (5분, 평가 시간 고려)
+    - Timeout: 120초 (평가 시간 고려)
     - 제출은 세션당 1회만 가능
     """
 )
@@ -400,11 +392,8 @@ async def submit_code(
     try:
         logger.info(f"코드 제출 수신 - session_id: {request.session_id}")
         
-        # 5분 타임아웃 설정 (평가 시간 고려)
+        # 2분 타임아웃 설정 (평가 시간 고려)
         # 평가 노드들이 순차적으로 실행되므로 충분한 시간 필요
-        # - Eval Turn Guard: 모든 턴 평가 (30-60초)
-        # - Holistic Flow: Chaining 평가 (10-20초)
-        # - Code Execution: Judge0 Worker 대기 (30-60초)
         result = await asyncio.wait_for(
             eval_service.submit_code(
                 session_id=request.session_id,
@@ -414,7 +403,7 @@ async def submit_code(
                 code_content=request.code,
                 lang=request.lang,
             ),
-            timeout=300.0  # 5분
+            timeout=120.0  # 2분
         )
         
         # 에러 발생 시
@@ -474,7 +463,7 @@ async def submit_code(
             final_scores=None,
             turn_scores=None,
             error=True,
-            error_message="요청 처리 시간이 초과되었습니다. (5분 타임아웃)",
+            error_message="요청 처리 시간이 초과되었습니다. (2분 타임아웃)",
         )
     except Exception as e:
         # 예상치 못한 모든 예외 처리

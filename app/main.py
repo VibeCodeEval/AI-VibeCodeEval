@@ -5,18 +5,16 @@ AI Vibe Coding Test Worker
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse
 import os
-import traceback
 
 from app.core.config import settings
 from app.infrastructure.cache.redis_client import redis_client
 from app.infrastructure.persistence.session import init_db, close_db
-from app.presentation.api.routes import chat_router, session_router, health_router, db_router
+from app.presentation.api.routes import chat_router, session_router, health_router
 
 
 # 로깅 설정
@@ -121,34 +119,10 @@ if os.path.exists(static_dir):
             return FileResponse(index_path)
         return {"message": "웹 인터페이스 파일을 찾을 수 없습니다.", "static_dir": static_dir, "index_path": index_path}
 
-# 전역 예외 핸들러 추가
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """전역 예외 핸들러 - 모든 예외를 로깅하고 JSON 응답 반환"""
-    logger.error(
-        f"전역 예외 발생 - Path: {request.url.path}, Method: {request.method}",
-        exc_info=True
-    )
-    logger.error(f"예외 타입: {type(exc).__name__}, 메시지: {str(exc)}")
-    logger.error(f"Traceback: {''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))}")
-    
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "error": True,
-            "error_type": type(exc).__name__,
-            "error_message": str(exc),
-            "path": request.url.path,
-            "method": request.method,
-        }
-    )
-
-
 # 라우터 등록
 app.include_router(health_router)
 app.include_router(chat_router, prefix="/api")
 app.include_router(session_router, prefix="/api")
-app.include_router(db_router, prefix="/api")
 
 
 if __name__ == "__main__":

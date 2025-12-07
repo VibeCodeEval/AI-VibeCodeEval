@@ -42,49 +42,6 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
     code_content = state.get("code_content")
     submission_id = state.get("submission_id")
     
-    # Submission이 없으면 먼저 생성 (Judge0 결과 저장을 위해)
-    if not submission_id and code_content:
-        try:
-            from app.infrastructure.persistence.session import get_db_context
-            from app.infrastructure.repositories.submission_repository import SubmissionRepository
-            from app.infrastructure.persistence.models.enums import SubmissionStatusEnum
-            import hashlib
-            
-            exam_id = state.get("exam_id")
-            participant_id = state.get("participant_id")
-            spec_id = state.get("spec_id")
-            lang = state.get("lang", "python")
-            
-            if exam_id and participant_id and spec_id:
-                async with get_db_context() as db:
-                    submission_repo = SubmissionRepository(db)
-                    
-                    # 코드 해시 계산
-                    code_sha256 = hashlib.sha256(code_content.encode('utf-8')).hexdigest()
-                    code_bytes = len(code_content.encode('utf-8'))
-                    code_loc = len(code_content.splitlines())
-                    
-                    submission = await submission_repo.create_submission(
-                        exam_id=exam_id,
-                        participant_id=participant_id,
-                        spec_id=spec_id,
-                        lang=lang,
-                        code_inline=code_content,
-                        code_sha256=code_sha256,
-                        code_bytes=code_bytes,
-                        code_loc=code_loc
-                    )
-                    submission_id = submission.id
-                    await db.commit()
-                    
-                    logger.info(
-                        f"[6c] Submission 생성 완료 (Judge0 결과 저장을 위해) - "
-                        f"submission_id: {submission_id}, exam_id: {exam_id}, participant_id: {participant_id}"
-                    )
-        except Exception as e:
-            logger.warning(f"[6c] Submission 생성 실패 (Judge0 결과 저장 불가) - error: {str(e)}")
-            submission_id = None
-    
     if not code_content:
         logger.warning(f"[6c. Eval Code Execution] 코드 없음 - session_id: {session_id}")
         return {
@@ -160,7 +117,7 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         logger.info(f"[6c] Correctness 작업 추가 - task_id: {correctness_task_id}, test_cases: {len(test_cases)}")
         
         # 결과 대기 (폴링)
-        max_wait = 60  # 최대 60초 대기 (Judge0 Worker 처리 시간 고려)
+        max_wait = 30  # 최대 30초 대기 (TC 1개만 사용하므로 시간 단축)
         start_time = time.time()
         poll_interval = 0.5
         
@@ -282,7 +239,7 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         logger.info(f"[6c] Performance 작업 추가 - task_id: {performance_task_id}")
         
         # 결과 대기 (폴링)
-        max_wait = 60  # 최대 60초 대기 (Judge0 Worker 처리 시간 고려)
+        max_wait = 30  # 최대 30초 대기
         start_time = time.time()
         poll_interval = 0.5
         
@@ -292,48 +249,33 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
             if status == "completed":
                 performance_result = await queue.get_result(performance_task_id)
                 
-                if performance_result:
-                    if performance_result.status == "success":
-                        # 성능 점수 계산 (조건 충족 시 최대 점수, 미충족 시 0점)
-                        execution_time = performance_result.execution_time
-                        memory_used_mb = performance_result.memory_used / (1024 * 1024)  # bytes -> MB
-                        
-                        # 조건 확인: 시간 제한과 메모리 제한 모두 충족해야 함
-                        time_ok = execution_time <= timeout
-                        memory_ok = memory_used_mb <= memory_limit
-                        
-                        # 조건 충족 시 최대 점수(100점), 미충족 시 0점
-                        if time_ok and memory_ok:
-                            performance_score = 100.0
-                            logger.info(
-                                f"[6c] Performance 평가 완료 (조건 충족) - task_id: {performance_task_id}, "
-                                f"time: {execution_time:.3f}s (≤{timeout}s), memory: {memory_used_mb:.2f}MB (≤{memory_limit}MB), score: 100.0"
-                            )
-                        else:
-                            performance_score = 0.0
-                            logger.warning(
-                                f"[6c] Performance 평가 실패 (조건 미충족) - task_id: {performance_task_id}, "
-                                f"time: {execution_time:.3f}s ({'>' if not time_ok else '≤'}{timeout}s), "
-                                f"memory: {memory_used_mb:.2f}MB ({'>' if not memory_ok else '≤'}{memory_limit}MB), score: 0.0"
-                            )
-                        break
-                    else:
-                        # 실행 실패 (timeout, error 등)
-                        error_msg = performance_result.error if performance_result.error else f"Status: {performance_result.status}"
-                        logger.warning(f"[6c] Performance 평가 실패 - task_id: {performance_task_id}, error: {error_msg}")
-                        performance_score = 0.0
-                        break
+                if performance_result and performance_result.status == "success":
+                    # 성능 점수 계산 (실행 시간과 메모리 기반)
+                    execution_time = performance_result.execution_time
+                    memory_used_mb = performance_result.memory_used / (1024 * 1024)  # bytes -> MB
+                    
+                    # 점수 계산 (0-100 스케일)
+                    # 시간 점수: timeout 기준으로 계산
+                    time_score = max(0, 100 * (1 - execution_time / timeout))
+                    # 메모리 점수: memory_limit 기준으로 계산
+                    memory_score = max(0, 100 * (1 - memory_used_mb / memory_limit))
+                    # 성능 점수: 시간 60%, 메모리 40%
+                    performance_score = time_score * 0.6 + memory_score * 0.4
+                    
+                    logger.info(
+                        f"[6c] Performance 평가 완료 - task_id: {performance_task_id}, "
+                        f"time: {execution_time}s, memory: {memory_used_mb:.2f}MB, score: {performance_score:.2f}"
+                    )
+                    break
                 else:
-                    # 결과 없음
-                    logger.warning(f"[6c] Performance 결과 없음 - task_id: {performance_task_id}")
+                    # 실행 실패
+                    error_msg = performance_result.error if performance_result else "Unknown error"
+                    logger.warning(f"[6c] Performance 평가 실패 - task_id: {performance_task_id}, error: {error_msg}")
                     performance_score = 0.0
                     break
             
             elif status == "failed":
-                # Worker가 작업을 실패로 표시
-                performance_result = await queue.get_result(performance_task_id)
-                error_msg = performance_result.error if performance_result and performance_result.error else "Worker 처리 실패"
-                logger.warning(f"[6c] Performance 작업 실패 - task_id: {performance_task_id}, error: {error_msg}")
+                logger.warning(f"[6c] Performance 작업 실패 - task_id: {performance_task_id}")
                 performance_score = 0.0
                 break
             
@@ -349,58 +291,6 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         logger.warning(f"[6c] Performance 평가 오류 - session_id: {session_id}, error: {str(e)}")
         performance_score = 0.0
     
-    # ===== Judge0 결과를 submission_runs에 저장 =====
-    if submission_id and correctness_result:
-        try:
-            from app.infrastructure.persistence.session import get_db_context
-            from app.infrastructure.repositories.submission_repository import SubmissionRepository
-            from app.infrastructure.persistence.models.enums import VerdictEnum, TestRunGrpEnum
-            
-            async with get_db_context() as db:
-                submission_repo = SubmissionRepository(db)
-                
-                # Correctness 결과 저장 (테스트 케이스별)
-                if test_cases and correctness_result.status == "success":
-                    # TODO: JudgeWorker에서 각 테스트 케이스별 결과를 반환하도록 수정 필요
-                    # 현재는 단일 결과만 저장
-                    time_ms = int(correctness_result.execution_time * 1000) if correctness_result.execution_time else None
-                    mem_kb = int(correctness_result.memory_used / 1024) if correctness_result.memory_used else None
-                    stdout_bytes = len(correctness_result.output.encode('utf-8')) if correctness_result.output else None
-                    stderr_bytes = len(correctness_result.error.encode('utf-8')) if correctness_result.error else None
-                    
-                    await submission_repo.add_submission_run(
-                        submission_id=submission_id,
-                        case_index=0,  # 첫 번째 테스트 케이스
-                        grp=TestRunGrpEnum.PUBLIC.value,
-                        verdict=VerdictEnum.AC if correctness_result.status == "success" else VerdictEnum.WA,
-                        time_ms=time_ms,
-                        mem_kb=mem_kb,
-                        stdout_bytes=stdout_bytes,
-                        stderr_bytes=stderr_bytes
-                    )
-                    logger.info(f"[6c] Judge0 결과 저장 완료 - submission_id: {submission_id}, case_index: 0")
-                
-                # Performance 결과 저장 (성능 평가가 실행된 경우)
-                if performance_result and performance_result.status == "success":
-                    time_ms = int(performance_result.execution_time * 1000) if performance_result.execution_time else None
-                    mem_kb = int(performance_result.memory_used / 1024) if performance_result.memory_used else None
-                    
-                    await submission_repo.add_submission_run(
-                        submission_id=submission_id,
-                        case_index=-1,  # Performance 평가는 별도 인덱스
-                        grp=TestRunGrpEnum.PUBLIC.value,
-                        verdict=VerdictEnum.AC,  # 성능 평가는 통과/실패만
-                        time_ms=time_ms,
-                        mem_kb=mem_kb,
-                        stdout_bytes=None,
-                        stderr_bytes=None
-                    )
-                    logger.info(f"[6c] Performance 결과 저장 완료 - submission_id: {submission_id}, case_index: -1")
-                
-                await db.commit()
-        except Exception as e:
-            logger.warning(f"[6c] Judge0 결과 저장 실패 - submission_id: {submission_id}, error: {str(e)}")
-    
     # ===== 결과 반환 =====
     result = {
         "code_correctness_score": round(correctness_score, 2) if correctness_score is not None else 0.0,
@@ -411,10 +301,6 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         "memory_used_mb": round(memory_used_mb, 2) if memory_used_mb is not None else None,
         "updated_at": datetime.utcnow().isoformat(),
     }
-    
-    # submission_id를 State에 저장 (7번 노드에서 사용)
-    if submission_id:
-        result["submission_id"] = submission_id
     
     # Performance 점수 상세 로깅
     logger.info(

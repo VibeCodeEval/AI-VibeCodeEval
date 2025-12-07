@@ -350,21 +350,11 @@ async def get_problem_info(spec_id: int, db: Optional[Any] = None) -> Dict[str, 
                 # keywords 추출
                 keywords = _extract_keywords_from_problem_spec(spec)
                 
-                # checker_json에서 solution_code와 test_cases 추출
-                solution_code = None
-                test_cases = []
-                if spec.checker_json and isinstance(spec.checker_json, dict):
-                    solution_code = spec.checker_json.get("solution_code")
-                    test_cases = spec.checker_json.get("test_cases", [])
-                    if test_cases and not isinstance(test_cases, list):
-                        test_cases = []
-                
                 problem_context = {
                     "basic_info": basic_info,
                     "constraints": constraints,
                     "ai_guide": ai_guide,
-                    "solution_code": solution_code,  # checker_json에서 추출
-                    "test_cases": test_cases,  # checker_json에서 추출
+                    "solution_code": None,  # checker_json에서 가져올 수 있으면 추가
                     "keywords": keywords,
                     "content_md": spec.content_md  # 전체 내용도 포함
                 }

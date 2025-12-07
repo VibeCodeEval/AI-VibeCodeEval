@@ -15,9 +15,12 @@ from app.core.config import settings
 
 
 def get_llm():
-    """LLM 인스턴스 생성 (Factory 사용)"""
-    from app.domain.langgraph.utils.llm_factory import get_llm as get_llm_from_factory
-    return get_llm_from_factory("system_nodes")
+    """LLM 인스턴스 생성"""
+    return ChatGoogleGenerativeAI(
+        model=settings.DEFAULT_LLM_MODEL,
+        google_api_key=settings.GEMINI_API_KEY,
+        temperature=0.3,
+    )
 
 
 async def handle_failure(state: MainGraphState) -> Dict[str, Any]:

@@ -41,7 +41,7 @@ class Submission(Base):
     )
     spec_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("problem_specs.spec_id"),
+        ForeignKey("problem_specs.id"),
         nullable=False
     )
     lang: Mapped[str] = mapped_column(String(40), nullable=False)

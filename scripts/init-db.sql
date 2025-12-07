@@ -17,6 +17,7 @@ CREATE TYPE ai_vibe_coding_test.submission_status_enum AS ENUM ('QUEUED', 'RUNNI
 CREATE TYPE ai_vibe_coding_test.run_grp_enum AS ENUM ('SAMPLE', 'PUBLIC', 'PRIVATE');
 CREATE TYPE ai_vibe_coding_test.verdict_enum AS ENUM ('AC', 'WA', 'TLE', 'MLE', 'RE');
 CREATE TYPE ai_vibe_coding_test.admin_role_enum AS ENUM ('ADMIN', 'MASTER'); -- 2.1 admins 규칙 반영
+CREATE TYPE ai_vibe_coding_test.evaluation_type_enum AS ENUM ('TURN_EVAL', 'HOLISTIC_FLOW'); -- 평가 유형
 
 -- 1) 관리자 및 권한 (Admins)
 
@@ -197,14 +198,11 @@ CREATE INDEX idx_prompt_messages_fts ON ai_vibe_coding_test.prompt_messages USIN
 CREATE TABLE ai_vibe_coding_test.prompt_evaluations (
     id BIGSERIAL PRIMARY KEY,
     session_id BIGINT NOT NULL REFERENCES ai_vibe_coding_test.prompt_sessions(id) ON DELETE CASCADE,
-    turn INTEGER,  -- 평가 대상 턴 (NULL이면 세션 전체 평가: holistic_flow, holistic_performance)
-    evaluation_type VARCHAR(50) NOT NULL,  -- 'turn_eval', 'holistic_flow', 'holistic_performance'
-    node_name VARCHAR(100),  -- 'eval_turn', 'eval_holistic_flow', 'eval_code_execution'
-    score NUMERIC(5,2),
-    analysis TEXT,
-    details JSONB,  -- 상세 결과
+    turn INTEGER,  -- 평가 대상 턴 (NULL이면 세션 전체 평가: HOLISTIC_FLOW)
+    evaluation_type ai_vibe_coding_test.evaluation_type_enum NOT NULL,  -- 'TURN_EVAL', 'HOLISTIC_FLOW'
+    details JSONB NOT NULL,  -- 모든 평가 데이터(점수, 분석 내용 등) 저장
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    -- turn이 NULL일 수 있으므로 UNIQUE 제약 조건 수정
+    -- turn이 NULL일 수 있으므로 UNIQUE 제약 조건 유지
     UNIQUE(session_id, turn, evaluation_type)
 );
 
@@ -215,31 +213,27 @@ FOREIGN KEY (session_id, turn)
 REFERENCES ai_vibe_coding_test.prompt_messages(session_id, turn)
 ON DELETE CASCADE;
 
--- 안전장치 1: Check Constraint
+-- 안전장치 1: Check Constraint (ENUM 값에 맞춰 수정)
 -- "Holistic 평가면 turn은 NULL, Turn 평가면 turn은 NOT NULL"
 ALTER TABLE ai_vibe_coding_test.prompt_evaluations
 ADD CONSTRAINT check_valid_turn_logic
 CHECK (
-    -- 경우 1: 전체 평가(Holistic)면 -> turn은 반드시 NULL
-    (evaluation_type IN ('holistic_flow', 'holistic_performance') AND turn IS NULL)
+    -- 경우 1: 전체 평가(HOLISTIC_FLOW)면 -> turn은 반드시 NULL
+    (evaluation_type = 'HOLISTIC_FLOW' AND turn IS NULL)
     OR
-    -- 경우 2: 턴 평가(Turn)면 -> turn은 반드시 NOT NULL
-    (evaluation_type = 'turn_eval' AND turn IS NOT NULL)
+    -- 경우 2: 턴 평가(TURN_EVAL)면 -> turn은 반드시 NOT NULL
+    (evaluation_type = 'TURN_EVAL' AND turn IS NOT NULL)
 );
 
--- 안전장치 2-1: 턴 평가용 유니크 인덱스 (부분 인덱스)
+-- 안전장치 2-1: 턴 평가용 유니크 인덱스 (ENUM 값 적용)
 CREATE UNIQUE INDEX idx_unique_turn_eval 
 ON ai_vibe_coding_test.prompt_evaluations (session_id, turn, evaluation_type) 
-WHERE turn IS NOT NULL;
+WHERE evaluation_type = 'TURN_EVAL';
 
--- 안전장치 2-2: 전체 평가용 유니크 인덱스 (부분 인덱스)
+-- 안전장치 2-2: 전체 평가용 유니크 인덱스 (ENUM 값 적용)
 CREATE UNIQUE INDEX idx_unique_holistic_flow_eval 
 ON ai_vibe_coding_test.prompt_evaluations (session_id) 
-WHERE evaluation_type = 'holistic_flow';
-
-CREATE UNIQUE INDEX idx_unique_holistic_performance_eval 
-ON ai_vibe_coding_test.prompt_evaluations (session_id) 
-WHERE evaluation_type = 'holistic_performance';
+WHERE evaluation_type = 'HOLISTIC_FLOW';
 
 -- 일반 인덱스
 CREATE INDEX idx_prompt_evaluations_session ON ai_vibe_coding_test.prompt_evaluations(session_id, turn);

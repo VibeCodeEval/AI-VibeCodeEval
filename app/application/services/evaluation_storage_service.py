@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.repositories.session_repository import SessionRepository
 from app.infrastructure.persistence.models.sessions import PromptEvaluation
+from app.infrastructure.persistence.models.enums import EvaluationTypeEnum
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +45,9 @@ class EvaluationStorageService:
         4번 노드 (eval_turn) 평가 결과 저장
         
         [저장 데이터]
-        - evaluation_type: 'turn_eval'
+        - evaluation_type: 'TURN_EVAL'
         - turn: 턴 번호 (NOT NULL)
-        - score: 턴 점수
-        - analysis: 종합 평가 근거 (comprehensive_reasoning)
-        - details: 상세 정보 (rubrics, intent, evaluations 등)
+        - details: 모든 평가 데이터 (score, analysis, rubrics, intent, evaluations 등)
         
         Args:
             session_id: 세션 ID (PostgreSQL id)
@@ -61,34 +60,39 @@ class EvaluationStorageService:
         try:
             # turn_log에서 평가 정보 추출
             prompt_eval_details = turn_log.get("prompt_evaluation_details", {})
+            score = prompt_eval_details.get("score")
+            analysis = turn_log.get("comprehensive_reasoning") or prompt_eval_details.get("final_reasoning")
+            
+            # details에 모든 평가 데이터 포함
+            details = {
+                "score": score,  # 점수
+                "analysis": analysis,  # 분석 내용
+                "intent": prompt_eval_details.get("intent"),
+                "intent_types": turn_log.get("intent_types", []),
+                "rubrics": prompt_eval_details.get("rubrics", []),
+                "evaluations": turn_log.get("evaluations", {}),
+                "detailed_feedback": turn_log.get("detailed_feedback", []),
+                "turn_score": turn_log.get("turn_score"),
+                "is_guardrail_failed": turn_log.get("is_guardrail_failed", False),
+                "guardrail_message": turn_log.get("guardrail_message"),
+            }
             
             # 기존 평가 결과 확인 (중복 방지)
             existing = await self._get_existing_evaluation(
                 session_id=session_id,
                 turn=turn,
-                evaluation_type="turn_eval"
+                evaluation_type=EvaluationTypeEnum.TURN_EVAL
             )
             
             if existing:
                 # 기존 평가 결과 업데이트
-                existing.score = prompt_eval_details.get("score")
-                existing.analysis = turn_log.get("comprehensive_reasoning") or prompt_eval_details.get("final_reasoning")
-                existing.details = {
-                    "intent": prompt_eval_details.get("intent"),
-                    "intent_types": turn_log.get("intent_types", []),
-                    "rubrics": prompt_eval_details.get("rubrics", []),
-                    "evaluations": turn_log.get("evaluations", {}),
-                    "detailed_feedback": turn_log.get("detailed_feedback", []),
-                    "turn_score": turn_log.get("turn_score"),
-                    "is_guardrail_failed": turn_log.get("is_guardrail_failed", False),
-                    "guardrail_message": turn_log.get("guardrail_message"),
-                }
+                existing.details = details
                 existing.created_at = datetime.utcnow()
                 
                 await self.db.flush()
                 logger.info(
                     f"[EvaluationStorage] 턴 평가 업데이트 - "
-                    f"session_id: {session_id}, turn: {turn}, score: {existing.score}"
+                    f"session_id: {session_id}, turn: {turn}, score: {score}"
                 )
                 return existing
             else:
@@ -96,20 +100,8 @@ class EvaluationStorageService:
                 evaluation = PromptEvaluation(
                     session_id=session_id,
                     turn=turn,
-                    evaluation_type="turn_eval",
-                    node_name="eval_turn",
-                    score=prompt_eval_details.get("score"),
-                    analysis=turn_log.get("comprehensive_reasoning") or prompt_eval_details.get("final_reasoning"),
-                    details={
-                        "intent": prompt_eval_details.get("intent"),
-                        "intent_types": turn_log.get("intent_types", []),
-                        "rubrics": prompt_eval_details.get("rubrics", []),
-                        "evaluations": turn_log.get("evaluations", {}),
-                        "detailed_feedback": turn_log.get("detailed_feedback", []),
-                        "turn_score": turn_log.get("turn_score"),
-                        "is_guardrail_failed": turn_log.get("is_guardrail_failed", False),
-                        "guardrail_message": turn_log.get("guardrail_message"),
-                    },
+                    evaluation_type=EvaluationTypeEnum.TURN_EVAL,
+                    details=details,
                     created_at=datetime.utcnow()
                 )
                 
@@ -118,7 +110,7 @@ class EvaluationStorageService:
                 
                 logger.info(
                     f"[EvaluationStorage] 턴 평가 저장 완료 - "
-                    f"session_id: {session_id}, turn: {turn}, score: {evaluation.score}"
+                    f"session_id: {session_id}, turn: {turn}, score: {score}"
                 )
                 return evaluation
                 
@@ -141,11 +133,9 @@ class EvaluationStorageService:
         6.a 노드 (eval_holistic_flow) 평가 결과 저장
         
         [저장 데이터]
-        - evaluation_type: 'holistic_flow'
+        - evaluation_type: 'HOLISTIC_FLOW'
         - turn: NULL (세션 전체 평가)
-        - score: holistic_flow_score
-        - analysis: holistic_flow_analysis
-        - details: 추가 상세 정보
+        - details: 모든 평가 데이터 (score, analysis, 추가 상세 정보 등)
         
         Args:
             session_id: 세션 ID (PostgreSQL id)
@@ -157,19 +147,23 @@ class EvaluationStorageService:
             생성된 PromptEvaluation 또는 None (실패 시)
         """
         try:
+            # details에 모든 평가 데이터 포함
+            evaluation_details = details.copy() if details else {}
+            evaluation_details.update({
+                "score": holistic_flow_score,  # 점수
+                "analysis": holistic_flow_analysis,  # 분석 내용
+            })
+            
             # 기존 평가 결과 확인 (중복 방지)
             existing = await self._get_existing_evaluation(
                 session_id=session_id,
                 turn=None,  # holistic 평가는 turn이 NULL
-                evaluation_type="holistic_flow"
+                evaluation_type=EvaluationTypeEnum.HOLISTIC_FLOW
             )
             
             if existing:
                 # 기존 평가 결과 업데이트
-                existing.score = holistic_flow_score
-                existing.analysis = holistic_flow_analysis
-                if details:
-                    existing.details = details
+                existing.details = evaluation_details
                 existing.created_at = datetime.utcnow()
                 
                 await self.db.flush()
@@ -183,11 +177,8 @@ class EvaluationStorageService:
                 evaluation = PromptEvaluation(
                     session_id=session_id,
                     turn=None,  # holistic 평가는 turn이 NULL
-                    evaluation_type="holistic_flow",
-                    node_name="eval_holistic_flow",
-                    score=holistic_flow_score,
-                    analysis=holistic_flow_analysis,
-                    details=details or {},
+                    evaluation_type=EvaluationTypeEnum.HOLISTIC_FLOW,
+                    details=evaluation_details,
                     created_at=datetime.utcnow()
                 )
                 
@@ -212,7 +203,7 @@ class EvaluationStorageService:
         self,
         session_id: int,
         turn: Optional[int],
-        evaluation_type: str
+        evaluation_type: EvaluationTypeEnum
     ) -> Optional[PromptEvaluation]:
         """
         기존 평가 결과 조회

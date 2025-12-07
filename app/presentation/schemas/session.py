@@ -49,34 +49,4 @@ class ConversationHistory(BaseModel):
     total_messages: int = Field(0, description="총 메시지 수")
 
 
-class StartSessionRequest(BaseModel):
-    """세션 시작 요청"""
-    examId: int = Field(..., description="시험 ID", alias="examId")
-    specId: int = Field(..., description="문제 스펙 ID", alias="specId")
-    participantId: int = Field(..., description="참가자 ID", alias="participantId")
-
-
-class StartSessionResponse(BaseModel):
-    """세션 시작 응답"""
-    id: int = Field(..., description="세션 ID")
-    examId: int = Field(..., description="시험 ID", alias="examId")
-    participantId: int = Field(..., description="참가자 ID", alias="participantId")
-    specId: int = Field(..., description="문제 스펙 ID", alias="specId")
-    startedAt: Optional[str] = Field(None, description="시작 시간 (ISO 8601)", alias="startedAt")
-    endedAt: Optional[str] = Field(None, description="종료 시간 (ISO 8601)", alias="endedAt")
-    totalTokens: int = Field(0, description="총 토큰 사용량", alias="totalTokens")
-
-
-class SendMessageRequest(BaseModel):
-    """메시지 전송 요청"""
-    role: str = Field(..., description="역할 (USER, AI)")
-    content: str = Field(..., description="메시지 내용")
-
-
-class SubmitCodeRequest(BaseModel):
-    """코드 제출 요청"""
-    code: str = Field(..., description="제출 코드")
-    lang: str = Field("python", description="프로그래밍 언어 (기본값: python)")
-
-
 

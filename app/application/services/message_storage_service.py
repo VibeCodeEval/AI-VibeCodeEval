@@ -45,7 +45,7 @@ class MessageStorageService:
         self,
         exam_id: int,
         participant_id: int,
-        turn: Optional[int],
+        turn: int,
         role: str,
         content: str,
         token_count: Optional[int] = None,
@@ -58,27 +58,15 @@ class MessageStorageService:
         1. PostgreSQL에 먼저 저장 (데이터 무결성)
         2. 성공하면 Redis 체크포인트 업데이트
         
-        [Atomic Increment 방식]
-        - turn=None일 경우: DB에서 자동으로 MAX(turn) + 1 계산하여 저장
-        - turn이 지정된 경우: 지정된 turn 번호로 저장 (중복 체크 수행)
-        
-        ⚠️ **중요**: turn=None은 파라미터 의미일 뿐, DB에는 항상 정수값이 저장됩니다.
-        - DB 스키마: `turn INTEGER NOT NULL` (NULL 불가능)
-        - SQL 서브쿼리: `COALESCE(MAX(turn), 0) + 1` → 항상 정수 반환 (최소 1)
-        - 따라서 실제 저장되는 turn 값은 절대 NULL이 아닙니다.
-        
         [호출 시점]
         - Spring Boot에서 SaveChatMessageRequest 받을 때
-        - 매 메시지마다 호출 (USER, AI 모두)
+        - 매 메시지마다 호출 (USER, ASSISTANT 모두)
         
         Args:
             exam_id: 시험 ID
             participant_id: 참가자 ID
-            turn: 턴 번호 
-                - None: DB에서 자동 계산 (MAX(turn) + 1, 최소 1)
-                - int: 지정된 번호로 저장
-                - ⚠️ 실제 DB 저장값은 항상 정수 (NULL 불가능)
-            role: 역할 ('user' 또는 'assistant'/'ai')
+            turn: 턴 번호
+            role: 역할 ('user' 또는 'assistant')
             content: 메시지 내용
             token_count: 토큰 사용량 (선택)
             meta: 메타데이터 (선택)
@@ -87,7 +75,6 @@ class MessageStorageService:
             {
                 "session_id": int,
                 "message_id": int,
-                "turn": int,  # 실제 저장된 turn 번호 (항상 정수, NULL 아님)
                 "success": bool
             }
         
@@ -106,37 +93,13 @@ class MessageStorageService:
                 f"session_id: {session.id}, exam_id: {exam_id}, participant_id: {participant_id}"
             )
             
-            # 2. Role 변환 ('user' → PromptRoleEnum.USER, 'assistant'/'ai' → PromptRoleEnum.AI)
+            # 2. Role 변환 ('user' → PromptRoleEnum.USER, 'assistant' → PromptRoleEnum.ASSISTANT)
             role_enum = self._convert_role(role)
             
-            # 3. 중복 체크: turn이 지정된 경우에만 수행 (turn=None이면 DB에서 자동 계산하므로 불필요)
-            if turn is not None:
-                from sqlalchemy import select
-                check_query = select(PromptMessage).where(
-                    PromptMessage.session_id == session.id,
-                    PromptMessage.turn == turn,
-                    PromptMessage.role == role_enum
-                )
-                check_result = await self.db.execute(check_query)
-                existing_msg = check_result.scalar_one_or_none()
-                
-                if existing_msg:
-                    logger.warning(
-                        f"[MessageStorage] 메시지가 이미 존재함 (건너뜀) - "
-                        f"session_id: {session.id}, turn: {turn}, role: {role_enum.value}"
-                    )
-                    return {
-                        "session_id": session.id,
-                        "message_id": existing_msg.id,
-                        "turn": existing_msg.turn,
-                        "success": True
-                    }
-            
-            # 4. PostgreSQL에 메시지 저장 (먼저)
-            # turn=None이면 DB에서 자동으로 다음 turn 번호 계산
+            # 3. PostgreSQL에 메시지 저장 (먼저)
             message = await self.session_repo.add_message(
                 session_id=session.id,
-                turn=turn,  # None이면 DB에서 자동 계산
+                turn=turn,
                 role=role_enum,
                 content=content,
                 token_count=token_count or 0,
@@ -152,12 +115,10 @@ class MessageStorageService:
             )
             
             # 4. Redis 체크포인트 업데이트 (PostgreSQL 성공 후)
-            # 실제 저장된 turn 값 사용 (turn=None이면 DB에서 자동 계산된 값)
-            actual_turn = message.turn
             try:
                 await self._update_redis_checkpoint(
                     session_id=session.id,
-                    turn=actual_turn,
+                    turn=turn,
                     role=role,
                     content=content,
                     token_count=token_count
@@ -176,7 +137,6 @@ class MessageStorageService:
             return {
                 "session_id": session.id,
                 "message_id": message.id,
-                "turn": message.turn,  # 실제 저장된 turn 번호 반환
                 "success": True
             }
             
@@ -194,8 +154,8 @@ class MessageStorageService:
         role_lower = role.lower()
         if role_lower == "user":
             return PromptRoleEnum.USER
-        elif role_lower in ["assistant", "ai", "model"]:
-            return PromptRoleEnum.AI  # DB ENUM 정의에 맞춰 'AI' 사용
+        elif role_lower == "assistant" or role_lower == "ai":
+            return PromptRoleEnum.ASSISTANT
         else:
             # 기본값은 USER
             logger.warning(f"[MessageStorage] 알 수 없는 role: {role}, USER로 처리")

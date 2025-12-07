@@ -98,4 +98,10 @@ class CodeIntentType(str, enum.Enum):
     FOLLOW_UP = "follow_up"
 
 
+class EvaluationTypeEnum(str, enum.Enum):
+    """평가 유형 (DB ENUM과 일치: 'TURN_EVAL', 'HOLISTIC_FLOW')"""
+    TURN_EVAL = "TURN_EVAL"  # 턴별 평가 (4번 노드)
+    HOLISTIC_FLOW = "HOLISTIC_FLOW"  # 전체 플로우 평가 (6a 노드)
+
+
 

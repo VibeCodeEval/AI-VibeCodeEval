@@ -21,7 +21,7 @@ START → 1. Handle Request → 2. Intent Analyzer → 3. Writer LLM → END
 1. Handle Request: Redis 상태 로드, 턴 번호 증가
 2. Intent Analyzer: 의도 분석 + 가드레일 체크
 3. Writer LLM: AI 답변 생성 (Socratic 방식)
-4. Eval Turn Guard: 제출 시 모든 턴 평가 완료 대기
+4. Eval Turn Guard: 제출 시 State의 messages에서 모든 턴 추출하여 동기 평가 실행
 5. Main Router: 제출 여부에 따른 분기
 6a. Holistic Flow: Chaining 전략 평가
 6b. Aggregate Scores: 턴별 점수 집계
@@ -72,13 +72,18 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     │ START → Handle Request → Intent Analyzer → Writer LLM    │
     │         ↓                         ↓ (가드레일 위반)      │
     │    Redis 상태 로드         Handle Failure → END          │
+    │                                                          │
+    │ ⚠️ 일반 채팅에서는 평가를 실행하지 않음 (응답만 반환)     │
     └─────────────────────────────────────────────────────────┘
     
     ┌─────────────────────────────────────────────────────────┐
     │ 제출 플로우                                               │
     │ START → Handle Request → Intent Analyzer                 │
     │                              ↓ (PASSED_SUBMIT)           │
-    │                   Eval Turn Guard (모든 턴 평가 대기)     │
+    │                   Eval Turn Guard                        │
+    │                    - State의 messages에서 모든 턴 추출   │
+    │                    - 각 턴에 대해 Eval Turn SubGraph 실행│
+    │                    - 모든 턴 평가 완료                    │
     │                              ↓                           │
     │                   Main Router (제출 확인)                │
     │                              ↓                           │
@@ -112,8 +117,9 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
         StateGraph: 컴파일된 메인 그래프
     """
     
-    # SubGraph는 사용하지 않음 (백그라운드로 직접 실행)
-    # eval_turn_subgraph = create_eval_turn_subgraph()
+    # Eval Turn SubGraph는 제출 시 Eval Turn Guard에서 동기적으로 실행
+    # 일반 채팅에서는 평가를 하지 않음
+    # eval_turn_subgraph = create_eval_turn_subgraph()  # Guard에서 직접 생성하여 사용
     
     # 메인 그래프 빌더 초기화
     builder = StateGraph(MainGraphState)
@@ -133,7 +139,7 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     builder.add_node("handle_failure", handle_failure)
     builder.add_node("summarize_memory", summarize_memory)
     
-    # 4. Eval Turn Guard (제출 시 모든 턴 평가 완료 확인)
+    # 4. Eval Turn Guard (제출 시 State의 messages에서 모든 턴 추출하여 동기 평가 실행)
     builder.add_node("eval_turn_guard", eval_turn_submit_guard)
     
     # 5. Main Router (조건부 분기 함수로 처리)
@@ -180,7 +186,7 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     )
     
     # Eval Turn Guard -> Main Router (조건부)
-    # 제출 시 모든 턴 평가 완료 후 5번 Router로 진행
+    # 제출 시 모든 턴 평가 완료 후 Main Router로 진행
     builder.add_conditional_edges(
         "eval_turn_guard",
         main_router,

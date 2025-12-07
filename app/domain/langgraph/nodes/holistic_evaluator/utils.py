@@ -1,9 +1,14 @@
 import logging
-from app.domain.langgraph.utils.llm_factory import get_llm as get_llm_from_factory
+from langchain_google_genai import ChatGoogleGenerativeAI
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 def get_llm():
-    """LLM 인스턴스 생성 (Factory 사용)"""
-    return get_llm_from_factory("holistic_evaluator")
+    """LLM 인스턴스 생성"""
+    return ChatGoogleGenerativeAI(
+        model=settings.DEFAULT_LLM_MODEL,
+        google_api_key=settings.GEMINI_API_KEY,
+        temperature=0.1,
+    )
 
