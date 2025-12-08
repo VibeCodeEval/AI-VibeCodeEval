@@ -223,7 +223,7 @@ class ChatMessagesRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "sessionId": 1,
-                "examParticipantId": 9001,
+                "participantId": 1,
                 "turnId": 1,
                 "role": "USER",
                 "content": "이 문제를 DP로 푸는 힌트를 줘",
@@ -236,7 +236,7 @@ class ChatMessagesRequest(BaseModel):
     )
     
     sessionId: int = Field(..., description="세션 ID", alias="sessionId")
-    examParticipantId: int = Field(..., description="참가자 식별값", alias="examParticipantId")
+    participantId: int = Field(..., description="참가자 ID (participants.id)", alias="participantId")
     turnId: int = Field(..., description="DB의 prompt_messages.turn", alias="turnId")
     role: str = Field(..., description="역할 (USER)")
     content: str = Field(..., description="메시지 내용")

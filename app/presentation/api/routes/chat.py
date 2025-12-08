@@ -278,55 +278,17 @@ async def send_messages(
             totalToken=total_tokens  # 한 세션의 모든 대화 token_count의 합
         )
         
-        # [7] 메시지 DB 저장 (Foreign Key 제약 조건을 위해)
-        # USER 메시지 저장 (한 turn에 하나의 메시지만 저장 가능하므로 USER만 저장)
-        try:
-            from app.infrastructure.persistence.models.sessions import PromptMessage
-            from app.infrastructure.persistence.models.enums import PromptRoleEnum
-            from sqlalchemy import select
-            
-            # 해당 turn의 메시지가 이미 존재하는지 확인
-            message_query = select(PromptMessage).where(
-                PromptMessage.session_id == session.id,
-                PromptMessage.turn == request.turnId
-            )
-            existing_message = await db.execute(message_query)
-            message = existing_message.scalar_one_or_none()
-            
-            if not message:
-                # USER 메시지 저장 (Foreign Key 제약 조건 충족)
-                user_message = PromptMessage(
-                    session_id=session.id,
-                    turn=request.turnId,
-                    role=PromptRoleEnum.USER,
-                    content=request.content[:10000] if len(request.content) > 10000 else request.content,  # TEXT 필드 길이 제한 고려
-                    token_count=user_message_tokens
-                )
-                db.add(user_message)
-                await db.commit()
-                logger.info(
-                    f"[SendMessages] USER 메시지 저장 완료 - "
-                    f"session_id: {session.id}, turn: {request.turnId}"
-                )
-            else:
-                logger.debug(
-                    f"[SendMessages] 메시지 이미 존재 - "
-                    f"session_id: {session.id}, turn: {request.turnId}"
-                )
-        except Exception as msg_error:
-            # 메시지 저장 실패해도 응답은 반환 (경고만)
-            logger.warning(
-                f"[SendMessages] 메시지 저장 실패 (응답은 반환) - "
-                f"session_id: {session.id}, turn: {request.turnId}, error: {str(msg_error)}"
-            )
-        
+        # [7] Gemini 응답을 BE 서버로 전달 (DB 저장은 BE에서 처리)
+        # 주의: DB 커밋을 응답 전에 하면 BE 타임아웃으로 CancelledError 발생 가능
+        # 따라서 응답을 먼저 반환하고, 메시지 저장은 BE에서 처리
         logger.info(
-            f"[SendMessages] 완료 - "
+            f"[SendMessages] Gemini 응답 준비 완료 - "
             f"session_id: {session.id}, turn: {ai_turn}, "
             f"user_tokens: {user_message_tokens}, ai_tokens: {ai_response_tokens}, "
             f"tokenCount (현재 턴): {current_turn_tokens}, totalToken (전체 누적): {total_tokens}"
         )
         
+        # Gemini 응답을 BE로 즉시 전달 (DB 저장 없이)
         return ChatMessagesResponse(aiMessage=ai_message)
         
     except HTTPException:
