@@ -5,6 +5,7 @@ from app.domain.langgraph.states import EvalTurnState, IntentClassification
 from app.infrastructure.persistence.models.enums import CodeIntentType
 from app.domain.langgraph.nodes.turn_evaluator.utils import get_llm
 from app.domain.langgraph.utils.token_tracking import extract_token_usage, accumulate_tokens
+from app.domain.langgraph.utils.structured_output_parser import parse_structured_output_async
 from langchain_core.messages import SystemMessage, HumanMessage
 
 logger = logging.getLogger(__name__)
@@ -63,10 +64,10 @@ async def intent_analysis(state: EvalTurnState) -> Dict[str, Any]:
             HumanMessage(content=prompt)
         ]
         
-        # 원본 LLM 응답 받기 (토큰 사용량 추출용)
+        # 원본 LLM 호출 (1회만 - 토큰 추출 + JSON 파싱)
         raw_response = await llm.ainvoke(messages)
         
-        # 토큰 사용량 추출 및 State에 누적 (원본 응답에서)
+        # 토큰 사용량 추출 및 State에 누적
         tokens = extract_token_usage(raw_response)
         if tokens:
             accumulate_tokens(state, tokens, token_type="eval")
@@ -74,8 +75,19 @@ async def intent_analysis(state: EvalTurnState) -> Dict[str, Any]:
         else:
             logger.warning(f"[4.0 Intent Analysis] 토큰 사용량 추출 실패 - raw_response 타입: {type(raw_response)}")
         
-        # 구조화된 출력으로 파싱 (원본 응답 내용 사용)
-        parsed_response = await structured_llm.ainvoke(messages)
+        # 원본 응답을 구조화된 출력으로 파싱
+        try:
+            parsed_response = await parse_structured_output_async(
+                raw_response=raw_response,
+                model_class=IntentClassification,
+                fallback_llm=structured_llm,
+                formatted_messages=messages
+            )
+        except Exception as parse_error:
+            logger.error(f"[4.0 Intent Analysis] 구조화된 출력 파싱 실패: {str(parse_error)}", exc_info=True)
+            # 파싱 실패 시 fallback으로 구조화된 출력 Chain 사용
+            logger.info("[4.0 Intent Analysis] Fallback: 구조화된 출력 Chain 사용")
+            parsed_response = await structured_llm.ainvoke(messages)
         
         # 리스트 형태의 값 추출
         intent_values = [intent.value for intent in parsed_response.intent_types]

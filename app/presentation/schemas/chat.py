@@ -213,7 +213,7 @@ class SaveChatMessageResponse(BaseModel):
 
 class ProblemContext(BaseModel):
     """문제 컨텍스트"""
-    problemId: int = Field(..., description="문제 ID", alias="problemId")
+    problemId: Optional[int] = Field(None, description="문제 ID", alias="problemId")
     specVersion: int = Field(..., description="스펙 버전", alias="specVersion")
 
 

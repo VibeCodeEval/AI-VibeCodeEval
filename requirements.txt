@@ -15,6 +15,7 @@ langgraph>=0.0.40
 langchain-google-genai>=1.0.0
 langchain-openai>=0.0.5
 langsmith>=0.1.0  # LangSmith Tracing (개발 환경)
+langchain-google-vertexai
 
 # Database
 sqlalchemy[asyncio]>=2.0.0

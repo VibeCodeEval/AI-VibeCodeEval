@@ -362,6 +362,13 @@ async def get_problem_info(spec_id: int, db: Optional[Any] = None) -> Dict[str, 
                 problem_name = basic_info.get("title", "알 수 없음")
                 logger.debug(f"[Problem Info] DB에서 조회 - spec_id: {spec_id}, problem_name: {problem_name}")
                 return problem_context
+            else:
+                # DB에 spec이 없거나 problem이 없는 경우 → 하드코딩 딕셔너리로 Fallback
+                logger.debug(f"[Problem Info] DB에 spec 없음 - spec_id: {spec_id}, 하드코딩 딕셔너리로 Fallback")
+                if spec_id in HARDCODED_PROBLEM_SPEC:
+                    problem_context = HARDCODED_PROBLEM_SPEC[spec_id].copy()
+                    logger.debug(f"[Problem Info] Fallback 하드코딩 사용 - spec_id: {spec_id}")
+                    return problem_context
                 
         except Exception as e:
             logger.warning(f"[Problem Info] DB 조회 실패 - spec_id: {spec_id}, error: {str(e)}")

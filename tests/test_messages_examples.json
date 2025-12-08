@@ -1,0 +1,109 @@
+{
+  "test_cases": [
+    {
+      "name": "Generation - 기본 코드 생성 요청",
+      "description": "외판원 순회 문제를 위한 비트마스킹 DP 코드 생성 요청",
+      "human_message": "외판원 순회 문제를 풀기 위해 비트마스킹 DP 코드를 작성해주세요.",
+      "ai_message": "네, 비트마스킹 DP를 사용한 외판원 순회 코드를 작성해드리겠습니다. 다음과 같은 접근 방식을 사용합니다:\n\n1. 비트마스크로 방문한 도시를 표현\n2. DP 테이블에 현재 도시와 방문 상태를 저장\n3. 모든 도시를 방문한 후 시작 도시로 돌아오는 최소 비용 계산",
+      "expected_intent": "generation"
+    },
+    {
+      "name": "Generation - 상세 제약 조건 포함",
+      "description": "제약 조건과 예시가 포함된 코드 생성 요청",
+      "human_message": "외판원 순회 문제를 풀기 위해 비트마스킹 DP 코드를 작성해주세요.\n\n[제약 조건]\n- 시간 복잡도: O(N^2 * 2^N)\n- 입력: sys.stdin.readline 사용\n- 메모리: 최대 20MB\n\n[예시]\n입력:\n4\n0 10 15 20\n5 0 9 10\n6 13 0 12\n8 8 9 0\n\n출력: 35",
+      "ai_message": "네, 요청하신 제약 조건을 반영하여 코드를 작성하겠습니다. 비트마스킹 DP를 사용하여 최적의 경로를 찾는 코드입니다.",
+      "expected_intent": "generation"
+    },
+    {
+      "name": "Optimization - 시간 복잡도 최적화",
+      "description": "기존 코드의 시간 복잡도를 최적화하는 요청",
+      "human_message": "현재 코드의 시간 복잡도를 O(N^2 * 2^N)으로 최적화해주세요. 메모이제이션을 활용하여 중복 계산을 줄이고 싶습니다.",
+      "ai_message": "네, 메모이제이션을 활용하여 최적화하겠습니다. DP 테이블을 활용하여 이미 계산한 결과를 재사용하면 시간 복잡도를 개선할 수 있습니다.",
+      "expected_intent": "optimization"
+    },
+    {
+      "name": "Debugging - 메모리 초과 오류",
+      "description": "메모리 초과 오류의 원인을 찾는 요청",
+      "human_message": "코드에서 메모리 초과 오류가 발생하는데, 원인을 찾아주세요. DP 테이블 크기가 너무 큰 것 같습니다.",
+      "ai_message": "메모리 초과는 DP 테이블 크기 문제일 수 있습니다. 비트마스크를 사용할 때 메모리 사용량을 줄이기 위해 불필요한 상태를 제거하거나, 슬라이딩 윈도우 기법을 사용할 수 있습니다.",
+      "expected_intent": "debugging"
+    },
+    {
+      "name": "Hint Query - 점화식 힌트 요청",
+      "description": "점화식 수립을 위한 힌트 요청",
+      "human_message": "점화식 수립을 위한 힌트를 주세요. 비트마스킹 DP에서 현재 상태에서 다음 상태로 전이하는 방법을 모르겠습니다.",
+      "ai_message": "점화식은 다음과 같이 수립할 수 있습니다:\n\ndp[current][visited] = min(\n    dp[next][visited | (1 << next)] + cost[current][next]\n    for next in range(n) if not (visited & (1 << next))\n)\n\n여기서 visited는 비트마스크로 표현된 방문한 도시 집합입니다.",
+      "expected_intent": "hint_query"
+    },
+    {
+      "name": "Test Case - 테스트 케이스 작성 요청",
+      "description": "테스트 케이스 작성을 요청",
+      "human_message": "외판원 순회 문제의 테스트 케이스를 작성해주세요. 경계 케이스와 일반 케이스를 포함해서요.",
+      "ai_message": "네, 테스트 케이스를 작성하겠습니다:\n\n1. 일반 케이스: 4개 도시, 모든 경로가 존재\n2. 경계 케이스: 2개 도시 (최소)\n3. 경계 케이스: 모든 도시가 연결되지 않은 경우\n4. 경계 케이스: 대칭 행렬 (비대칭 행렬도 포함)",
+      "expected_intent": "test_case"
+    },
+    {
+      "name": "Follow Up - 추가 질문",
+      "description": "이전 대화에 대한 추가 질문",
+      "human_message": "이전에 설명해주신 비트마스킹 DP에서, visited 비트마스크가 2^N 크기인데 메모리가 부족할 수 있지 않나요?",
+      "ai_message": "좋은 질문입니다. visited 비트마스크는 2^N 크기이지만, 실제로는 N이 20 이하인 경우가 많아서 메모리 사용량이 크지 않습니다. 만약 N이 더 크다면 다른 접근 방식을 고려해야 합니다.",
+      "expected_intent": "follow_up"
+    },
+    {
+      "name": "System Prompt - 역할 설정",
+      "description": "AI의 역할을 설정하는 요청",
+      "human_message": "당신은 알고리즘 튜터입니다. 학생이 이해하기 쉽게 설명해주세요.",
+      "ai_message": "네, 알고리즘 튜터 역할을 수행하겠습니다. 학생이 이해하기 쉽게 단계별로 설명하겠습니다.",
+      "expected_intent": "system_prompt"
+    },
+    {
+      "name": "Rule Setting - 제약 조건 설정",
+      "description": "코드 작성 규칙을 설정하는 요청",
+      "human_message": "[제약 조건]\n- 시간 복잡도: O(N^2 * 2^N) 이하여야 합니다.\n- 공간 복잡도: O(N * 2^N) 이하여야 합니다.\n- 입력 형식: 첫 줄에 도시 개수 N, 다음 N줄에 비용 행렬",
+      "ai_message": "네, 제약 조건을 반영하여 코드를 작성하겠습니다. 요청하신 시간/공간 복잡도와 입력 형식을 준수하겠습니다.",
+      "expected_intent": "rule_setting"
+    },
+    {
+      "name": "Multiple Intents - 복합 의도",
+      "description": "여러 의도가 혼합된 요청 (최적화 + 디버깅)",
+      "human_message": "현재 코드가 시간 초과가 발생하는데, 최적화해주세요. 그리고 메모리 사용량도 줄여주세요.",
+      "ai_message": "네, 시간 초과와 메모리 문제를 해결하기 위해 최적화하겠습니다. 불필요한 계산을 제거하고 메모이제이션을 활용하겠습니다.",
+      "expected_intent": ["optimization", "debugging"]
+    },
+    {
+      "name": "Low Quality - 모호한 요청",
+      "description": "명확하지 않은 요청 (낮은 점수 예상)",
+      "human_message": "코드 좀 만들어줘",
+      "ai_message": "네, 어떤 코드를 원하시나요? 좀 더 구체적으로 설명해주시면 도와드리겠습니다.",
+      "expected_intent": "generation"
+    },
+    {
+      "name": "High Quality - 매우 구체적인 요청",
+      "description": "매우 구체적이고 상세한 요청 (높은 점수 예상)",
+      "human_message": "외판원 순회 문제를 풀기 위해 비트마스킹 DP 코드를 작성해주세요.\n\n[문제 정보]\n- 문제 번호: 백준 2098\n- 알고리즘: DP, Bitmasking\n\n[제약 조건]\n- 시간 복잡도: O(N^2 * 2^N)\n- 공간 복잡도: O(N * 2^N)\n- 입력: sys.stdin.readline 사용\n- N 범위: 2 <= N <= 16\n\n[예시]\n입력:\n4\n0 10 15 20\n5 0 9 10\n6 13 0 12\n8 8 9 0\n\n출력: 35\n\n[요구사항]\n- 모든 도시를 정확히 한 번씩 방문\n- 시작 도시로 돌아와야 함\n- 최소 비용 경로 찾기",
+      "ai_message": "네, 요청하신 모든 조건을 반영하여 비트마스킹 DP 코드를 작성하겠습니다. 제약 조건과 예시를 모두 고려하여 구현하겠습니다.",
+      "expected_intent": "generation"
+    }
+  ],
+  "problem_context_example": {
+    "basic_info": {
+      "title": "외판원 순회 (TSP)",
+      "problem_id": "2098",
+      "difficulty": "MEDIUM"
+    },
+    "ai_guide": {
+      "key_algorithms": ["DP", "Bitmasking"],
+      "time_complexity": "O(N^2 * 2^N)",
+      "space_complexity": "O(N * 2^N)"
+    },
+    "constraints": {
+      "n_range": "2 <= N <= 16",
+      "cost_range": "0 <= cost[i][j] <= 1000000"
+    }
+  }
+}
+
+
+
+
+

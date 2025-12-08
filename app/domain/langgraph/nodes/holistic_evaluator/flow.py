@@ -22,6 +22,7 @@ from app.domain.langgraph.nodes.holistic_evaluator.langsmith_utils import (
     TRACE_NAME_HOLISTIC_FLOW,
 )
 from app.domain.langgraph.utils.token_tracking import extract_token_usage, accumulate_tokens
+from app.domain.langgraph.utils.structured_output_parser import parse_structured_output_async
 
 logger = logging.getLogger(__name__)
 
@@ -216,16 +217,12 @@ async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
         )
         
         try:
-            # Chain 실행 전에 원본 LLM 호출하여 메타데이터 추출
-            # 주의: with_structured_output은 원본 응답 메타데이터를 보존하지 않으므로
-            # 원본 LLM을 먼저 호출하여 메타데이터 추출
+            # 입력 준비 및 메시지 포맷팅
             chain_input = {"structured_logs": structured_logs}
-            
-            # 메시지 포맷팅 (토큰 추출용 원본 LLM 호출에 사용)
             prepared_input = prepare_holistic_input(chain_input)
             formatted_messages = format_holistic_messages(prepared_input)
             
-            # 원본 LLM 호출 (토큰 사용량 추출용)
+            # 원본 LLM 호출 (1회만 - 토큰 추출 + JSON 파싱)
             logger.info(f"[6a. Eval Holistic Flow] ===== LLM 호출 시작 =====")
             logger.info(f"[6a. Eval Holistic Flow] 평가 대상 턴 수: {len(structured_logs)}")
             raw_response = await llm.ainvoke(formatted_messages)
@@ -234,7 +231,7 @@ async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
             if hasattr(raw_response, 'content'):
                 logger.info(f"[6a. Eval Holistic Flow] LLM 원본 응답 (처음 500자): {raw_response.content[:500]}...")
             
-            # 토큰 사용량 추출 및 State에 누적 (원본 응답에서)
+            # 토큰 사용량 추출 및 State에 누적
             tokens = extract_token_usage(raw_response)
             if tokens:
                 accumulate_tokens(state, tokens, token_type="eval")
@@ -242,15 +239,32 @@ async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
             else:
                 logger.warning(f"[6a. Eval Holistic Flow] 토큰 사용량 추출 실패 - raw_response 타입: {type(raw_response)}")
             
-            # Chain 실행 (구조화된 출력 파싱)
+            # 원본 응답을 구조화된 출력으로 파싱
             logger.info(f"[6a. Eval Holistic Flow] 구조화된 출력 파싱 시작...")
-            chain_result = await holistic_chain.ainvoke(chain_input)
+            try:
+                from app.domain.langgraph.utils.structured_output_parser import parse_structured_output_async
+                structured_result = await parse_structured_output_async(
+                    raw_response=raw_response,
+                    model_class=HolisticFlowEvaluation,
+                    fallback_llm=structured_llm,
+                    formatted_messages=formatted_messages
+                )
+            except Exception as parse_error:
+                logger.error(f"[6a. Eval Holistic Flow] 구조화된 출력 파싱 실패: {str(parse_error)}", exc_info=True)
+                # 파싱 실패 시 fallback으로 구조화된 출력 Chain 사용
+                logger.info("[6a. Eval Holistic Flow] Fallback: 구조화된 출력 Chain 사용")
+                structured_result = await structured_llm.ainvoke(formatted_messages)
+            
+            # 출력 처리 (State 형식으로 변환)
+            result = {
+                "holistic_flow_score": structured_result.overall_flow_score,
+                "holistic_flow_analysis": structured_result.analysis,
+                "strategy_coherence": structured_result.strategy_coherence,
+                "problem_solving_approach": structured_result.problem_solving_approach,
+                "iteration_quality": structured_result.iteration_quality,
+                "updated_at": datetime.utcnow().isoformat(),
+            }
             logger.info(f"[6a. Eval Holistic Flow] 구조화된 출력 파싱 완료")
-            
-            # _llm_response는 더 이상 필요 없음 (이미 원본 응답에서 토큰 추출 완료)
-            chain_result.pop("_llm_response", None)
-            
-            result = chain_result
             
             # State에 누적된 토큰 정보를 result에 포함 (LangGraph 병합을 위해)
             if "eval_tokens" in state:
