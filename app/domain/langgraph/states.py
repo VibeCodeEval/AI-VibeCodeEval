@@ -45,7 +45,7 @@ class MainGraphState(TypedDict):
     intent_status: Optional[str]  # IntentAnalyzerStatus
     is_guardrail_failed: bool
     guardrail_message: Optional[str]
-    guide_strategy: Optional[str]  # SYNTAX_GUIDE, LOGIC_HINT, ROADMAP
+    guide_strategy: Optional[str]  # SYNTAX_GUIDE, LOGIC_HINT, ROADMAP, GENERATION
     keywords: Optional[List[str]]  # 사용자 질문의 핵심 키워드
     
     # Writer LLM 결과

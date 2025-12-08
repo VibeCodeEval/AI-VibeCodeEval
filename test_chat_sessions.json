@@ -1,0 +1,47 @@
+[
+  {
+    "sessionId": 1,
+    "examParticipantId": 1,
+    "problemId": 1,
+    "specVersion": 1,
+    "participantId": 101,
+    "examId": 1,
+    "specId": 1
+  },
+  {
+    "sessionId": 2,
+    "examParticipantId": 2,
+    "problemId": 1,
+    "specVersion": 1,
+    "participantId": 102,
+    "examId": 1,
+    "specId": 1
+  },
+  {
+    "sessionId": 3,
+    "examParticipantId": 3,
+    "problemId": 1,
+    "specVersion": 1,
+    "participantId": 103,
+    "examId": 1,
+    "specId": 1
+  },
+  {
+    "sessionId": 4,
+    "examParticipantId": 4,
+    "problemId": 1,
+    "specVersion": 1,
+    "participantId": 104,
+    "examId": 1,
+    "specId": 1
+  },
+  {
+    "sessionId": 5,
+    "examParticipantId": 5,
+    "problemId": 1,
+    "specVersion": 1,
+    "participantId": 105,
+    "examId": 1,
+    "specId": 1
+  }
+]

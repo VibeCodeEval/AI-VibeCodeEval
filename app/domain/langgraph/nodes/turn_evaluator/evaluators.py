@@ -7,6 +7,7 @@ from langchain_core.runnables import RunnableLambda
 from app.domain.langgraph.states import EvalTurnState, TurnEvaluation
 from app.domain.langgraph.nodes.turn_evaluator.utils import get_llm
 from app.domain.langgraph.utils.token_tracking import extract_token_usage, accumulate_tokens
+from app.domain.langgraph.utils.structured_output_parser import parse_structured_output_async
 from app.domain.langgraph.utils.prompt_metrics import calculate_all_metrics
 
 logger = logging.getLogger(__name__)
@@ -242,25 +243,18 @@ async def _evaluate_turn(state: EvalTurnState, eval_type: str, criteria: str) ->
     - Chain 실행 전에 원본 LLM을 호출하여 메타데이터 추출
     """
     try:
-        # 평가 Chain 생성
-        chain = create_evaluation_chain(eval_type, criteria)
+        # LLM 인스턴스 가져오기
+        llm = get_llm()
         
-        # Chain 실행 전에 원본 LLM 호출하여 메타데이터 추출
-        # 주의: with_structured_output은 원본 응답 메타데이터를 보존하지 않으므로
-        # 원본 LLM을 먼저 호출하여 메타데이터 추출
+        # 입력 준비 및 메시지 포맷팅
         chain_input = {"state": state}
-        
-        # 메시지 포맷팅 (토큰 추출용 원본 LLM 호출에 사용)
-        # Chain 내부의 prepare_evaluation_input과 format_messages를 재사용
         prepared_input = prepare_evaluation_input_internal(chain_input, eval_type, criteria)
         formatted_messages = format_evaluation_messages(prepared_input)
         
-        # 원본 LLM 호출 (토큰 사용량 추출용)
-        from app.domain.langgraph.nodes.turn_evaluator.utils import get_llm
-        llm = get_llm()
+        # 원본 LLM 호출 (1회만 - 토큰 추출 + JSON 파싱)
         raw_response = await llm.ainvoke(formatted_messages)
         
-        # 토큰 사용량 추출 및 State에 누적 (원본 응답에서)
+        # 토큰 사용량 추출 및 State에 누적
         tokens = extract_token_usage(raw_response)
         if tokens:
             accumulate_tokens(state, tokens, token_type="eval")
@@ -268,11 +262,30 @@ async def _evaluate_turn(state: EvalTurnState, eval_type: str, criteria: str) ->
         else:
             logger.warning(f"[{eval_type} 평가] 토큰 사용량 추출 실패 - raw_response 타입: {type(raw_response)}")
         
-        # 평가 Chain 실행 (구조화된 출력 파싱)
-        chain_result = await chain.ainvoke(chain_input)
+        # 원본 응답을 구조화된 출력으로 파싱
+        try:
+            structured_llm = llm.with_structured_output(TurnEvaluation)
+            structured_result = await parse_structured_output_async(
+                raw_response=raw_response,
+                model_class=TurnEvaluation,
+                fallback_llm=structured_llm,
+                formatted_messages=formatted_messages
+            )
+        except Exception as parse_error:
+            logger.error(f"[{eval_type} 평가] 구조화된 출력 파싱 실패: {str(parse_error)}", exc_info=True)
+            # 파싱 실패 시 fallback으로 구조화된 출력 Chain 사용
+            logger.info(f"[{eval_type} 평가] Fallback: 구조화된 출력 Chain 사용")
+            structured_llm = llm.with_structured_output(TurnEvaluation)
+            structured_result = await structured_llm.ainvoke(formatted_messages)
         
-        # _llm_response는 더 이상 필요 없음 (이미 원본 응답에서 토큰 추출 완료)
-        chain_result.pop("_llm_response", None)
+        # 출력 처리 (State 형식으로 변환)
+        chain_result = {
+            "intent": structured_result.intent,
+            "score": structured_result.score,
+            "average": structured_result.score,  # 호환성 유지
+            "rubrics": [r.dict() for r in structured_result.rubrics],
+            "final_reasoning": structured_result.final_reasoning,
+        }
         
         # State에 누적된 토큰 정보를 result에 포함 (LangGraph 병합을 위해)
         if "eval_tokens" in state:
