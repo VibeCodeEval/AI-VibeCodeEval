@@ -95,7 +95,24 @@ def create_holistic_system_prompt(problem_context: Optional[Dict[str, Any]] = No
    - System Prompting, XML 태그, Few-shot 예시 등 고급 기법을 사용했는가?
    - 이러한 기법 사용 시 보너스 점수를 부여하세요.
 
-각 항목은 0-100점으로 평가하고, overall_flow_score를 종합 점수로 반환하세요.
+각 항목은 0-100점으로 평가하세요.
+
+**응답 형식 (반드시 다음 JSON 구조를 사용하세요):**
+```json
+{{
+    "strategy_coherence": 0-100,  // 전략 일관성 점수 (항목 4: 전략적 탐색)
+    "problem_solving_approach": 0-100,  // 문제 해결 접근법 점수 (항목 1: 문제 분해)
+    "iteration_quality": 0-100,  // 반복 개선 품질 점수 (항목 2: 피드백 수용성)
+    "overall_flow_score": 0-100,  // 종합 점수 (모든 항목의 가중 평균)
+    "analysis": "상세 분석 내용"
+}}
+```
+
+**필드 매핑:**
+- `strategy_coherence`: 항목 4 (전략적 탐색) 점수
+- `problem_solving_approach`: 항목 1 (문제 분해) 점수
+- `iteration_quality`: 항목 2 (피드백 수용성) 점수
+- `overall_flow_score`: 모든 항목을 종합한 전체 점수
 
 **중요**: `analysis` 필드에는 다음을 포함하여 상세한 피드백을 제공하세요:
 - 문제 분해 전략에 대한 구체적 평가 (어떤 부분이 잘되었고, 어떤 부분을 개선할 수 있는지)

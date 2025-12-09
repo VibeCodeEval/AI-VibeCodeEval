@@ -71,7 +71,7 @@ async def get_eval_service() -> EvalService:
     "/messages",
     response_model=ChatMessagesResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "세션을 찾을 수 없음"},
+        #404: {"model": ErrorResponse, "description": "세션을 찾을 수 없음"},
         504: {"model": ErrorResponse, "description": "요청 처리 시간 초과"},
         500: {"model": ErrorResponse, "description": "서버 에러"}
     },
@@ -125,24 +125,18 @@ async def send_messages(
         )
         
         # [1] 세션 존재 확인
-        # 세션은 BE에서 생성하므로, 여기서는 조회만 수행
         from app.infrastructure.repositories.session_repository import SessionRepository
         session_repo = SessionRepository(db)
         
         session = await session_repo.get_session_by_id(request.sessionId)
         
         if not session:
-            logger.error(
-                f"[SendMessages] 세션을 찾을 수 없음 - "
-                f"sessionId: {request.sessionId}, participantId: {request.participantId}. "
-                f"BE에서 세션을 생성했는지 확인하세요."
-            )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={
                     "error": True,
                     "error_code": "SESSION_NOT_FOUND",
-                    "error_message": f"세션을 찾을 수 없습니다. (session_id: {request.sessionId}). BE에서 세션을 먼저 생성해야 합니다."
+                    "error_message": f"세션을 찾을 수 없습니다. (session_id: {request.sessionId})"
                 }
             )
         

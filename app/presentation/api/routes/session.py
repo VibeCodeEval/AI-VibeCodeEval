@@ -2,6 +2,7 @@
 세션 API 라우터
 """
 import logging
+from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -188,6 +189,41 @@ async def get_session_scores(
 
 
 @router.get(
+    "/submissions/{submission_id}/status",
+    summary="제출 평가 진행 상태 조회",
+    description="제출 평가의 진행 상태를 조회합니다. (processing, completed, failed)"
+)
+async def get_submission_status(
+    submission_id: int
+) -> Dict[str, Any]:
+    """
+    제출 평가 진행 상태 조회
+    
+    [상태]
+    - processing: 평가 진행 중
+    - completed: 평가 완료
+    - failed: 평가 실패
+    - not_found: 평가 시작되지 않음
+    """
+    from app.infrastructure.cache.redis_client import redis_client
+    
+    submission_status_key = f"submission_status:{submission_id}"
+    status = await redis_client.get(submission_status_key)
+    
+    if status:
+        status_str = status  # RedisClient는 decode_responses=True로 설정되어 문자열 반환
+        return {
+            "submission_id": submission_id,
+            "status": status_str
+        }
+    else:
+        return {
+            "submission_id": submission_id,
+            "status": "not_found"
+        }
+
+
+@router.get(
     "/{session_id}/history",
     response_model=ConversationHistory,
     responses={
@@ -339,114 +375,46 @@ async def submit_code(
             f"session_id: {session.id}, spec_id: {session.spec_id}"
         )
         
-        # [3] LangGraph 실행 (제출 처리 및 평가) - 동기적으로 완료까지 대기
+        # [3] 비동기 평가 실행 (백그라운드 태스크)
         redis_session_id = f"session_{session.id}"
         
-        logger.info(f"[SubmitCode] ===== 평가 시작 =====")
+        logger.info(f"[SubmitCode] ===== 비동기 평가 시작 =====")
         logger.info(f"[SubmitCode] submissionId: {request.submissionId}")
         logger.info(f"[SubmitCode] session_id: {session.id}, redis_session_id: {redis_session_id}")
         logger.info(f"[SubmitCode] code_length: {len(request.finalCode)} 문자")
         logger.info(f"[SubmitCode] language: {request.language}")
         
-        try:
-            # 평가 실행 (완료까지 대기)
-            result = await eval_service.submit_code(
+        # 진행 상태를 Redis에 저장 (조회 가능)
+        from app.infrastructure.cache.redis_client import redis_client
+        submission_status_key = f"submission_status:{request.submissionId}"
+        await redis_client.set(
+            submission_status_key,
+            "processing",  # 상태: processing, completed, failed
+            ttl_seconds=3600  # 1시간 TTL
+        )
+        
+        # 백그라운드 태스크로 평가 실행
+        import asyncio
+        asyncio.create_task(
+            _run_submit_evaluation_background(
+                eval_service=eval_service,
                 session_id=redis_session_id,
                 exam_id=exam_id,
                 participant_id=participant_id,
                 spec_id=request.specId,
                 code_content=request.finalCode,
                 lang=request.language,
-                submission_id=request.submissionId,  # BE에서 생성한 submission ID 전달
+                submission_id=request.submissionId,
+                postgres_session_id=session.id,
             )
-            
-            logger.info(f"[SubmitCode] ===== 평가 완료 =====")
-            logger.info(f"[SubmitCode] submissionId: {request.submissionId}")
-            logger.info(f"[SubmitCode] final_scores: {result.get('final_scores')}")
-            logger.info(f"[SubmitCode] submission_id: {result.get('submission_id')}")
-            
-            # 평가 결과 저장은 eval_service 내부에서 처리됨
-            # 4번 Node (TURN_EVAL), 6a번 Node (HOLISTIC_FLOW), scores 테이블 저장
-            
-            if result.get("error") or result.get("error_message"):
-                error_msg = result.get("error_message", "평가 실패")
-                logger.error(
-                    f"[SubmitCode] 평가 실패 - "
-                    f"submissionId: {request.submissionId}, error: {error_msg}"
-                )
-                
-                # 실패 시 submission 상태 업데이트
-                try:
-                    from app.infrastructure.repositories.submission_repository import SubmissionRepository
-                    from app.infrastructure.persistence.models.enums import SubmissionStatusEnum
-                    from app.infrastructure.persistence.session import get_db_context
-                    
-                    async with get_db_context() as db_context:
-                        submission_repo = SubmissionRepository(db_context)
-                        await submission_repo.update_submission_status(
-                            submission_id=request.submissionId,
-                            status=SubmissionStatusEnum.FAILED
-                        )
-                        await db_context.commit()
-                        logger.info(
-                            f"[SubmitCode] Submission 상태 업데이트 완료 - "
-                            f"submissionId: {request.submissionId}, status: FAILED"
-                        )
-                except Exception as update_error:
-                    logger.warning(
-                        f"[SubmitCode] Submission 상태 업데이트 실패 - "
-                        f"submissionId: {request.submissionId}, error: {str(update_error)}"
-                    )
-                
-                return SubmitCodeResponse(
-                    submissionId=request.submissionId,
-                    status="failed"
-                )
-            
-            logger.info(
-                f"[SubmitCode] 평가 성공 - "
-                f"submissionId: {request.submissionId}, session_id: {session.id}"
-            )
-            
-            # 평가 완료 및 점수 저장 완료 후 Response 반환
-            return SubmitCodeResponse(
-                submissionId=request.submissionId,
-                status="successed"  # 평가 완료 성공
-            )
-            
-        except Exception as e:
-            logger.error(
-                f"[SubmitCode] 평가 중 오류 - submissionId: {request.submissionId}",
-                exc_info=True
-            )
-            
-            # 예외 발생 시 submission 상태 업데이트
-            try:
-                from app.infrastructure.repositories.submission_repository import SubmissionRepository
-                from app.infrastructure.persistence.models.enums import SubmissionStatusEnum
-                from app.infrastructure.persistence.session import get_db_context
-                
-                async with get_db_context() as db_context:
-                    submission_repo = SubmissionRepository(db_context)
-                    await submission_repo.update_submission_status(
-                        submission_id=request.submissionId,
-                        status=SubmissionStatusEnum.FAILED
-                    )
-                    await db_context.commit()
-                    logger.info(
-                        f"[SubmitCode] Submission 상태 업데이트 완료 (예외 발생) - "
-                        f"submissionId: {request.submissionId}, status: FAILED"
-                    )
-            except Exception as update_error:
-                logger.warning(
-                    f"[SubmitCode] Submission 상태 업데이트 실패 (예외 발생) - "
-                    f"submissionId: {request.submissionId}, error: {str(update_error)}"
-                )
-            
-            return SubmitCodeResponse(
-                submissionId=request.submissionId,
-                status="failed"
-            )
+        )
+        
+        # 즉시 응답 반환 (Backend 블로킹 방지)
+        logger.info(f"[SubmitCode] 백그라운드 평가 태스크 시작 - submissionId: {request.submissionId}")
+        return SubmitCodeResponse(
+            submissionId=request.submissionId,
+            status="processing"  # 처리 중 상태
+        )
         
     except HTTPException:
         raise
@@ -456,6 +424,201 @@ async def submit_code(
             submissionId=request.submissionId,
             status="failed"
         )
+
+
+async def _run_submit_evaluation_background(
+    eval_service: EvalService,
+    session_id: str,
+    exam_id: int,
+    participant_id: int,
+    spec_id: int,
+    code_content: str,
+    lang: str,
+    submission_id: int,
+    postgres_session_id: int,
+) -> None:
+    """
+    백그라운드에서 평가 실행 (비동기)
+    
+    [처리 과정]
+    1. 평가 실행
+    2. 진행 상태 업데이트 (Redis) - 조회 가능
+    3. 평가 결과 저장 (DB)
+    4. Spring Boot 콜백 전송
+    5. Submission 상태 업데이트
+    
+    [진행 상태]
+    - processing: 평가 진행 중
+    - completed: 평가 완료
+    - failed: 평가 실패
+    """
+    import asyncio
+    from app.infrastructure.cache.redis_client import redis_client
+    from app.application.services.callback_service import CallbackService
+    
+    logger = logging.getLogger(__name__)
+    submission_status_key = f"submission_status:{submission_id}"
+    
+    try:
+        logger.info(f"[SubmitCode Background] 평가 시작 - submissionId: {submission_id}")
+        
+        # 평가 실행
+        result = await eval_service.submit_code(
+            session_id=session_id,
+            exam_id=exam_id,
+            participant_id=participant_id,
+            spec_id=spec_id,
+            code_content=code_content,
+            lang=lang,
+            submission_id=submission_id,
+        )
+        
+        logger.info(f"[SubmitCode Background] 평가 완료 - submissionId: {submission_id}")
+        logger.info(f"[SubmitCode Background] final_scores: {result.get('final_scores')}")
+        logger.info(f"[SubmitCode Background] submission_id: {result.get('submission_id')}")
+        
+        # 평가 결과 저장은 eval_service 내부에서 처리됨
+        # 4번 Node (TURN_EVAL), 6a번 Node (HOLISTIC_FLOW), scores 테이블 저장
+        
+        if result.get("error") or result.get("error_message"):
+            error_msg = result.get("error_message", "평가 실패")
+            logger.error(
+                f"[SubmitCode Background] 평가 실패 - "
+                f"submissionId: {submission_id}, error: {error_msg}"
+            )
+            
+                # 진행 상태 업데이트 (실패)
+            await redis_client.set(submission_status_key, "failed", ttl_seconds=3600)
+            
+            # 실패 시 submission 상태 업데이트
+            try:
+                from app.infrastructure.repositories.submission_repository import SubmissionRepository
+                from app.infrastructure.persistence.models.enums import SubmissionStatusEnum
+                from app.infrastructure.persistence.session import get_db_context
+                
+                async with get_db_context() as db_context:
+                    submission_repo = SubmissionRepository(db_context)
+                    await submission_repo.update_submission_status(
+                        submission_id=submission_id,
+                        status=SubmissionStatusEnum.FAILED
+                    )
+                    await db_context.commit()
+                    logger.info(
+                        f"[SubmitCode Background] Submission 상태 업데이트 완료 - "
+                        f"submissionId: {submission_id}, status: FAILED"
+                    )
+            except Exception as update_error:
+                logger.warning(
+                    f"[SubmitCode Background] Submission 상태 업데이트 실패 - "
+                    f"submissionId: {submission_id}, error: {str(update_error)}"
+                )
+            
+            # Spring Boot 콜백 전송 (실패)
+            try:
+                callback_service = CallbackService()
+                success = await callback_service.send_submission_status(
+                    submission_id=submission_id,
+                    status="FAILED",
+                )
+                if success:
+                    logger.info(f"[SubmitCode Background] 콜백 전송 완료 - submissionId: {submission_id}, status: FAILED")
+                else:
+                    logger.warning(f"[SubmitCode Background] 콜백 전송 실패 - submissionId: {submission_id}")
+            except Exception as callback_error:
+                logger.warning(f"[SubmitCode Background] 콜백 전송 실패: {str(callback_error)}")
+            
+            return
+        
+        # 진행 상태 업데이트 (완료)
+        await redis_client.set(submission_status_key, "completed", ttl_seconds=3600)
+        
+        logger.info(
+            f"[SubmitCode Background] 평가 성공 - "
+            f"submissionId: {submission_id}, session_id: {postgres_session_id}"
+        )
+        
+        # Submission 상태 업데이트 (성공)
+        try:
+            from app.infrastructure.repositories.submission_repository import SubmissionRepository
+            from app.infrastructure.persistence.models.enums import SubmissionStatusEnum
+            from app.infrastructure.persistence.session import get_db_context
+            
+            async with get_db_context() as db_context:
+                submission_repo = SubmissionRepository(db_context)
+                await submission_repo.update_submission_status(
+                    submission_id=submission_id,
+                    status=SubmissionStatusEnum.DONE
+                )
+                await db_context.commit()
+                logger.info(
+                    f"[SubmitCode Background] Submission 상태 업데이트 완료 - "
+                    f"submissionId: {submission_id}, status: COMPLETED"
+                )
+        except Exception as update_error:
+            logger.warning(
+                f"[SubmitCode Background] Submission 상태 업데이트 실패 - "
+                f"submissionId: {submission_id}, error: {str(update_error)}"
+            )
+        
+        # Spring Boot 콜백 전송 (성공)
+        try:
+            callback_service = CallbackService()
+            success = await callback_service.send_submission_status(
+                submission_id=submission_id,
+                status="DONE",
+            )
+            if success:
+                logger.info(f"[SubmitCode Background] 콜백 전송 완료 - submissionId: {submission_id}, status: DONE")
+            else:
+                logger.warning(f"[SubmitCode Background] 콜백 전송 실패 (401 등) - submissionId: {submission_id}")
+        except Exception as callback_error:
+            logger.warning(f"[SubmitCode Background] 콜백 전송 실패: {str(callback_error)}")
+        
+    except Exception as e:
+        logger.error(
+            f"[SubmitCode Background] 평가 중 오류 - submissionId: {submission_id}",
+            exc_info=True
+        )
+        
+        # 진행 상태 업데이트 (실패)
+        await redis_client.set(submission_status_key, "failed", ttl_seconds=3600)
+        
+        # 예외 발생 시 submission 상태 업데이트
+        try:
+            from app.infrastructure.repositories.submission_repository import SubmissionRepository
+            from app.infrastructure.persistence.models.enums import SubmissionStatusEnum
+            from app.infrastructure.persistence.session import get_db_context
+            
+            async with get_db_context() as db_context:
+                submission_repo = SubmissionRepository(db_context)
+                await submission_repo.update_submission_status(
+                    submission_id=submission_id,
+                    status=SubmissionStatusEnum.FAILED
+                )
+                await db_context.commit()
+                logger.info(
+                    f"[SubmitCode Background] Submission 상태 업데이트 완료 (예외 발생) - "
+                    f"submissionId: {submission_id}, status: FAILED"
+                )
+        except Exception as update_error:
+            logger.warning(
+                f"[SubmitCode Background] Submission 상태 업데이트 실패 (예외 발생) - "
+                f"submissionId: {submission_id}, error: {str(update_error)}"
+            )
+        
+        # Spring Boot 콜백 전송 (에러)
+        try:
+            callback_service = CallbackService()
+            success = await callback_service.send_submission_status(
+                submission_id=submission_id,
+                status="FAILED",
+            )
+            if success:
+                logger.info(f"[SubmitCode Background] 콜백 전송 완료 (예외) - submissionId: {submission_id}, status: FAILED")
+            else:
+                logger.warning(f"[SubmitCode Background] 콜백 전송 실패 - submissionId: {submission_id}")
+        except Exception as callback_error:
+            logger.warning(f"[SubmitCode Background] 콜백 전송 실패: {str(callback_error)}")
 
 
 # ===== [DEPRECATED] 레거시 API - 주석처리됨 (2024-12-07) =====

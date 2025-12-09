@@ -64,18 +64,39 @@ class EvaluationStorageService:
             score = prompt_eval_details.get("score")
             analysis = turn_log.get("comprehensive_reasoning") or prompt_eval_details.get("final_reasoning")
             
-            # details에 모든 평가 데이터 포함
+            # 상세 루브릭 정보 추출 (name, score, reasoning 포함)
+            rubrics = prompt_eval_details.get("rubrics", [])
+            detailed_rubrics = []
+            for rubric in rubrics:
+                if isinstance(rubric, dict):
+                    detailed_rubrics.append({
+                        "name": rubric.get("name", rubric.get("criterion", "")),
+                        "score": rubric.get("score", 0.0),
+                        "reasoning": rubric.get("reasoning", rubric.get("reason", "평가 없음")),
+                        "criterion": rubric.get("criterion", rubric.get("name", ""))  # 호환성 유지
+                    })
+            
+            # intent가 "UNKNOWN"이면 intent_types[0] 사용
+            intent = prompt_eval_details.get("intent", "UNKNOWN")
+            intent_types = turn_log.get("intent_types", [])
+            if intent == "UNKNOWN" and intent_types:
+                intent = intent_types[0]
+            
+            # details에 모든 평가 데이터 포함 (상세 정보, 중복 최소화)
             details = {
                 "score": score,  # 점수
-                "analysis": analysis,  # 분석 내용
-                "intent": prompt_eval_details.get("intent"),
-                "intent_types": turn_log.get("intent_types", []),
-                "rubrics": prompt_eval_details.get("rubrics", []),
-                "evaluations": turn_log.get("evaluations", {}),
-                "detailed_feedback": turn_log.get("detailed_feedback", []),
+                "analysis": analysis,  # 분석 내용 (종합 평가 근거)
+                "intent": intent,  # UNKNOWN 대신 실제 intent 사용
+                "intent_types": intent_types,
+                "intent_confidence": turn_log.get("intent_confidence", prompt_eval_details.get("intent_confidence", 0.0)),  # 의도 신뢰도
+                "rubrics": detailed_rubrics,  # 상세 루브릭 정보 (name, score, reasoning 포함) - 중복 제거
+                "weights": prompt_eval_details.get("weights", {}),  # 가중치 정보
                 "turn_score": turn_log.get("turn_score"),
                 "is_guardrail_failed": turn_log.get("is_guardrail_failed", False),
                 "guardrail_message": turn_log.get("guardrail_message"),
+                # 참고용: 상세 정보는 필요시에만 포함 (중복 방지)
+                # "evaluations": turn_log.get("evaluations", {}),  # 주석 처리: rubrics와 중복
+                # "detailed_feedback": turn_log.get("detailed_feedback", []),  # 주석 처리: rubrics와 중복
             }
             
             # 기존 평가 결과 확인 (중복 방지)
@@ -107,14 +128,21 @@ class EvaluationStorageService:
                 
                 # Foreign Key 제약 조건을 위해 메시지가 존재하는지 확인
                 # (백엔드에서 메시지를 생성하므로, 평가 저장 시점에는 메시지가 이미 존재해야 함)
-                message_query = select(PromptMessage).where(
-                    PromptMessage.session_id == session_id,
-                    PromptMessage.turn == turn
+                # role 필드는 필요 없으므로 id만 확인 (ENUM 변환 오류 방지)
+                from sqlalchemy import text
+                message_query = text("""
+                    SELECT id
+                    FROM prompt_messages
+                    WHERE session_id = :session_id AND turn = :turn
+                    LIMIT 1
+                """)
+                result = await self.db.execute(
+                    message_query,
+                    {"session_id": session_id, "turn": turn}
                 )
-                existing_message = await self.db.execute(message_query)
-                message = existing_message.scalar_one_or_none()
+                message_exists = result.first() is not None
                 
-                if not message:
+                if not message_exists:
                     logger.error(
                         f"[EvaluationStorage] Foreign Key 제약 조건 위반 - "
                         f"메시지가 존재하지 않습니다. session_id: {session_id}, turn: {turn}. "

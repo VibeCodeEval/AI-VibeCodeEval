@@ -88,6 +88,31 @@ class CallbackService:
         
         return await self._send_callback(payload)
     
+    async def send_submission_status(
+        self,
+        submission_id: int,
+        status: str,  # "QUEUED", "RUNNING", "DONE", "FAILED"
+    ) -> bool:
+        """
+        제출 상태 콜백 전송
+        
+        Args:
+            submission_id: 제출 ID
+            status: 제출 상태 (QUEUED, RUNNING, DONE, FAILED)
+        
+        Returns:
+            성공 여부
+        """
+        # 콜백 URL 구성: 기본 URL에서 경로 변경
+        callback_url = self.callback_url.replace("/api/ai/callback", "/api/callbacks/ai/analysis")
+        
+        payload = {
+            "submissionId": submission_id,
+            "status": status,
+        }
+        
+        return await self._send_callback(payload, callback_url=callback_url)
+    
     async def send_final_scores(
         self,
         session_id: str,
@@ -98,7 +123,7 @@ class CallbackService:
         turn_scores: Dict[str, Any],
     ) -> bool:
         """
-        최종 점수 전송
+        최종 점수 전송 (레거시 - 사용 안 함)
         
         Args:
             session_id: 세션 ID
@@ -152,36 +177,39 @@ class CallbackService:
         
         return await self._send_callback(payload)
     
-    async def _send_callback(self, payload: Dict[str, Any]) -> bool:
+    async def _send_callback(self, payload: Dict[str, Any], callback_url: Optional[str] = None) -> bool:
         """
         콜백 전송 (내부)
         
         Args:
             payload: 전송할 데이터
+            callback_url: 콜백 URL (None이면 기본 URL 사용)
         
         Returns:
             성공 여부
         """
+        url = callback_url or self.callback_url
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
-                    self.callback_url,
+                    url,
                     json=payload,
                     headers=self._get_headers(),
                 )
                 
                 if response.status_code == 200:
-                    logger.info(f"콜백 전송 성공: {payload.get('type')}")
+                    callback_type = payload.get('type') or f"submission_status:{payload.get('submissionId')}"
+                    logger.info(f"콜백 전송 성공: {callback_type}")
                     return True
                 else:
                     logger.warning(
                         f"콜백 전송 실패: status={response.status_code}, "
-                        f"body={response.text}"
+                        f"body={response.text}, url={url}"
                     )
                     return False
                     
         except httpx.TimeoutException:
-            logger.error(f"콜백 전송 타임아웃: {self.callback_url}")
+            logger.error(f"콜백 전송 타임아웃: {url}")
             return False
         except Exception as e:
             logger.error(f"콜백 전송 오류: {str(e)}", exc_info=True)
