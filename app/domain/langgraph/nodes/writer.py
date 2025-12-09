@@ -289,13 +289,21 @@ def solve(n: int, maps: list) -> int:
 - FULL_CODE_ALLOWED 전략이 아닌 경우: 풀 코드 생성 금지.
 - 줄글로 된 긴 설명 금지 (요청한 코드/의사코드만 깔끔하게 출력).
 
+# 📝 일반 인사 및 문제 해결과 무관한 요청 처리
+사용자가 일반적인 인사("안녕하세요", "hello" 등)나 문제 해결과 무관한 요청을 한 경우:
+- 간단히 인사하고, 문제 해결과 관련된 도움을 제공할 수 있다고 안내
+- 예시: "안녕하세요. 문제 해결과 관련된 도움이 필요하시면 언제든지 말씀해주세요."
+- 문제 해결 관련 요청이 아닌 경우에도 항상 응답해야 하며, "(No response...)" 같은 메시지는 절대 사용하지 말 것
+
 # Output Formats
 
-반드시 아래 헤더 중 하나를 사용하여 답변을 시작하십시오.
+문제 해결 관련 요청인 경우, 반드시 아래 헤더 중 하나를 사용하여 답변을 시작하십시오.
 - **[Syntax Example]**
 - **[Pseudo Code]**
 - **[Code]**
 - **[Roadmap]**
+
+일반 인사나 문제 해결과 무관한 요청인 경우, 헤더 없이 간단히 응답하십시오.
 
 {memory_summary}
 """
@@ -310,9 +318,17 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
     guardrail_message = state.get("guardrail_message", "")
     
     # Guide Strategy 정보 가져오기
-    guide_strategy = state.get("guide_strategy", "LOGIC_HINT")  # 기본값
+    guide_strategy_raw = state.get("guide_strategy")
+    guide_strategy = guide_strategy_raw or "LOGIC_HINT"  # None인 경우 기본값 사용
     keywords = state.get("keywords", [])
     problem_context = state.get("problem_context")
+    
+    import logging
+    logger = logging.getLogger(__name__)
+    if guide_strategy_raw is None:
+        logger.info(f"[prepare_writer_input] guide_strategy가 None이므로 기본값 'LOGIC_HINT' 사용")
+    else:
+        logger.debug(f"[prepare_writer_input] guide_strategy: {guide_strategy}")
     
     # 코드 생성 요청 감지 (맥락 기반)
     is_code_generation_request = False
@@ -383,18 +399,23 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
                 problem_context=problem_context,
                 is_code_generation_request=False
             )
+            logger.info(f"[prepare_writer_input] 시스템 프롬프트 생성 완료 - guide_strategy: {guide_strategy or 'LOGIC_HINT'}, 프롬프트 길이: {len(system_prompt)}")
+            logger.debug(f"[prepare_writer_input] 시스템 프롬프트 (처음 500자): {system_prompt[:500]}...")
     
     # 최근 메시지 변환 (최대 10개)
     recent_messages = messages[-10:] if len(messages) > 10 else messages
     formatted_messages = []
     for msg in recent_messages:
         if hasattr(msg, 'content'):
-            role = getattr(msg, 'type', 'user')
-            if role == 'human':
-                role = 'user'
-            elif role == 'ai':
-                role = 'assistant'
-            formatted_messages.append({"role": role, "content": msg.content})
+            content = msg.content
+            # 빈 content 필터링
+            if content and str(content).strip():
+                role = getattr(msg, 'type', 'user')
+                if role == 'human':
+                    role = 'user'
+                elif role == 'ai':
+                    role = 'assistant'
+                formatted_messages.append({"role": role, "content": content})
     
     return {
         "system_prompt": system_prompt,
@@ -406,31 +427,65 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
 
 def format_writer_messages(inputs: Dict[str, Any]) -> list:
     """메시지 리스트를 LangChain BaseMessage 객체로 변환"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     chat_messages = []
     
-    # 시스템 메시지 추가
-    if inputs.get("system_prompt"):
-        chat_messages.append(SystemMessage(content=inputs["system_prompt"]))
+    # 시스템 메시지 추가 (content가 비어있지 않은 경우에만)
+    system_prompt = inputs.get("system_prompt")
+    if system_prompt and str(system_prompt).strip():
+        chat_messages.append(SystemMessage(content=system_prompt))
+        logger.info(f"[format_writer_messages] 시스템 메시지 추가 - 길이: {len(str(system_prompt))}자")
+        logger.debug(f"[format_writer_messages] 시스템 프롬프트 (처음 300자): {str(system_prompt)[:300]}...")
+    else:
+        logger.error(f"[format_writer_messages] ⚠️ 시스템 메시지가 비어있음 - system_prompt: {system_prompt}")
     
-    # 이전 대화 메시지 변환
+    # 이전 대화 메시지 변환 (content가 비어있지 않은 경우에만)
+    messages_count = 0
+    filtered_count = 0
     for msg in inputs.get("messages", []):
+        messages_count += 1
         if isinstance(msg, dict):
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            if role == "system":
-                chat_messages.append(SystemMessage(content=content))
-            elif role == "assistant" or role == "ai":
-                chat_messages.append(AIMessage(content=content))
+            # 빈 content 필터링
+            if content and str(content).strip():
+                if role == "system":
+                    chat_messages.append(SystemMessage(content=content))
+                elif role == "assistant" or role == "ai":
+                    chat_messages.append(AIMessage(content=content))
+                else:
+                    chat_messages.append(HumanMessage(content=content))
             else:
-                chat_messages.append(HumanMessage(content=content))
+                filtered_count += 1
+                logger.debug(f"[format_writer_messages] 빈 메시지 필터링됨 - role: {role}, content: {content}")
         elif hasattr(msg, 'content'):
-            # 이미 BaseMessage 객체인 경우
-            chat_messages.append(msg)
+            # 이미 BaseMessage 객체인 경우 - 빈 content 필터링
+            content = msg.content
+            if content and str(content).strip():
+                chat_messages.append(msg)
+            else:
+                filtered_count += 1
+                logger.debug(f"[format_writer_messages] 빈 BaseMessage 필터링됨 - type: {type(msg)}, content: {content}")
     
-    # 현재 사용자 메시지 추가
-    if inputs.get("human_message"):
-        chat_messages.append(HumanMessage(content=inputs["human_message"]))
+    if filtered_count > 0:
+        logger.info(f"[format_writer_messages] 총 {messages_count}개 메시지 중 {filtered_count}개 빈 메시지 필터링됨")
     
+    # 현재 사용자 메시지 추가 (content가 비어있지 않은 경우에만)
+    human_message = inputs.get("human_message")
+    if human_message and str(human_message).strip():
+        chat_messages.append(HumanMessage(content=human_message))
+        logger.debug(f"[format_writer_messages] 사용자 메시지 추가 - 길이: {len(str(human_message))}")
+    else:
+        logger.warning(f"[format_writer_messages] 사용자 메시지가 비어있음 - human_message: {human_message}")
+    
+    # 모든 메시지가 비어있을 경우, Vertex AI의 "at least one parts field" 오류 방지를 위해 기본 메시지 추가
+    if not chat_messages:
+        logger.error(f"[format_writer_messages] 모든 메시지가 비어있음! 기본 메시지 추가")
+        chat_messages.append(SystemMessage(content="안녕하세요. 무엇을 도와드릴까요?"))
+    
+    logger.info(f"[format_writer_messages] 최종 메시지 개수: {len(chat_messages)}개")
     return chat_messages
 
 
@@ -505,6 +560,18 @@ async def writer_llm(state: MainGraphState) -> Dict[str, Any]:
         # Chain 결과에서 내용과 LLM 응답 객체 분리
         ai_content = chain_result.get("ai_content", "") if isinstance(chain_result, dict) else str(chain_result)
         llm_response = chain_result.get("_llm_response") if isinstance(chain_result, dict) else None
+        
+        # LLM 응답 상세 로깅 (디버깅용)
+        if llm_response:
+            logger.debug(f"[Writer LLM] LLM 응답 상세 - type: {type(llm_response)}, has_content: {hasattr(llm_response, 'content')}, content_type: {type(getattr(llm_response, 'content', None))}")
+            if hasattr(llm_response, 'response_metadata'):
+                logger.debug(f"[Writer LLM] response_metadata: {llm_response.response_metadata}")
+        
+        # 빈 응답 체크 및 처리
+        if not ai_content or (isinstance(ai_content, str) and not ai_content.strip()):
+            logger.warning(f"[Writer LLM] 빈 응답 감지 - LLM이 빈 응답을 반환했습니다. chain_result: {chain_result}, llm_response type: {type(llm_response)}")
+            # 빈 응답인 경우 기본 메시지 제공
+            ai_content = "죄송합니다. 응답을 생성할 수 없습니다. 다시 시도해주세요."
         
         # 토큰 사용량 추출 및 State에 누적
         if llm_response:
