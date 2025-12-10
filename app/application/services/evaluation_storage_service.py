@@ -82,6 +82,9 @@ class EvaluationStorageService:
             if intent == "UNKNOWN" and intent_types:
                 intent = intent_types[0]
             
+            # AI 응답 요약 추출 (6번 Node에서 Chaining 전략 평가에 사용)
+            ai_summary = turn_log.get("llm_answer_summary") or turn_log.get("answer_summary") or ""
+            
             # details에 모든 평가 데이터 포함 (상세 정보, 중복 최소화)
             details = {
                 "score": score,  # 점수
@@ -94,6 +97,7 @@ class EvaluationStorageService:
                 "turn_score": turn_log.get("turn_score"),
                 "is_guardrail_failed": turn_log.get("is_guardrail_failed", False),
                 "guardrail_message": turn_log.get("guardrail_message"),
+                "ai_summary": ai_summary,  # AI 응답 요약 (6번 Node에서 Chaining 전략 평가에 사용)
                 # 참고용: 상세 정보는 필요시에만 포함 (중복 방지)
                 # "evaluations": turn_log.get("evaluations", {}),  # 주석 처리: rubrics와 중복
                 # "detailed_feedback": turn_log.get("detailed_feedback", []),  # 주석 처리: rubrics와 중복

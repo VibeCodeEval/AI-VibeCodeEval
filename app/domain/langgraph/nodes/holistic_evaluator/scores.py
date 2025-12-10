@@ -86,14 +86,18 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             "correctness": 0.30,  # 정확성
         }
         
-        # 프롬프트 점수 계산
-        prompt_scores = []
-        if holistic_flow_score is not None:
-            prompt_scores.append(holistic_flow_score)
-        if aggregate_turn_score is not None:
-            prompt_scores.append(aggregate_turn_score)
-        
-        prompt_score = sum(prompt_scores) / len(prompt_scores) if prompt_scores else 0
+        # 프롬프트 점수 계산 (가중 평균)
+        # holistic_flow_score: 60%, aggregate_turn_score: 40%
+        prompt_score = 0
+        if holistic_flow_score is not None and aggregate_turn_score is not None:
+            # 둘 다 있는 경우: 가중 평균
+            prompt_score = holistic_flow_score * 0.60 + aggregate_turn_score * 0.40
+        elif holistic_flow_score is not None:
+            # holistic_flow_score만 있는 경우
+            prompt_score = holistic_flow_score
+        elif aggregate_turn_score is not None:
+            # aggregate_turn_score만 있는 경우
+            prompt_score = aggregate_turn_score
         
         # 성능 점수
         perf_score = code_performance_score if code_performance_score is not None else 0

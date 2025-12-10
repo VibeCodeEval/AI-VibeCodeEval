@@ -71,7 +71,7 @@ def create_holistic_system_prompt(problem_context: Optional[Dict[str, Any]] = No
     
     return f"""당신은 AI 코딩 테스트의 Chaining 전략을 평가하는 전문가입니다.
 
-{problem_info_section}다음은 사용자의 턴별 대화 로그입니다. 각 턴의 의도, 프롬프트 요약, AI 추론을 분석하여 다음 항목을 평가하세요:
+{problem_info_section}다음은 사용자의 턴별 대화 로그입니다. 각 턴의 의도, 프롬프트 요약, AI 응답 요약(ai_summary), AI 추론을 분석하여 다음 항목을 평가하세요:
 
 1. **문제 분해 (Problem Decomposition):**
    - 전체 코드가 아닌 부분 코드로 점진적으로 구성되는가?
@@ -143,14 +143,56 @@ async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
         logger.info(f"[6a. Eval Holistic Flow] 턴 로그 조회 - session_id: {session_id}, 턴 개수: {len(all_turn_logs)}")
         
         # Chaining 평가를 위한 구조화된 로그 생성
+        # PostgreSQL에서 모든 턴의 ai_summary를 한 번에 조회 (성능 최적화)
+        ai_summaries_map = {}  # {turn_num: ai_summary}
+        try:
+            from app.infrastructure.persistence.session import get_db_context
+            from app.infrastructure.persistence.models.sessions import PromptEvaluation
+            from app.infrastructure.persistence.models.enums import EvaluationTypeEnum
+            from sqlalchemy import select, and_, text
+            
+            # session_id를 PostgreSQL id로 변환
+            postgres_session_id = int(session_id.replace("session_", "")) if session_id.startswith("session_") else None
+            
+            if postgres_session_id:
+                turn_numbers = sorted([int(k) for k in all_turn_logs.keys()])
+                if turn_numbers:
+                    async with get_db_context() as db:
+                        # 모든 턴의 평가 결과를 한 번에 조회
+                        query = select(PromptEvaluation).where(
+                            and_(
+                                PromptEvaluation.session_id == postgres_session_id,
+                                PromptEvaluation.turn.in_(turn_numbers),
+                                text("prompt_evaluations.evaluation_type::text = :eval_type")
+                            )
+                        )
+                        result = await db.execute(query.params(eval_type=EvaluationTypeEnum.TURN_EVAL.value))
+                        evaluations = result.scalars().all()
+                        
+                        # turn별로 ai_summary 매핑
+                        for evaluation in evaluations:
+                            if evaluation.turn is not None and evaluation.details:
+                                ai_summary = evaluation.details.get("ai_summary", "")
+                                if ai_summary:
+                                    ai_summaries_map[evaluation.turn] = ai_summary
+                        
+                        logger.debug(f"[6a. Eval Holistic Flow] PostgreSQL에서 ai_summary 조회 완료 - {len(ai_summaries_map)}개 턴")
+        except Exception as e:
+            logger.debug(f"[6a. Eval Holistic Flow] PostgreSQL에서 ai_summary 조회 실패 (Redis 사용) - error: {str(e)}")
+        
         structured_logs = []
         for turn_num in sorted([int(k) for k in all_turn_logs.keys()]):
             log = all_turn_logs[str(turn_num)]
+            
+            # ai_summary 우선순위: PostgreSQL > Redis turn_log
+            ai_summary = ai_summaries_map.get(turn_num) or log.get("llm_answer_summary", "") or log.get("answer_summary", "")
+            
             structured_logs.append({
                 "turn": turn_num,
                 "intent": log.get("prompt_evaluation_details", {}).get("intent", "UNKNOWN"),
                 "prompt_summary": log.get("user_prompt_summary", ""),
                 "llm_reasoning": log.get("llm_answer_reasoning", ""),
+                "ai_summary": ai_summary,  # AI 응답 요약 (Chaining 전략 평가에 사용)
                 "score": log.get("prompt_evaluation_details", {}).get("score", 0),
                 "rubrics": log.get("prompt_evaluation_details", {}).get("rubrics", [])
             })
