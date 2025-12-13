@@ -238,33 +238,33 @@ class CodeQualityEvaluation(BaseModel):
 
 class HolisticFlowEvaluation(BaseModel):
     """전체 플로우 평가 결과"""
-    strategy_coherence: float = Field(
+    problem_decomposition: float = Field(
         ...,
         ge=0.0,
         le=100.0,
-        description="전략 일관성 점수"
+        description="문제 분해 점수 (항목 1)"
     )
-    problem_solving_approach: float = Field(
+    feedback_integration: float = Field(
         ...,
         ge=0.0,
         le=100.0,
-        description="문제 해결 접근법 점수"
+        description="피드백 수용성 점수 (항목 2)"
     )
-    iteration_quality: float = Field(
+    strategic_exploration: float = Field(
         ...,
         ge=0.0,
         le=100.0,
-        description="반복 개선 품질 점수"
+        description="전략적 탐색 점수 (항목 4)"
     )
     overall_flow_score: float = Field(
         ...,
         ge=0.0,
         le=100.0,
-        description="전체 플로우 점수"
+        description="전체 플로우 점수 (종합 점수)"
     )
     analysis: str = Field(
         ...,
-        description="분석 내용"
+        description="상세 분석 내용 (주도성 및 오류 수정, 고급 프롬프트 기법 포함)"
     )
 
 

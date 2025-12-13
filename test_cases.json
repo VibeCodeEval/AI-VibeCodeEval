@@ -1,0 +1,25 @@
+[
+  {
+    "input": "4\n0 10 15 20\n5 0 9 10\n6 13 0 12\n8 8 9 0\n",
+    "expected": "35",
+    "description": "기본 케이스: 4개 도시"
+  },
+  {
+    "input": "3\n0 1 2\n1 0 3\n2 3 0\n",
+    "expected": "6",
+    "description": "최소 케이스: 3개 도시"
+  },
+  {
+    "input": "2\n0 10\n10 0\n",
+    "expected": "20",
+    "description": "최소 케이스: 2개 도시"
+  },
+  {
+    "input": "5\n0 1 2 3 4\n1 0 5 6 7\n2 5 0 8 9\n3 6 8 0 10\n4 7 9 10 0\n",
+    "expected": "21",
+    "description": "5개 도시 케이스"
+  }
+]
+
+
+

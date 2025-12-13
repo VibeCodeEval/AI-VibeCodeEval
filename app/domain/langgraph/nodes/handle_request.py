@@ -52,7 +52,7 @@ async def handle_request_load_state(state: MainGraphState) -> Dict[str, Any]:
             except Exception as e:
                 logger.warning(f"[1. Handle Request] DB 조회 실패, 하드코딩 딕셔너리 사용 - spec_id: {spec_id}, error: {str(e)}")
                 # Fallback: 하드코딩 딕셔너리 사용
-                problem_context = get_problem_info_sync(spec_id)
+            problem_context = get_problem_info_sync(spec_id)
             
             # 1. problem_context 저장 (새 구조)
             result["problem_context"] = problem_context

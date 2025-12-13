@@ -3,6 +3,7 @@ from typing import Dict, Any
 from datetime import datetime
 
 from app.domain.langgraph.states import EvalTurnState
+from app.domain.langgraph.nodes.turn_evaluator.weights import calculate_weighted_score
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +26,34 @@ async def aggregate_turn_log(state: EvalTurnState) -> Dict[str, Any]:
         if state.get(eval_key):
             eval_results[eval_key] = state.get(eval_key)
     
-    # 평균 점수 계산 (이미 0-100 스케일)
+    # 의도 타입 추출 (가중치 적용을 위해)
+    intent_types = state.get("intent_types", [])
+    primary_intent = intent_types[0] if intent_types else state.get("intent_type")
+    
+    # 의도 타입을 대문자로 변환 (weights.py의 INTENT_WEIGHTS 키 형식에 맞춤)
+    if primary_intent:
+        # "follow_up" -> "FOLLOW_UP", "rule_setting" -> "RULE_SETTING" 등
+        intent_upper = primary_intent.upper()
+    else:
+        intent_upper = "HINT_OR_QUERY"  # 기본값
+    
+    # 가중치를 적용한 점수 계산
     all_scores = []
-    for eval_data in eval_results.values():
+    for eval_key, eval_data in eval_results.items():
         if isinstance(eval_data, dict):
-            # TurnEvaluation 모델의 score는 이미 0-100 스케일
-            score = eval_data.get("score", eval_data.get("average", 0))
-            all_scores.append(score)
+            rubrics = eval_data.get("rubrics", [])
+            
+            # 루브릭이 있으면 가중치를 적용하여 점수 계산
+            if rubrics:
+                # Rubric 모델이 dict로 변환된 형태: {"criterion": str, "score": float, "reasoning": str}
+                weighted_score = calculate_weighted_score(rubrics, intent_upper)
+                all_scores.append(weighted_score)
+                logger.debug(f"[4.4 턴 로그 집계] {eval_key} 가중치 적용 점수: {weighted_score:.2f} (의도: {intent_upper})")
+            else:
+                # 루브릭이 없으면 기존 score 사용 (fallback)
+                score = eval_data.get("score", eval_data.get("average", 0))
+                all_scores.append(score)
+                logger.warning(f"[4.4 턴 로그 집계] {eval_key} 루브릭 없음 - 기존 score 사용: {score:.2f}")
     
     # 가드레일 위반 시 점수 처리
     is_guardrail_failed = state.get("is_guardrail_failed", False)
@@ -41,13 +63,13 @@ async def aggregate_turn_log(state: EvalTurnState) -> Dict[str, Any]:
         turn_score = 0
         logger.warning(f"[4.4 턴 로그 집계] 가드레일 위반 - session_id: {session_id}, turn: {turn}, 점수: 0점")
     else:
-        # 이미 0-100 스케일이므로 * 10 하지 않음
+        # 가중치 적용 점수의 평균 계산
         turn_score = sum(all_scores) / len(all_scores) if all_scores else 0
+        logger.info(f"[4.4 턴 로그 집계] 가중치 적용 완료 - 의도: {intent_upper}, 최종 점수: {turn_score:.2f}")
     
     # 턴 로그 생성
     # intent_type은 호환성을 위해 첫 번째 의도 사용하거나, intent_types 리스트 사용
-    intent_types = state.get("intent_types", [])
-    primary_intent = intent_types[0] if intent_types else state.get("intent_type")
+    # (이미 위에서 추출했으므로 재사용)
 
     # 평가 결과에서 rubrics와 final_reasoning 추출 (상세 피드백)
     detailed_feedback = []

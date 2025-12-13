@@ -69,30 +69,37 @@ def create_holistic_system_prompt(problem_context: Optional[Dict[str, Any]] = No
 
 """
     
-    return f"""당신은 AI 코딩 테스트의 Chaining 전략을 평가하는 전문가입니다.
+    return f"""당신은 AI 코딩 테스트의 **사용자 프롬프트 Chaining 전략**을 평가하는 전문가입니다.
 
-{problem_info_section}다음은 사용자의 턴별 대화 로그입니다. 각 턴의 의도, 프롬프트 요약, AI 응답 요약(ai_summary), AI 추론을 분석하여 다음 항목을 평가하세요:
+{problem_info_section}다음은 사용자의 턴별 대화 로그입니다. **사용자 프롬프트의 Chaining 전략만 평가**하세요. AI 응답(ai_summary)은 참고용으로만 사용하고, 점수 평가에는 영향을 주지 마세요.
+
+**⚠️ 중요: 평가 대상**
+- ✅ 평가 대상: **사용자 프롬프트의 Chaining 전략** (프롬프트 품질, 전략적 접근)
+- ❌ 평가 제외: AI 응답 품질, AI의 지시 준수 여부, AI의 오류
+- 📝 참고용: AI 응답(ai_summary)은 사용자 프롬프트의 맥락 이해를 위한 참고용일 뿐
+
+다음 항목을 **사용자 프롬프트 관점**에서만 평가하세요:
 
 1. **문제 분해 (Problem Decomposition):**
-   - 전체 코드가 아닌 부분 코드로 점진적으로 구성되는가?
-   - 큰 문제를 작은 단계로 나누어 해결하는가?
-   - 문제 특성({algorithms_text if problem_context else "알 수 없음"})에 맞는 접근 방식인가?
-   - 힌트 로드맵 순서와 유사하게 진행되었는가?{hint_roadmap_section}
+   - 사용자가 전체 코드가 아닌 부분 코드로 점진적으로 구성하도록 프롬프트를 작성했는가?
+   - 사용자가 큰 문제를 작은 단계로 나누어 해결하도록 프롬프트를 구성했는가?
+   - 사용자 프롬프트가 문제 특성({algorithms_text if problem_context else "알 수 없음"})에 맞는 접근 방식을 제시했는가?
+   - 사용자 프롬프트가 힌트 로드맵 순서와 유사하게 진행하도록 구성되었는가?{hint_roadmap_section}
 
 2. **피드백 수용성 (Feedback Integration):**
-   - 턴 N의 AI 힌트 내용이 턴 N+1의 사용자 요청에 반영되었는가?
-   - 이전 턴의 제안을 다음 턴에서 활용하는가?
+   - 사용자가 턴 N의 AI 힌트 내용을 턴 N+1의 프롬프트에 반영했는가?
+   - 사용자가 이전 턴의 제안을 다음 턴 프롬프트에서 활용했는가?
 
 3. **주도성 및 오류 수정 (Proactiveness):**
-   - 사용자가 AI의 이전 오류를 구체적으로 지적하는가?
-   - 능동적으로 개선 방향을 제시하는가?
+   - 사용자가 AI의 이전 오류를 구체적으로 지적하는 프롬프트를 작성했는가?
+   - 사용자가 능동적으로 개선 방향을 제시하는 프롬프트를 작성했는가?
 
 4. **전략적 탐색 (Strategic Exploration):**
-   - 의도가 HINT_OR_QUERY에서 OPTIMIZATION으로 전환되는 등 능동적인 변화가 있는가?
-   - DEBUGGING에서 TEST_CASE로 전환하는 등 전략적 탐색이 있는가?
+   - 사용자 프롬프트의 의도가 HINT_OR_QUERY에서 OPTIMIZATION으로 전환되는 등 능동적인 변화가 있는가?
+   - 사용자 프롬프트가 DEBUGGING에서 TEST_CASE로 전환하는 등 전략적 탐색을 보여주는가?
 
 5. **고급 프롬프트 기법 활용 (Advanced Techniques Bonus):**
-   - System Prompting, XML 태그, Few-shot 예시 등 고급 기법을 사용했는가?
+   - 사용자가 System Prompting, XML 태그, Few-shot 예시 등 고급 기법을 프롬프트에 사용했는가?
    - 이러한 기법 사용 시 보너스 점수를 부여하세요.
 
 각 항목은 0-100점으로 평가하세요.
@@ -100,26 +107,35 @@ def create_holistic_system_prompt(problem_context: Optional[Dict[str, Any]] = No
 **응답 형식 (반드시 다음 JSON 구조를 사용하세요):**
 ```json
 {{
-    "strategy_coherence": 0-100,  // 전략 일관성 점수 (항목 4: 전략적 탐색)
-    "problem_solving_approach": 0-100,  // 문제 해결 접근법 점수 (항목 1: 문제 분해)
-    "iteration_quality": 0-100,  // 반복 개선 품질 점수 (항목 2: 피드백 수용성)
+    "problem_decomposition": 0-100,  // 문제 분해 점수 (항목 1)
+    "feedback_integration": 0-100,  // 피드백 수용성 점수 (항목 2)
+    "strategic_exploration": 0-100,  // 전략적 탐색 점수 (항목 4)
     "overall_flow_score": 0-100,  // 종합 점수 (모든 항목의 가중 평균)
     "analysis": "상세 분석 내용"
 }}
 ```
 
-**필드 매핑:**
-- `strategy_coherence`: 항목 4 (전략적 탐색) 점수
-- `problem_solving_approach`: 항목 1 (문제 분해) 점수
-- `iteration_quality`: 항목 2 (피드백 수용성) 점수
+**필드 매핑 (평가 기준 순서와 일치):**
+- `problem_decomposition`: 항목 1 (문제 분해) 점수
+- `feedback_integration`: 항목 2 (피드백 수용성) 점수
+- `strategic_exploration`: 항목 4 (전략적 탐색) 점수
 - `overall_flow_score`: 모든 항목을 종합한 전체 점수
+- `analysis`: 상세 분석 (항목 3: 주도성 및 오류 수정, 항목 5: 고급 프롬프트 기법 포함)
 
 **중요**: `analysis` 필드에는 다음을 포함하여 상세한 피드백을 제공하세요:
-- 문제 분해 전략에 대한 구체적 평가 (어떤 부분이 잘되었고, 어떤 부분을 개선할 수 있는지)
-- 피드백 수용성에 대한 구체적 평가 (이전 턴의 힌트가 어떻게 반영되었는지)
-- 주도성에 대한 구체적 평가 (사용자가 어떻게 능동적으로 개선을 제시했는지)
-- 전략적 탐색에 대한 구체적 평가 (의도 전환이 어떻게 이루어졌는지)
-- 전체적인 체이닝 전략에 대한 종합 의견 및 개선 제안"""
+- 문제 분해 전략에 대한 구체적 평가 (사용자 프롬프트가 어떤 부분이 잘되었고, 어떤 부분을 개선할 수 있는지)
+- 피드백 수용성에 대한 구체적 평가 (사용자가 이전 턴의 힌트를 어떻게 프롬프트에 반영했는지)
+- **주도성 및 오류 수정에 대한 구체적 평가** (사용자가 어떻게 능동적으로 개선을 제시하는 프롬프트를 작성했는지, AI의 오류를 어떻게 지적하는 프롬프트를 작성했는지)
+- 전략적 탐색에 대한 구체적 평가 (사용자 프롬프트의 의도 전환이 어떻게 이루어졌는지)
+- **고급 프롬프트 기법 활용에 대한 평가** (사용자가 XML 태그, System Prompting, Few-shot 예시 등을 어떻게 활용했는지)
+- 전체적인 사용자 프롬프트 체이닝 전략에 대한 종합 의견 및 개선 제안
+
+**⚠️ 평가 시 주의사항:**
+- AI 응답 품질이나 AI의 지시 준수 여부는 평가하지 마세요
+- 점수는 **사용자 프롬프트의 Chaining 전략 품질**에만 기반해야 합니다
+- AI 응답(ai_summary)은 사용자 프롬프트의 맥락을 이해하기 위한 참고용일 뿐입니다
+
+**참고**: 항목 3 (주도성 및 오류 수정)과 항목 5 (고급 프롬프트 기법 활용)는 점수에 포함되지 않고 `analysis` 필드에만 평가 내용을 작성하세요."""
 
 
 async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
@@ -255,9 +271,9 @@ async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
             processed = {
                 "holistic_flow_score": result.overall_flow_score,
                 "holistic_flow_analysis": result.analysis,  # 체이닝 전략에 대한 상세 분석 (문제 분해, 피드백 수용성, 주도성, 전략적 탐색)
-                "strategy_coherence": result.strategy_coherence,
-                "problem_solving_approach": result.problem_solving_approach,
-                "iteration_quality": result.iteration_quality,
+                "problem_decomposition": result.problem_decomposition,
+                "feedback_integration": result.feedback_integration,
+                "strategic_exploration": result.strategic_exploration,
                 "updated_at": datetime.utcnow().isoformat(),
                 "_llm_response": llm_response  # 토큰 추출용
             }
@@ -318,9 +334,9 @@ async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
             result = {
                 "holistic_flow_score": structured_result.overall_flow_score,
                 "holistic_flow_analysis": structured_result.analysis,
-                "strategy_coherence": structured_result.strategy_coherence,
-                "problem_solving_approach": structured_result.problem_solving_approach,
-                "iteration_quality": structured_result.iteration_quality,
+                "problem_decomposition": structured_result.problem_decomposition,
+                "feedback_integration": structured_result.feedback_integration,
+                "strategic_exploration": structured_result.strategic_exploration,
                 "updated_at": datetime.utcnow().isoformat(),
             }
             logger.info(f"[6a. Eval Holistic Flow] 구조화된 출력 파싱 완료")
@@ -334,12 +350,26 @@ async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
             score = result.get("holistic_flow_score")
             logger.info(f"[6a. Eval Holistic Flow] ===== 평가 완료 =====")
             logger.info(f"[6a. Eval Holistic Flow] Holistic Flow Score: {score}")
-            logger.info(f"[6a. Eval Holistic Flow] Strategy Coherence: {result.get('strategy_coherence')}")
-            logger.info(f"[6a. Eval Holistic Flow] Problem Solving Approach: {result.get('problem_solving_approach')}")
-            logger.info(f"[6a. Eval Holistic Flow] Iteration Quality: {result.get('iteration_quality')}")
+            logger.info(f"[6a. Eval Holistic Flow] Problem Decomposition: {result.get('problem_decomposition')}")
+            logger.info(f"[6a. Eval Holistic Flow] Feedback Integration: {result.get('feedback_integration')}")
+            logger.info(f"[6a. Eval Holistic Flow] Strategic Exploration: {result.get('strategic_exploration')}")
             if analysis:
                 logger.info(f"[6a. Eval Holistic Flow] Analysis (처음 500자): {analysis[:500]}...")
                 logger.info(f"[6a. Eval Holistic Flow] 전체 Analysis 길이: {len(analysis)} 문자")
+                
+                # 전체 분석 텍스트 JSON 출력 (발표자료용)
+                analysis_json = {
+                    "session_id": session_id,
+                    "holistic_flow_score": score,
+                    "problem_decomposition": result.get('problem_decomposition'),
+                    "feedback_integration": result.get('feedback_integration'),
+                    "strategic_exploration": result.get('strategic_exploration'),
+                    "analysis_text": analysis
+                }
+                logger.info("")
+                logger.info(f"[6a. Eval Holistic Flow] ===== Holistic Flow 평가 분석 텍스트 (JSON) =====")
+                logger.info(json.dumps(analysis_json, indent=4, ensure_ascii=False))
+                logger.info("")
             else:
                 logger.warning(f"[6a. Eval Holistic Flow] 분석 내용 없음 - session_id: {session_id}")
             
@@ -357,9 +387,9 @@ async def _eval_holistic_flow_impl(state: MainGraphState) -> Dict[str, Any]:
                         
                         # 상세 정보 구성
                         details = {
-                            "strategy_coherence": result.get("strategy_coherence"),
-                            "problem_solving_approach": result.get("problem_solving_approach"),
-                            "iteration_quality": result.get("iteration_quality"),
+                            "problem_decomposition": result.get("problem_decomposition"),
+                            "feedback_integration": result.get("feedback_integration"),
+                            "strategic_exploration": result.get("strategic_exploration"),
                             "structured_logs": structured_logs,  # 턴별 로그 정보
                         }
                         

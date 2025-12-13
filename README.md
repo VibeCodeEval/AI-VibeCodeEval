@@ -384,10 +384,10 @@ ai_vibe_worker/
 ## 🚀 시작하기
 
 ### 사전 요구사항
-- Python 3.10 이상
+- Python 3.10 이상 (`.python-version` 파일에 지정됨)
 - Docker & Docker Compose
 - Gemini API 키
-- uv (권장) 또는 pip
+- **uv** (권장) - 빠른 Python 패키지 관리자
 
 ### 1. 환경 설정
 
@@ -408,7 +408,38 @@ REDIS_HOST=localhost
 
 ### 2. 로컬 개발 (권장)
 
-**2.1 Docker로 DB만 실행**
+**2.1 uv 설치**
+
+```bash
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Linux/Mac
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 또는 pip로 설치
+pip install uv
+
+# 설치 확인
+uv --version
+```
+
+**2.2 Python 환경 및 의존성 설치**
+
+```bash
+# uv sync: Python 버전 설치 + 가상 환경 생성 + 의존성 설치 (한 번에)
+uv sync
+
+# 또는 단계별로
+# 1. Python 3.10 설치 (.python-version 파일 기반)
+uv python install 3.10
+
+# 2. 의존성 설치 (pyproject.toml + uv.lock 기반)
+uv sync
+```
+
+**2.3 Docker로 DB 실행**
+
 ```bash
 # PostgreSQL & Redis 실행
 docker-compose -f docker-compose.dev.yml up -d
@@ -417,26 +448,68 @@ docker-compose -f docker-compose.dev.yml up -d
 docker ps
 ```
 
-**2.2 Python 환경 설정**
-```bash
-# uv 사용 (권장)
-pip install uv
-uv sync
+**2.4 개발 서버 실행**
 
-# 또는 pip 사용
-python -m venv venv
-.\venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Linux/Mac
-pip install -r requirements.txt
-```
-
-**2.3 개발 서버 실행**
 ```bash
-# 방법 1: 스크립트 사용 (권장)
+# 방법 1: uv run 사용 (권장)
 uv run scripts/run_dev.py
 
 # 방법 2: uvicorn 직접 실행
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# 방법 3: 가상 환경 활성화 후 실행 (선택사항)
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+# Linux/Mac
+source .venv/bin/activate
+
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 3. uv 주요 명령어
+
+```bash
+# 의존성 설치/업데이트
+uv sync                    # pyproject.toml 기반 의존성 설치
+uv sync --upgrade          # 모든 패키지 최신 버전으로 업그레이드
+uv sync --dev              # 개발 의존성 포함 설치
+
+# Python 버전 관리
+uv python install 3.10      # Python 3.10 설치
+uv python list             # 설치된 Python 버전 목록
+uv python pin 3.10         # 프로젝트 Python 버전 고정
+
+# 스크립트 실행
+uv run <script>            # 가상 환경에서 스크립트 실행
+uv run python <file.py>    # Python 파일 실행
+uv run pytest              # 테스트 실행
+
+# 패키지 관리
+uv pip install <package>    # 패키지 설치
+uv pip list                 # 설치된 패키지 목록
+uv pip freeze               # requirements.txt 형식으로 출력
+
+# 가상 환경 관리
+uv venv                     # 가상 환경 생성 (.venv)
+uv venv --python 3.10       # 특정 Python 버전으로 가상 환경 생성
+```
+
+### 4. pip 사용 (대안)
+
+uv를 사용하지 않는 경우:
+
+```bash
+# 가상 환경 생성
+python -m venv venv
+
+# 가상 환경 활성화
+# Windows PowerShell
+.\venv\Scripts\Activate.ps1
+# Linux/Mac
+source venv/bin/activate
+
+# 의존성 설치
+pip install -r requirements.txt
 ```
 
 서버 실행 확인: http://localhost:8000
@@ -677,6 +750,18 @@ uv run python test_scripts/test_chat_flow.py
 uv run python test_scripts/test_gemini.py
 ```
 
+**4. 단위 테스트 (pytest)**
+```bash
+# 전체 테스트 실행
+uv run pytest tests/ -v
+
+# 커버리지 포함
+uv run pytest tests/ -v --cov=app --cov-report=html
+
+# 특정 테스트 파일만 실행
+uv run pytest tests/test_api.py -v
+```
+
 ### 테스트 가이드
 - **`test_scripts/README.md`**: 테스트 스크립트 상세 가이드
 - **`docs/Test_Execution_Guide.md`**: 테스트 실행 가이드
@@ -739,6 +824,7 @@ docker-compose logs -f ai_worker
 ## 📚 문서
 
 ### 핵심 문서
+- [uv 환경 설정 가이드](./docs/UV_Setup_Guide.md) - uv 설치 및 사용법 (권장)
 - [API 명세서](./docs/API_Specification.md) - REST API 상세 명세
 - [DB 가이드](./docs/Quick_DB_Guide.md) - 데이터베이스 사용 가이드
 - [테스트 가이드](./docs/Test_Execution_Guide.md) - 테스트 실행 방법
@@ -758,6 +844,7 @@ docker-compose logs -f ai_worker
 ### 백엔드
 - **FastAPI** (0.109+): 비동기 웹 프레임워크
 - **Python** (3.10+): 프로그래밍 언어
+- **uv**: 빠른 Python 패키지 관리자 (pip 대체)
 
 ### AI/LLM
 - **LangGraph** (0.6+): AI 워크플로우 오케스트레이션
@@ -779,6 +866,7 @@ docker-compose logs -f ai_worker
 - **Pydantic** (2.0+): 데이터 검증
 - **httpx**: 비동기 HTTP 클라이언트
 - **websockets**: WebSocket 지원
+- **uv**: Python 패키지 관리 (pip 대체, 10-100배 빠름)
 
 ---
 

@@ -225,6 +225,102 @@ print(tsp(0, 1))
             "방문 상태"
         ]
     },
+    2: {  # spec_id = 2 (외판원 순회 - 테스트용)
+        # 1. 기본 정보
+        "basic_info": {
+            "problem_id": "2",
+            "title": "외판원 순회",
+            "description_summary": "1번 도시에서 출발하여 모든 도시를 단 한 번씩 거쳐 다시 1번 도시로 돌아오는 최소 비용의 경로를 구하는 문제.",
+            "input_format": "첫째 줄에 도시의 수 N (2 ≤ N ≤ 16). 다음 N개의 줄에 비용 행렬 W가 주어짐. W[i][j]는 도시 i에서 j로 가기 위한 비용 (0은 갈 수 없음).",
+            "output_format": "첫째 줄에 순회에 필요한 최소 비용을 출력."
+        },
+        
+        # 2. 제약 조건
+        "constraints": {
+            "time_limit_sec": 1.0,
+            "memory_limit_mb": 128,
+            "variable_ranges": {
+                "N": "2 <= N <= 16",
+                "Cost": "0 <= W[i][j] <= 1,000,000"
+            },
+            "logic_reasoning": "N이 최대 16이므로, O(N!)의 완전 탐색(약 20조 연산)은 시간 초과가 발생함. 따라서 O(N^2 * 2^N) 시간 복잡도를 가지는 '비트마스킹을 이용한 DP'를 사용해야 함."
+        },
+        
+        # 3. AI 튜터링 가이드
+        "ai_guide": {
+            "key_algorithms": ["Dynamic Programming", "Bitmasking", "DFS", "TSP"],
+            "solution_architecture": "Top-down DFS with Memoization",
+            "hint_roadmap": {
+                "step_1_concept": "N이 작다는 점(16)에 주목하세요. 방문한 도시들의 상태를 효율적으로 저장할 방법이 필요합니다. 배열보다는 '비트(Bit)'를 사용해보면 어떨까요?",
+                "step_2_state": "상태를 `dp[current_city][visited_bitmask]`로 정의해보세요. `visited_bitmask`의 i번째 비트가 1이면 i번 도시를 방문했다는 뜻입니다.",
+                "step_3_transition": "점화식: `FindPath(curr, visited) = min(W[curr][next] + FindPath(next, visited | (1<<next)))` (단, next는 아직 방문하지 않은 도시)",
+                "step_4_base_case": "모든 도시를 방문했을 때(`visited == (1<<N) - 1`), 현재 도시에서 출발 도시(0)로 돌아가는 길이 있는지 확인하고 비용을 반환해야 합니다."
+            },
+            "common_pitfalls": [
+                "갈 수 없는 길(W[i][j] == 0)인 경우를 체크하지 않음.",
+                "DP 배열을 0으로 초기화하면 '방문 안 함'과 '비용 0'이 구분되지 않음. -1이나 INF로 초기화해야 함.",
+                "마지막 도시에서 시작 도시로 돌아올 수 없는 경우를 예외 처리하지 않음 (INF 반환 필요)."
+            ]
+        },
+        
+        # 4. 정답 코드 (spec_id: 10과 동일)
+        "solution_code": """import sys
+
+def tsp(current, visited):
+    # 모든 도시를 방문한 경우
+    if visited == (1 << N) - 1:
+        # 출발 도시(0)로 돌아갈 수 있는 경우
+        if W[current][0] != 0:
+            return W[current][0]
+        else:
+            return float('inf')
+    
+    # 이미 계산된 경우 (Memoization)
+    if dp[current][visited] != -1:
+        return dp[current][visited]
+    
+    dp[current][visited] = float('inf')
+    for i in range(N):
+        # i번 도시를 아직 방문하지 않았고, 가는 길이 있는 경우
+        if not (visited & (1 << i)) and W[current][i] != 0:
+            dp[current][visited] = min(dp[current][visited], tsp(i, visited | (1 << i)) + W[current][i])
+    
+    return dp[current][visited]
+
+N = int(sys.stdin.readline())
+W = [list(map(int, sys.stdin.readline().split())) for _ in range(N)]
+dp = [[-1] * (1 << N) for _ in range(N)]
+print(tsp(0, 1))
+""",
+        
+        # 5. 테스트 케이스 (1개만 - spec_id: 10의 첫 번째 TC 사용)
+        "test_cases": [
+            {
+                "input": "4\n0 10 15 20\n5 0 9 10\n6 13 0 12\n8 8 9 0\n",
+                "expected": "35",
+                "description": "기본 케이스: 4개 도시 (외판원 문제)"
+            }
+        ],
+        
+        # 6. 채점 기준 (기본값)
+        "rubric": {
+            "correctness": {
+                "weight": 0.5,
+                "description": "정확성 점수"
+            },
+            "performance": {
+                "weight": 0.25,
+                "description": "성능 점수"
+            },
+            "code_quality": {
+                "weight": 0.25,
+                "description": "코드 품질 점수"
+            }
+        },
+        
+        # 7. 가드레일용 키워드
+        "keywords": ["외판원", "tsp", "traveling salesman", "DP", "비트마스킹", "bitmasking"]
+    },
     # 추후 다른 문제 추가 가능
     # 11: {
     #     "basic_info": {...},
@@ -261,7 +357,9 @@ def get_problem_info_sync(spec_id: int) -> Dict[str, Any]:
         return problem_context
     
     # 기본값 반환 (문제 정보 없음)
-    logger.debug(f"[Problem Info] 기본값 반환 - spec_id: {spec_id} (문제 정보 없음)")
+    # 외판원 문제의 기본 테스트 케이스 1개 제공
+    logger.warning(f"[Problem Info] 기본값 반환 - spec_id: {spec_id} (문제 정보 없음, HARDCODED_PROBLEM_SPEC에 정의되지 않음)")
+    logger.warning(f"[Problem Info] 기본 테스트 케이스 제공 (외판원 문제 - 백준 2098번)")
     return {
         "basic_info": {
             "problem_id": str(spec_id),
@@ -271,8 +369,8 @@ def get_problem_info_sync(spec_id: int) -> Dict[str, Any]:
             "output_format": None
         },
         "constraints": {
-            "time_limit_sec": None,
-            "memory_limit_mb": None,
+            "time_limit_sec": 1.0,
+            "memory_limit_mb": 128,
             "variable_ranges": {},
             "logic_reasoning": None
         },
@@ -283,7 +381,15 @@ def get_problem_info_sync(spec_id: int) -> Dict[str, Any]:
             "common_pitfalls": []
         },
         "solution_code": None,
-        "keywords": []
+        "keywords": [],
+        # 외판원 문제의 기본 테스트 케이스 1개 제공
+        "test_cases": [
+            {
+                "input": "4\n0 10 15 20\n5 0 9 10\n6 13 0 12\n8 8 9 0\n",
+                "expected": "35",
+                "description": "기본 케이스: 4개 도시 (외판원 문제)"
+            }
+        ]
     }
 
 
@@ -386,7 +492,9 @@ async def get_problem_info(spec_id: int, db: Optional[Any] = None) -> Dict[str, 
         return problem_context
     
     # 기본값 반환 (문제 정보 없음)
-    logger.debug(f"[Problem Info] 기본값 반환 - spec_id: {spec_id} (문제 정보 없음)")
+    # 외판원 문제의 기본 테스트 케이스 1개 제공
+    logger.warning(f"[Problem Info] 기본값 반환 - spec_id: {spec_id} (문제 정보 없음, HARDCODED_PROBLEM_SPEC에 정의되지 않음)")
+    logger.warning(f"[Problem Info] 기본 테스트 케이스 제공 (외판원 문제 - 백준 2098번)")
     return {
         "basic_info": {
             "problem_id": str(spec_id),
@@ -396,8 +504,8 @@ async def get_problem_info(spec_id: int, db: Optional[Any] = None) -> Dict[str, 
             "output_format": None
         },
         "constraints": {
-            "time_limit_sec": None,
-            "memory_limit_mb": None,
+            "time_limit_sec": 1.0,
+            "memory_limit_mb": 128,
             "variable_ranges": {},
             "logic_reasoning": None
         },
@@ -408,7 +516,15 @@ async def get_problem_info(spec_id: int, db: Optional[Any] = None) -> Dict[str, 
             "common_pitfalls": []
         },
         "solution_code": None,
-        "keywords": []
+        "keywords": [],
+        # 외판원 문제의 기본 테스트 케이스 1개 제공
+        "test_cases": [
+            {
+                "input": "4\n0 10 15 20\n5 0 9 10\n6 13 0 12\n8 8 9 0\n",
+                "expected": "35",
+                "description": "기본 케이스: 4개 도시 (외판원 문제)"
+            }
+        ]
     }
 
 

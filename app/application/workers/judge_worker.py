@@ -123,6 +123,24 @@ class JudgeWorker:
             실행 결과
         """
         try:
+            # 코드와 테스트 케이스 로그
+            logger.info(f"[JudgeWorker] 작업 상세 정보 - task_id: {task.task_id}")
+            logger.info(f"[JudgeWorker]   - 코드 길이: {len(task.code)} 문자")
+            logger.info(f"[JudgeWorker]   - 코드 라인 수: {len(task.code.split(chr(10)))}줄")
+            logger.info(f"[JudgeWorker]   - 언어: {task.language}")
+            logger.info(f"[JudgeWorker]   - 테스트 케이스 개수: {len(task.test_cases)}")
+            if task.test_cases:
+                for idx, tc in enumerate(task.test_cases, 1):
+                    tc_input = tc.get("input", "") if isinstance(tc, dict) else str(tc)
+                    tc_expected = tc.get("expected", "") if isinstance(tc, dict) else ""
+                    logger.info(f"[JudgeWorker]   - TC {idx}: input 길이={len(tc_input)} 문자, expected={tc_expected}")
+                    if len(tc_input) <= 200:
+                        logger.info(f"[JudgeWorker]     input 내용: {tc_input}")
+                    else:
+                        logger.info(f"[JudgeWorker]     input 내용 (처음 200자): {tc_input[:200]}...")
+            else:
+                logger.warning(f"[JudgeWorker]   ⚠️ 테스트 케이스 없음 - stdin이 비어있을 수 있음")
+            
             # 테스트 케이스가 있는 경우
             if task.test_cases:
                 # 여러 테스트 케이스 실행

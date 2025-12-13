@@ -187,3 +187,9 @@ GRANT ALL ON SCHEMA ai_vibe_coding_test TO "user";
 
 
 
+
+
+
+
+
+

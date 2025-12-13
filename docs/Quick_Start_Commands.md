@@ -120,13 +120,66 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 ```
 
+## 🐍 Python 환경 설정 (uv 사용)
+
+### uv 설치
+
+```bash
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Linux/Mac
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 또는 pip로 설치
+pip install uv
+```
+
+### 의존성 설치
+
+```bash
+# 프로젝트 루트에서 실행
+cd LangGraph_1
+
+# Python 3.10 설치 + 가상 환경 생성 + 의존성 설치 (한 번에)
+uv sync
+
+# 의존성만 업데이트
+uv sync --upgrade
+```
+
+### uv 주요 명령어
+
+```bash
+# 스크립트 실행 (가상 환경 자동 사용)
+uv run scripts/run_dev.py
+uv run python test_scripts/test_chat_flow.py
+uv run pytest tests/
+
+# Python 버전 관리
+uv python install 3.10      # Python 3.10 설치
+uv python list               # 설치된 버전 목록
+
+# 패키지 관리
+uv pip install <package>     # 패키지 설치
+uv pip list                   # 설치된 패키지 목록
+```
+
 ## 🐍 서버 실행
 
 ```bash
-# 방법 1: 스크립트 사용 (권장)
+# 방법 1: uv run 사용 (권장)
 uv run scripts/run_dev.py
 
 # 방법 2: uvicorn 직접 실행
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# 방법 3: 가상 환경 활성화 후 실행
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+# Linux/Mac
+source .venv/bin/activate
+
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
