@@ -1,0 +1,84 @@
+{
+  "phase_id": "phase5",
+  "name": "프롬프트 파인튜닝",
+  "owner": "sub_agent_finetuning",
+  "status": "pending",
+  "priority": "medium",
+  "created_at": "2026-01-18T00:00:00Z",
+  "started_at": null,
+  "completed_at": null,
+  "progress": 0,
+  
+  "description": "정답 라벨 100개를 활용하여 프롬프트를 파인튜닝합니다. 하부 Agent가 담당합니다.",
+  
+  "approach": "Few-shot / In-context Learning (LLM 자체 접근 아님)",
+  
+  "data_requirements": {
+    "total_labels": 100,
+    "categories": [
+      "SYSTEM_PROMPT",
+      "RULE_SETTING", 
+      "GENERATION",
+      "OPTIMIZATION",
+      "DEBUGGING",
+      "TEST_CASE",
+      "HINT_OR_QUERY",
+      "FOLLOW_UP"
+    ],
+    "per_category_target": "12-13개 (균등 분배 권장)"
+  },
+  
+  "data_schema": {
+    "id": "string - 고유 식별자 (label_001)",
+    "intent": "string - 의도 카테고리",
+    "user_prompt": "string - 사용자 프롬프트",
+    "context": {
+      "problem_id": "number",
+      "turn_number": "number",
+      "previous_context": "string (optional)"
+    },
+    "ideal_evaluation": {
+      "clarity_score": "number (0-100)",
+      "examples_score": "number (0-100)",
+      "rules_score": "number (0-100)",
+      "cot_score": "number (0-100)",
+      "total_score": "number (0-100)",
+      "reasoning": "string - 평가 근거"
+    }
+  },
+  
+  "pipeline_steps": [
+    {
+      "step": 1,
+      "name": "데이터 수집",
+      "description": "100개 정답 프롬프트-응답 쌍 준비",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "데이터 구조화",
+      "description": "JSON/JSONL 포맷으로 변환",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "프롬프트 템플릿 최적화",
+      "description": "Few-shot 예시 삽입, CoT 유도",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "평가 및 반복",
+      "description": "테스트 세트로 성능 측정, 오답 분석",
+      "status": "pending"
+    }
+  ],
+  
+  "output_location": ".maestro/data/finetuning/",
+  
+  "dependencies": ["phase3"],
+  
+  "notes": "이 Phase는 하부 Agent가 담당합니다. Maestro의 명령을 commands/pending/ 폴더에서 확인하세요.",
+  
+  "logs": []
+}

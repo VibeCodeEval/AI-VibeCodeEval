@@ -1,0 +1,171 @@
+{
+  "command_id": "CMD_005",
+  "timestamp": "2026-01-26T00:00:00Z",
+  "from": "maestro",
+  "to": "sub_agent_refactoring",
+  "priority": "high",
+  "task_phase": "phase6",
+  "action": "system_refactoring",
+  "description": "시스템 리팩토링 - AST 기반 코드 생성 + 평가 통합 + 파인튜닝 데이터 생성",
+  "status": "pending",
+
+  "overview": {
+    "current_system": "Socratic 방식 - 힌트/가이드만 제공, 정답 코드 직접 제공 X",
+    "target_system": "Spec 기반 코드 생성 - 프롬프트 명확성에 따른 코드 품질 결정",
+    "key_changes": [
+      "1. Writer: Socratic → 정답 기반 + AST 변형 코드 생성",
+      "2. 새 모듈: Spec Extractor + AST Error Injector",
+      "3. 평가: Turn Evaluator + Holistic Flow 통합",
+      "4. 파인튜닝: LLM 시뮬레이션으로 데이터 자동 생성"
+    ]
+  },
+
+  "execution_order": [
+    {
+      "order": 1,
+      "sub_phase": "phase6a",
+      "name": "AST 기반 코드 생성 시스템",
+      "tasks": ["6a-1", "6a-2", "6a-3", "6a-4", "6a-5"]
+    },
+    {
+      "order": 2,
+      "sub_phase": "phase6b",
+      "name": "평가 노드 통합",
+      "tasks": ["6b-1", "6b-2", "6b-3", "6b-4"]
+    },
+    {
+      "order": 3,
+      "sub_phase": "phase6c",
+      "name": "파인튜닝 데이터 자동 생성",
+      "tasks": ["6c-1", "6c-2", "6c-3", "6c-4"]
+    },
+    {
+      "order": 4,
+      "sub_phase": "phase6d",
+      "name": "Graph 구조 변경",
+      "tasks": ["6d-1", "6d-2"]
+    }
+  ],
+
+  "detailed_instructions": {
+    "phase6a": {
+      "description": "AST 기반 코드 생성 시스템 구축",
+      "core_concept": {
+        "step1_llm": "초기 판단 - 사용자 프롬프트에서 누락된 Spec 추출",
+        "step2_ast": "위치 지정 - 정답 코드에서 누락 Spec에 해당하는 AST 노드 찾기",
+        "step3_llm": "변형 결정 - 해당 노드를 어떻게 변형할지 LLM이 결정"
+      },
+      "implementation_guide": {
+        "spec_extractor": {
+          "input": "사용자 프롬프트 + 문제 정보",
+          "output": {
+            "specified_requirements": ["DP", "비트마스킹", "O(N²·2ⁿ)"],
+            "missing_requirements": ["기저조건 처리", "메모이제이션 방식"],
+            "ambiguous_requirements": ["상태 정의 불명확"]
+          },
+          "prompt_template": "YAML 파일로 분리 (spec_extractor.yaml)"
+        },
+        "ast_analyzer": {
+          "input": "정답 코드 (solution_code)",
+          "process": "ast.parse() → NodeVisitor로 구성 요소 식별",
+          "output": {
+            "components": [
+              {"type": "BASE_CASE", "line": "12-13", "code": "if visited == ..."},
+              {"type": "MEMOIZATION", "line": "9", "code": "@lru_cache"},
+              {"type": "BIT_OPERATION", "line": "17", "code": "visited & (1 << ...)"}
+            ]
+          }
+        },
+        "error_injector": {
+          "input": "정답 코드 + 누락 Spec + AST 분석 결과",
+          "process": [
+            "1. Spec-AST 매핑 (누락 Spec → 해당 AST 노드)",
+            "2. 변형 전략 선택 (REMOVE, SIMPLIFY, INCORRECT 등)",
+            "3. LLM으로 변형 코드 생성"
+          ],
+          "output": "의도적으로 불완전한 코드"
+        }
+      }
+    },
+    "phase6b": {
+      "description": "평가 노드 통합",
+      "preserve_logic": "기존 8의도 평가 + Holistic Flow 로직 유지",
+      "integration_approach": [
+        "Turn Evaluator 8개 함수 → 단일 통합 평가기로 병합",
+        "Holistic Flow → 통합 평가기에 포함",
+        "Spec 충족 평가 항목 추가"
+      ],
+      "gemini_upgrade": {
+        "current": "gemini-1.5-flash",
+        "target": "gemini-3.0-pro (또는 최신)",
+        "purpose": "파인튜닝 데이터 일관성 확보"
+      }
+    },
+    "phase6c": {
+      "description": "파인튜닝 데이터 자동 생성",
+      "simulation_flow": [
+        "1. User Simulator가 품질별(bad/medium/good) 초기 프롬프트 생성",
+        "2. 현재 시스템 API 호출 (/api/chat)",
+        "3. User Simulator가 후속 질문 생성",
+        "4. 4-5턴 반복",
+        "5. 제출 (/api/chat/submit) → 평가 결과 수집",
+        "6. JSONL 형식으로 저장"
+      ],
+      "target_dataset": {
+        "bad": "40-50 샘플",
+        "medium": "40-50 샘플",
+        "good": "40-50 샘플",
+        "total": "120-150 샘플"
+      },
+      "data_format": {
+        "input": "[문제 정보]\\n...[사용자 프롬프트]\\n...위 프롬프트를 평가하세요.",
+        "output": "{\"label\": \"bad|medium|good\", \"score\": 0-100, \"reasoning\": \"...\", \"missing_specs\": [...], \"feedback\": \"...\"}"
+      }
+    }
+  },
+
+  "file_structure": {
+    "new_files": [
+      "app/domain/langgraph/nodes/spec_extractor.py",
+      "app/domain/langgraph/prompts/spec_extractor.yaml",
+      "app/domain/langgraph/ast_injector/__init__.py",
+      "app/domain/langgraph/ast_injector/analyzer.py",
+      "app/domain/langgraph/ast_injector/components.py",
+      "app/domain/langgraph/ast_injector/mapper.py",
+      "app/domain/langgraph/ast_injector/strategies.py",
+      "app/domain/langgraph/ast_injector/modifier.py",
+      "app/domain/langgraph/ast_injector/injector.py",
+      "app/domain/langgraph/nodes/integrated_evaluator.py",
+      "scripts/finetuning/user_simulator.py",
+      "scripts/finetuning/simulation_controller.py",
+      "scripts/finetuning/generate_dataset.py",
+      "scripts/finetuning/review_dataset.py"
+    ],
+    "modified_files": [
+      "app/domain/langgraph/nodes/writer.py",
+      "app/domain/langgraph/prompts/writer_normal.yaml",
+      "app/domain/langgraph/nodes/intent_analyzer.py",
+      "app/domain/langgraph/nodes/turn_evaluator/evaluators.py",
+      "app/domain/langgraph/nodes/holistic_evaluator/flow.py",
+      "app/domain/langgraph/states.py",
+      "app/domain/langgraph/graph.py",
+      "app/domain/langgraph/utils/llm_factory.py",
+      "app/core/config.py"
+    ]
+  },
+
+  "success_criteria": [
+    "AST 분석으로 정답 코드 구성 요소 정확히 식별",
+    "Spec 누락 시 해당 부분이 변형된 코드 생성",
+    "통합 평가기가 기존 평가 로직 모두 포함",
+    "파인튜닝 데이터셋 120-150개 생성",
+    "라벨 분포 균형 (bad/medium/good 각 40-50개)"
+  ],
+
+  "references": {
+    "current_system_analysis": ".maestro/tasks/phase6_system_refactoring.json",
+    "existing_evaluator": "app/domain/langgraph/nodes/turn_evaluator/",
+    "existing_writer": "app/domain/langgraph/nodes/writer.py",
+    "problem_info": "app/domain/langgraph/utils/problem_info.py"
+  }
+}

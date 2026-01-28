@@ -1,0 +1,45 @@
+{
+  "_comment": "이것은 완료 보고서 템플릿입니다. 하부 Agent가 completed/ 폴더에 작성합니다.",
+  
+  "command_id": "CMD_XXX",
+  "completed_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "agent": "sub_agent_features | sub_agent_finetuning",
+  
+  "status": "completed | partial | failed",
+  
+  "result": {
+    "summary": "작업 결과 요약",
+    
+    "files_created": ["생성된 파일 목록"],
+    "files_modified": ["수정된 파일 목록"],
+    "files_deleted": ["삭제된 파일 목록"],
+    
+    "tests_added": 0,
+    "tests_passed": true,
+    "test_coverage": "XX%",
+    
+    "breaking_changes": false,
+    "migration_required": false
+  },
+  
+  "issues": [
+    {
+      "type": "bug | blocker | question",
+      "description": "발견된 이슈",
+      "severity": "critical | high | medium | low",
+      "resolved": false
+    }
+  ],
+  
+  "metrics": {
+    "time_spent": "X시간",
+    "lines_added": 0,
+    "lines_removed": 0
+  },
+  
+  "notes": "추가 메모",
+  
+  "next_steps": [
+    "후속 작업 제안"
+  ]
+}

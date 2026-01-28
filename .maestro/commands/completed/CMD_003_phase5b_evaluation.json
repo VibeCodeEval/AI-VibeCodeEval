@@ -1,0 +1,178 @@
+{
+  "command_id": "CMD_003",
+  "timestamp": "2026-01-19T00:50:00Z",
+  "from": "maestro",
+  "to": "sub_agent_evaluation_tuning",
+  "priority": "medium",
+  
+  "phase": "phase5b",
+  "title": "평가 파인튜닝 - LLM 평가 데이터",
+  "status": "pending",
+  
+  "description": "사용자 프롬프트에 대한 평가 점수, 분석, 루브릭을 추출하여 평가 LLM 품질 개선에 활용합니다.",
+  
+  "prerequisites": [
+    "Phase 4 완료: 프롬프트 YAML 분리",
+    "DB에 충분한 평가 데이터 축적 (100개 이상)"
+  ],
+  
+  "data_source": {
+    "primary_table": "prompt_evaluations",
+    "join_tables": ["prompt_messages"],
+    "extraction_logic": "평가 결과 + 원본 프롬프트 JOIN"
+  },
+  
+  "sql_query": {
+    "description": "평가 데이터 추출 (TURN_EVAL만)",
+    "query": "SELECT pe.id, pe.session_id, pe.turn, pm.content AS user_prompt, pe.details FROM prompt_evaluations pe JOIN prompt_messages pm ON pe.session_id = pm.session_id AND pe.turn = pm.turn WHERE pm.role = 'USER' AND pe.evaluation_type = 'TURN_EVAL' AND pe.details->>'score' IS NOT NULL ORDER BY pe.session_id, pe.turn"
+  },
+  
+  "output_schema": {
+    "file": ".maestro/data/finetuning/evaluation_data.jsonl",
+    "format": "JSONL",
+    "fields": {
+      "id": "고유 식별자 (eval_{session_id}_{turn})",
+      "user_prompt": "사용자 프롬프트 원문",
+      "intent": "의도 분류",
+      "intent_confidence": "의도 신뢰도 (0-1)",
+      "score": "총점 (0-100)",
+      "rubrics": {
+        "clarity": {"score": "number", "reasoning": "string"},
+        "problem_relevance": {"score": "number", "reasoning": "string"},
+        "examples": {"score": "number", "reasoning": "string"},
+        "rules": {"score": "number", "reasoning": "string"},
+        "context": {"score": "number", "reasoning": "string"}
+      },
+      "weights": "가중치 정보 (의도별)",
+      "analysis": "종합 평가 분석 텍스트",
+      "is_guardrail_failed": "가드레일 위반 여부",
+      "metadata": {
+        "session_id": "number",
+        "turn": "number",
+        "created_at": "timestamp"
+      }
+    },
+    "example": {
+      "id": "eval_4_3",
+      "user_prompt": "DP에 대해 알고 있어?",
+      "intent": "HINT_OR_QUERY",
+      "intent_confidence": 1.0,
+      "score": 44.0,
+      "rubrics": {
+        "clarity": {"score": 40.0, "reasoning": "프롬프트는 'DP'라는 대상을 명확히 언급하고 있지만, 구체성이 매우 낮습니다."},
+        "problem_relevance": {"score": 80.0, "reasoning": "DP는 외판원 순회 문제의 필수 알고리즘 중 하나입니다."},
+        "examples": {"score": 0.0, "reasoning": "예시나 상황을 전혀 제공하지 않았습니다."},
+        "rules": {"score": 0.0, "reasoning": "규칙이나 제약조건을 명시하지 않았습니다."},
+        "context": {"score": 0.0, "reasoning": "이전 대화나 배경 지식을 참조하지 않았습니다."}
+      },
+      "weights": {
+        "HINT_OR_QUERY": {"clarity": 0.5, "problem_relevance": 0.3, "examples": 0.0, "rules": 0.0, "context": 0.2}
+      },
+      "analysis": "[hint_query_eval]: 사용자 프롬프트는 'DP'라는 핵심 기술 용어를 포함하여 문제의 필수 알고리즘과 관련성은 높지만, '힌트/질의 요청'이라는 의도에 비추어 볼 때 명확성과 구체성이 매우 낮습니다.",
+      "is_guardrail_failed": false,
+      "metadata": {
+        "session_id": 4,
+        "turn": 3,
+        "created_at": "2026-01-19T00:22:53"
+      }
+    }
+  },
+  
+  "categorization": {
+    "by_score": {
+      "high": "score >= 70 (좋은 프롬프트)",
+      "medium": "40 <= score < 70 (보통 프롬프트)",
+      "low": "score < 40 (개선 필요 프롬프트)"
+    },
+    "by_intent": [
+      "SYSTEM_PROMPT", "RULE_SETTING", "GENERATION", "OPTIMIZATION",
+      "DEBUGGING", "TEST_CASE", "HINT_OR_QUERY", "FOLLOW_UP"
+    ]
+  },
+  
+  "tasks": [
+    {
+      "step": 1,
+      "name": "데이터 추출 스크립트 작성",
+      "output": "scripts/extract_evaluation_data.py",
+      "description": "평가 데이터 + 원본 프롬프트 추출"
+    },
+    {
+      "step": 2,
+      "name": "데이터 정제",
+      "description": "score가 NULL이거나 analysis가 비어있는 데이터 제외",
+      "output": ".maestro/data/finetuning/evaluation_cleaned.jsonl"
+    },
+    {
+      "step": 3,
+      "name": "점수대별 분류",
+      "description": "고점/중점/저점 프롬프트 분류",
+      "outputs": [
+        ".maestro/data/finetuning/eval_high_score.jsonl",
+        ".maestro/data/finetuning/eval_medium_score.jsonl",
+        ".maestro/data/finetuning/eval_low_score.jsonl"
+      ]
+    },
+    {
+      "step": 4,
+      "name": "의도별 균등 샘플링",
+      "description": "각 의도별 최소 10개 이상 확보",
+      "target_distribution": {
+        "SYSTEM_PROMPT": 10,
+        "RULE_SETTING": 15,
+        "GENERATION": 15,
+        "OPTIMIZATION": 10,
+        "DEBUGGING": 10,
+        "TEST_CASE": 10,
+        "HINT_OR_QUERY": 20,
+        "FOLLOW_UP": 10
+      }
+    },
+    {
+      "step": 5,
+      "name": "Few-shot 예시 선정",
+      "description": "의도별/점수대별 대표 예시 선정 (reasoning 명확한 것 우선)",
+      "output": ".maestro/data/finetuning/evaluation_examples.json"
+    },
+    {
+      "step": 6,
+      "name": "YAML 프롬프트에 예시 삽입",
+      "description": "Phase 4에서 분리한 YAML 파일의 examples 섹션에 삽입",
+      "depends_on": "Phase 4 완료",
+      "files_to_update": [
+        "app/domain/langgraph/prompts/eval_criteria/*.yaml",
+        "app/domain/langgraph/prompts/eval_intent_analysis.yaml"
+      ]
+    }
+  ],
+  
+  "deliverables": [
+    "scripts/extract_evaluation_data.py - 추출 스크립트",
+    ".maestro/data/finetuning/evaluation_data.jsonl - 전체 평가 데이터",
+    ".maestro/data/finetuning/evaluation_cleaned.jsonl - 정제된 데이터",
+    ".maestro/data/finetuning/eval_high_score.jsonl - 고점 프롬프트",
+    ".maestro/data/finetuning/eval_medium_score.jsonl - 중점 프롬프트",
+    ".maestro/data/finetuning/eval_low_score.jsonl - 저점 프롬프트",
+    ".maestro/data/finetuning/evaluation_examples.json - Few-shot 예시",
+    "업데이트된 YAML 프롬프트"
+  ],
+  
+  "acceptance_criteria": [
+    "최소 100개 정제 데이터 확보",
+    "의도별 최소 10개 이상 분포",
+    "Few-shot 적용 후 평가 점수 MAE < 10점",
+    "Few-shot 적용 후 의도 분류 정확도 > 85%"
+  ],
+  
+  "use_cases": [
+    "평가 LLM (Turn Evaluator) 품질 개선",
+    "루브릭별 평가 일관성 향상",
+    "의도 분류 정확도 개선"
+  ],
+  
+  "notes": [
+    "Phase 5-A(응답 파인튜닝)와 별도 진행",
+    "평가 데이터는 Evaluator 노드 프롬프트 개선에 활용",
+    "LLM 자체 파인튜닝이 아닌 In-context Learning 방식"
+  ]
+}

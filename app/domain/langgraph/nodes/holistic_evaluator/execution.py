@@ -8,18 +8,18 @@ Correctness 먼저 평가 → 통과 시 Performance 평가
    - 통과 시: Performance 평가 진행
 2. Performance 평가 (실행 시간, 메모리 사용량)
 """
+
 import asyncio
 import logging
 import time
-from typing import Dict, Any
 from datetime import datetime
+from typing import Any, Dict
 
-from app.domain.langgraph.states import MainGraphState
-from app.domain.langgraph.utils.token_tracking import extract_token_usage, accumulate_tokens
 from app.domain.langgraph.nodes.holistic_evaluator.langsmith_utils import (
-    wrap_node_with_tracing,
-    should_enable_langsmith,
-)
+    should_enable_langsmith, wrap_node_with_tracing)
+from app.domain.langgraph.states import MainGraphState
+from app.domain.langgraph.utils.token_tracking import (accumulate_tokens,
+                                                       extract_token_usage)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ TRACE_NAME_CODE_EXECUTION = "eval_code_execution"
 async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
     """
     6c: 코드 실행 평가 (Judge0 연동)
-    
+
     평가 순서:
     1. Correctness 평가 (테스트 케이스 통과율)
        - 실패 시: Performance 평가 건너뛰고 바로 종료
@@ -38,101 +38,133 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
     """
     session_id = state.get("session_id", "unknown")
     logger.info(f"[6c. Eval Code Execution] 진입 - session_id: {session_id}")
-    
+
     code_content = state.get("code_content")
     submission_id = state.get("submission_id")
-    
+
     if not code_content:
-        logger.warning(f"[6c. Eval Code Execution] 코드 없음 - session_id: {session_id}")
+        logger.warning(
+            f"[6c. Eval Code Execution] 코드 없음 - session_id: {session_id}"
+        )
         return {
             "code_correctness_score": None,
             "code_performance_score": None,
             "updated_at": datetime.utcnow().isoformat(),
         }
-    
-    logger.info(f"[6c. Eval Code Execution] 코드 평가 시작 - session_id: {session_id}, 코드 길이: {len(code_content)}")
-    
+
+    logger.info(
+        f"[6c. Eval Code Execution] 코드 평가 시작 - session_id: {session_id}, 코드 길이: {len(code_content)}"
+    )
+
     # 원본 코드 로그 (처음 300자)
-    original_code_preview = code_content[:300].replace('\n', '\\n') if code_content else ""
+    original_code_preview = (
+        code_content[:300].replace("\n", "\\n") if code_content else ""
+    )
     logger.info(f"[6c] 원본 코드 미리보기 (처음 300자): {original_code_preview}")
-    
+
     # 코드 정리 (이스케이프된 줄바꿈 문자 변환 등)
     from app.infrastructure.judge0.utils import clean_code
+
     code_content = clean_code(code_content)
-    logger.info(f"[6c. Eval Code Execution] 코드 정리 완료 - 정리 후 길이: {len(code_content)}")
-    
+    logger.info(
+        f"[6c. Eval Code Execution] 코드 정리 완료 - 정리 후 길이: {len(code_content)}"
+    )
+
     # 코드 내용 디버깅 (처음 300자)
     if code_content:
-        code_preview = code_content[:300].replace('\n', '\\n')
+        code_preview = code_content[:300].replace("\n", "\\n")
         logger.info(f"[6c] 정리된 코드 미리보기 (처음 300자): {code_preview}")
-        logger.info(f"[6c] 코드 인코딩 확인: UTF-8, 길이: {len(code_content.encode('utf-8'))} bytes")
+        logger.info(
+            f"[6c] 코드 인코딩 확인: UTF-8, 길이: {len(code_content.encode('utf-8'))} bytes"
+        )
         # 실제 줄바꿈이 있는지 확인
         has_actual_newline = "\n" in code_content
         has_escaped_newline = "\\n" in code_content and "\n" not in code_content
-        logger.info(f"[6c] 줄바꿈 확인 - 실제 줄바꿈: {has_actual_newline}, 이스케이프된 줄바꿈: {has_escaped_newline}")
+        logger.info(
+            f"[6c] 줄바꿈 확인 - 실제 줄바꿈: {has_actual_newline}, 이스케이프된 줄바꿈: {has_escaped_newline}"
+        )
         # 코드 라인 수 확인
-        line_count = len(code_content.split('\n'))
+        line_count = len(code_content.split("\n"))
         logger.info(f"[6c] 코드 라인 수: {line_count}줄")
-    
+
     # 문제 정보 가져오기
     problem_context = state.get("problem_context", {})
-    
+
     # problem_context가 없으면 spec_id로 다시 로드
     if not problem_context or not problem_context.get("test_cases"):
         spec_id = state.get("spec_id")
         if spec_id:
-            logger.warning(f"[6c] problem_context 없음 또는 test_cases 없음 - spec_id로 다시 로드: {spec_id}")
-            from app.domain.langgraph.utils.problem_info import get_problem_info_sync
+            logger.warning(
+                f"[6c] problem_context 없음 또는 test_cases 없음 - spec_id로 다시 로드: {spec_id}"
+            )
+            from app.domain.langgraph.utils.problem_info import \
+                get_problem_info_sync
+
             problem_context = get_problem_info_sync(spec_id)
-            logger.info(f"[6c] problem_context 로드 완료 - test_cases: {len(problem_context.get('test_cases', []))}개")
+            logger.info(
+                f"[6c] problem_context 로드 완료 - test_cases: {len(problem_context.get('test_cases', []))}개"
+            )
         else:
             logger.error(f"[6c] spec_id 없음 - problem_context를 로드할 수 없음")
             problem_context = {}
-    
+
     constraints = problem_context.get("constraints", {})
     timeout = constraints.get("time_limit_sec") or 1.0
     memory_limit = constraints.get("memory_limit_mb") or 128
-    
+
     # 테스트 케이스 준비 (첫 번째 TC만 사용)
     test_cases_raw = problem_context.get("test_cases", [])
     if test_cases_raw:
         # 첫 번째 테스트 케이스만 사용
         first_tc = test_cases_raw[0]
-        test_cases = [{
-            "input": first_tc.get("input", ""),
-            "expected": first_tc.get("expected", "")
-        }]
+        test_cases = [
+            {
+                "input": first_tc.get("input", ""),
+                "expected": first_tc.get("expected", ""),
+            }
+        ]
         test_cases_total = 1
-        logger.info(f"[6c] 테스트 케이스 사용 - TC: {first_tc.get('description', '기본 케이스')}")
-        logger.info(f"[6c] 테스트 케이스 입력 길이: {len(test_cases[0].get('input', ''))} 문자, 예상 출력: {test_cases[0].get('expected', '')}")
+        logger.info(
+            f"[6c] 테스트 케이스 사용 - TC: {first_tc.get('description', '기본 케이스')}"
+        )
+        logger.info(
+            f"[6c] 테스트 케이스 입력 길이: {len(test_cases[0].get('input', ''))} 문자, 예상 출력: {test_cases[0].get('expected', '')}"
+        )
     else:
         test_cases = []
         test_cases_total = 0
-        logger.error(f"[6c] 테스트 케이스 없음 - session_id: {session_id}, spec_id: {state.get('spec_id')}")
+        logger.error(
+            f"[6c] 테스트 케이스 없음 - session_id: {session_id}, spec_id: {state.get('spec_id')}"
+        )
         logger.error(f"[6c] problem_context 키 확인: {list(problem_context.keys())}")
-        logger.error(f"[6c] test_cases_raw 타입: {type(test_cases_raw)}, 값: {test_cases_raw}")
-    
+        logger.error(
+            f"[6c] test_cases_raw 타입: {type(test_cases_raw)}, 값: {test_cases_raw}"
+        )
+
     # 언어 정보 가져오기 (기본값: python)
     language = "python"  # TODO: state에서 언어 정보 가져오기
-    
+
     # ===== 1단계: Correctness 평가 =====
     logger.info(f"[6c. Eval Code Execution] ===== 1단계: Correctness 평가 시작 =====")
     logger.info(f"[6c. Eval Code Execution] test_cases: {len(test_cases)}개")
-    logger.info(f"[6c. Eval Code Execution] timeout: {timeout}초, memory_limit: {memory_limit}MB")
-    
+    logger.info(
+        f"[6c. Eval Code Execution] timeout: {timeout}초, memory_limit: {memory_limit}MB"
+    )
+
     correctness_score = None
     test_cases_passed = None
     correctness_result = None
     # Correctness 결과에서도 execution_time과 memory_used_mb 추출 (Performance 실패 시 대비)
     correctness_execution_time = None
     correctness_memory_used_mb = None
-    
+
     try:
-        from app.domain.queue import create_queue_adapter, JudgeTask
         import uuid
-        
+
+        from app.domain.queue import JudgeTask, create_queue_adapter
+
         queue = create_queue_adapter()
-        
+
         # Correctness 작업 생성
         correctness_task_id = f"correct_{session_id}_{uuid.uuid4().hex[:8]}"
         correctness_task = JudgeTask(
@@ -145,70 +177,110 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
             meta={
                 "session_id": session_id,
                 "submission_id": submission_id,
-                "evaluation_type": "correctness"
-            }
+                "evaluation_type": "correctness",
+            },
         )
-        
+
         # 큐에 작업 추가
         await queue.enqueue(correctness_task)
-        logger.info(f"[6c] Correctness 작업 추가 - task_id: {correctness_task_id}, test_cases: {len(test_cases)}")
-        
+        logger.info(
+            f"[6c] Correctness 작업 추가 - task_id: {correctness_task_id}, test_cases: {len(test_cases)}"
+        )
+
         # 결과 대기 (폴링)
         max_wait = 30  # 최대 30초 대기
         start_time = time.time()
         poll_interval = 0.5
-        
+
         while time.time() - start_time < max_wait:
             status = await queue.get_status(correctness_task_id)
             elapsed = time.time() - start_time
-            logger.debug(f"[6c] 상태 조회 - task_id: {correctness_task_id}, status: {status}, 경과: {elapsed:.2f}초")
-            
+            logger.debug(
+                f"[6c] 상태 조회 - task_id: {correctness_task_id}, status: {status}, 경과: {elapsed:.2f}초"
+            )
+
             if status == "completed":
                 correctness_result = await queue.get_result(correctness_task_id)
-                
+
                 if correctness_result:
                     if correctness_result.status == "success" and test_cases:
                         # 테스트 케이스 통과율 계산
                         # JudgeWorker에서 여러 테스트 케이스 실행 시 결과를 집계
                         # TODO: result에서 테스트 케이스별 통과 여부 추출
                         # 현재는 간단히 status로 판단
-                        correctness_score = 100.0 if correctness_result.status == "success" else 0.0
-                        test_cases_passed = len(test_cases) if correctness_result.status == "success" else 0
-                        
+                        correctness_score = (
+                            100.0 if correctness_result.status == "success" else 0.0
+                        )
+                        test_cases_passed = (
+                            len(test_cases)
+                            if correctness_result.status == "success"
+                            else 0
+                        )
+
                         # Correctness 결과에서 execution_time과 memory_used 추출
                         if correctness_result.execution_time is not None:
-                            correctness_execution_time = correctness_result.execution_time
+                            correctness_execution_time = (
+                                correctness_result.execution_time
+                            )
                         if correctness_result.memory_used is not None:
-                            correctness_memory_used_mb = correctness_result.memory_used / (1024 * 1024)  # bytes -> MB
-                        
-                        logger.info(f"[6c. Eval Code Execution] ===== Correctness 평가 완료 =====")
-                        logger.info(f"[6c. Eval Code Execution] task_id: {correctness_task_id}")
-                        logger.info(f"[6c. Eval Code Execution] status: {correctness_result.status}")
-                        logger.info(f"[6c. Eval Code Execution] Correctness Score: {correctness_score}")
-                        logger.info(f"[6c. Eval Code Execution] test_cases_passed: {test_cases_passed}/{len(test_cases)}")
+                            correctness_memory_used_mb = (
+                                correctness_result.memory_used / (1024 * 1024)
+                            )  # bytes -> MB
+
+                        logger.info(
+                            f"[6c. Eval Code Execution] ===== Correctness 평가 완료 ====="
+                        )
+                        logger.info(
+                            f"[6c. Eval Code Execution] task_id: {correctness_task_id}"
+                        )
+                        logger.info(
+                            f"[6c. Eval Code Execution] status: {correctness_result.status}"
+                        )
+                        logger.info(
+                            f"[6c. Eval Code Execution] Correctness Score: {correctness_score}"
+                        )
+                        logger.info(
+                            f"[6c. Eval Code Execution] test_cases_passed: {test_cases_passed}/{len(test_cases)}"
+                        )
                         if correctness_execution_time is not None:
-                            logger.info(f"[6c. Eval Code Execution] 실행 시간: {correctness_execution_time:.3f}초 (기준: {timeout}초)")
+                            logger.info(
+                                f"[6c. Eval Code Execution] 실행 시간: {correctness_execution_time:.3f}초 (기준: {timeout}초)"
+                            )
                         if correctness_memory_used_mb is not None:
-                            logger.info(f"[6c. Eval Code Execution] 메모리 사용: {correctness_memory_used_mb:.2f}MB (기준: {memory_limit}MB)")
+                            logger.info(
+                                f"[6c. Eval Code Execution] 메모리 사용: {correctness_memory_used_mb:.2f}MB (기준: {memory_limit}MB)"
+                            )
                         if correctness_result.output:
-                            logger.info(f"[6c. Eval Code Execution] 출력 (처음 200자): {correctness_result.output[:200]}...")
+                            logger.info(
+                                f"[6c. Eval Code Execution] 출력 (처음 200자): {correctness_result.output[:200]}..."
+                            )
                         if correctness_result.error:
-                            logger.warning(f"[6c. Eval Code Execution] 에러: {correctness_result.error}")
+                            logger.warning(
+                                f"[6c. Eval Code Execution] 에러: {correctness_result.error}"
+                            )
                         break
                     elif correctness_result.status == "success" and not test_cases:
                         # 테스트 케이스가 없으면 실행만 확인
                         correctness_score = 50.0
                         test_cases_passed = 0
-                        logger.info(f"[6c] Correctness 평가 완료 (TC 없음) - task_id: {correctness_task_id}")
+                        logger.info(
+                            f"[6c] Correctness 평가 완료 (TC 없음) - task_id: {correctness_task_id}"
+                        )
                         break
                     else:
                         # 실행 실패
                         correctness_score = 0.0
                         test_cases_passed = 0
-                        error_msg = correctness_result.error if correctness_result else "Unknown error"
-                        logger.warning(f"[6c] Correctness 평가 실패 - task_id: {correctness_task_id}, error: {error_msg}")
+                        error_msg = (
+                            correctness_result.error
+                            if correctness_result
+                            else "Unknown error"
+                        )
+                        logger.warning(
+                            f"[6c] Correctness 평가 실패 - task_id: {correctness_task_id}, error: {error_msg}"
+                        )
                         break
-            
+
             elif status == "failed":
                 correctness_score = 0.0
                 test_cases_passed = 0
@@ -226,10 +298,10 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
                         f"결과 없음 (Worker가 작업을 처리하지 못했을 수 있음)"
                     )
                 break
-            
+
             # 아직 처리 중이면 대기
             await asyncio.sleep(poll_interval)
-        
+
         # 타임아웃 처리
         if correctness_score is None:
             correctness_score = 0.0
@@ -239,15 +311,19 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
                 f"[6c] Correctness 평가 타임아웃 - task_id: {correctness_task_id}, "
                 f"최종 상태: {final_status}, 대기 시간: {max_wait}초"
             )
-        
+
     except Exception as e:
-        logger.warning(f"[6c] Correctness 평가 오류 - session_id: {session_id}, error: {str(e)}")
+        logger.warning(
+            f"[6c] Correctness 평가 오류 - session_id: {session_id}, error: {str(e)}"
+        )
         correctness_score = 0.0
         test_cases_passed = 0
-    
+
     # ===== Correctness 실패 시 Performance 평가 건너뛰기 =====
     if correctness_score is None or correctness_score == 0.0:
-        logger.info(f"[6c] Correctness 실패 - Performance 평가 건너뛰기 (score: {correctness_score})")
+        logger.info(
+            f"[6c] Correctness 실패 - Performance 평가 건너뛰기 (score: {correctness_score})"
+        )
         return {
             "code_correctness_score": 0.0,
             "code_performance_score": 0.0,  # Correctness 실패 시 Performance도 0점
@@ -259,17 +335,22 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
             "skip_reason": "Correctness 평가 실패",
             "updated_at": datetime.utcnow().isoformat(),
         }
-    
+
     # ===== Performance 점수 계산 (Correctness 결과 재사용) =====
     # Correctness 평가에서 이미 시간/메모리 정보를 가져왔으므로 별도 실행 불필요
-    logger.info(f"[6c. Eval Code Execution] ===== Performance 점수 계산 (Correctness 결과 재사용) =====")
-    
+    logger.info(
+        f"[6c. Eval Code Execution] ===== Performance 점수 계산 (Correctness 결과 재사용) ====="
+    )
+
     performance_score = None
     execution_time = correctness_execution_time
     memory_used_mb = correctness_memory_used_mb
-    
+
     # Correctness 결과에서 Performance 점수 계산
-    if correctness_execution_time is not None and correctness_memory_used_mb is not None:
+    if (
+        correctness_execution_time is not None
+        and correctness_memory_used_mb is not None
+    ):
         # 백준 기준: 1초 128MB
         # 시간 점수: 실행 시간 < timeout이면 50점, 아니면 0점
         time_score = 50.0 if correctness_execution_time < timeout else 0.0
@@ -277,30 +358,44 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         memory_score = 50.0 if correctness_memory_used_mb < memory_limit else 0.0
         # 성능 점수: 시간 점수 + 메모리 점수 (최대 100점)
         performance_score = time_score + memory_score
-        
+
         logger.info(f"[6c. Eval Code Execution] ===== Performance 점수 계산 완료 =====")
-        logger.info(f"[6c. Eval Code Execution] 실행 시간: {correctness_execution_time:.3f}초 (기준: {timeout}초) → 시간 점수: {time_score}점")
-        logger.info(f"[6c. Eval Code Execution] 메모리 사용: {correctness_memory_used_mb:.2f}MB (기준: {memory_limit}MB) → 메모리 점수: {memory_score}점")
-        logger.info(f"[6c. Eval Code Execution] Performance Score: {performance_score:.2f}점 (시간 {time_score}점 + 메모리 {memory_score}점)")
+        logger.info(
+            f"[6c. Eval Code Execution] 실행 시간: {correctness_execution_time:.3f}초 (기준: {timeout}초) → 시간 점수: {time_score}점"
+        )
+        logger.info(
+            f"[6c. Eval Code Execution] 메모리 사용: {correctness_memory_used_mb:.2f}MB (기준: {memory_limit}MB) → 메모리 점수: {memory_score}점"
+        )
+        logger.info(
+            f"[6c. Eval Code Execution] Performance Score: {performance_score:.2f}점 (시간 {time_score}점 + 메모리 {memory_score}점)"
+        )
     else:
-        logger.warning(f"[6c] Performance 점수 계산 불가 - execution_time 또는 memory_used 정보 없음")
+        logger.warning(
+            f"[6c] Performance 점수 계산 불가 - execution_time 또는 memory_used 정보 없음"
+        )
         performance_score = 0.0
-    
+
     # ===== 결과 반환 =====
     # Correctness 결과에서 가져온 값 사용 (Performance 별도 실행 없음)
     final_execution_time = correctness_execution_time
     final_memory_used_mb = correctness_memory_used_mb
-    
+
     result = {
-        "code_correctness_score": round(correctness_score, 2) if correctness_score is not None else 0.0,
-        "code_performance_score": round(performance_score, 2) if performance_score is not None else 0.0,
+        "code_correctness_score": (
+            round(correctness_score, 2) if correctness_score is not None else 0.0
+        ),
+        "code_performance_score": (
+            round(performance_score, 2) if performance_score is not None else 0.0
+        ),
         "test_cases_passed": test_cases_passed or 0,
         "test_cases_total": test_cases_total,
         "execution_time": final_execution_time,
-        "memory_used_mb": round(final_memory_used_mb, 2) if final_memory_used_mb is not None else None,
+        "memory_used_mb": (
+            round(final_memory_used_mb, 2) if final_memory_used_mb is not None else None
+        ),
         "updated_at": datetime.utcnow().isoformat(),
     }
-    
+
     # Performance 점수 상세 로깅
     logger.info(
         f"[6c. Eval Code Execution] 완료 - session_id: {session_id}, "
@@ -317,16 +412,16 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
             f"[6c. Performance 점수] session_id: {session_id}, "
             f"Performance 평가 실패 또는 점수 없음: {result['code_performance_score']:.2f}점"
         )
-    
+
     return result
 
 
 async def eval_code_execution(state: MainGraphState) -> Dict[str, Any]:
     """
     6c: 코드 실행 평가 (Judge0 연동)
-    
+
     Correctness 먼저 평가 → 통과 시 Performance 평가
-    
+
     LangSmith 추적:
     - State의 enable_langsmith_tracing 값에 따라 활성화/비활성화
     - None이면 환경 변수 LANGCHAIN_TRACING_V2 사용
@@ -335,7 +430,6 @@ async def eval_code_execution(state: MainGraphState) -> Dict[str, Any]:
     wrapped_func = wrap_node_with_tracing(
         node_name=TRACE_NAME_CODE_EXECUTION,
         impl_func=_eval_code_execution_impl,
-        state=state
+        state=state,
     )
     return await wrapped_func(state)
-

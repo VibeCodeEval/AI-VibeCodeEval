@@ -1,0 +1,11 @@
+version: "1.0"
+name: summary
+description: AI 응답 요약 프롬프트
+
+variables: []
+
+template: |
+  AI 응답을 3줄 이내로 핵심만 요약하세요.
+  - 제공된 코드의 핵심 기능
+  - 주요 알고리즘/접근 방식
+  - 핵심 설명 포인트

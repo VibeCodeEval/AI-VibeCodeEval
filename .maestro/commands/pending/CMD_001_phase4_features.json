@@ -1,0 +1,236 @@
+{
+  "command_id": "CMD_001",
+  "timestamp": "2026-01-19T00:30:00Z",
+  "from": "maestro",
+  "to": "sub_agent_features",
+  "priority": "high",
+  
+  "phase": "phase4",
+  "title": "LangGraph 프롬프트 구조 리팩토링",
+  "status": "pending",
+  
+  "description": "하드코딩된 프롬프트를 별도 파일로 분리하여 관리 용이성 및 유지보수성 향상",
+  
+  "main_task": {
+    "id": "T001",
+    "name": "프롬프트 파일 분리",
+    "description": "현재 LangGraph 노드에 하드코딩된 프롬프트를 별도 파일로 분리",
+    "priority": "high",
+    
+    "target_files": [
+      {
+        "source": "app/domain/langgraph/nodes/intent_analyzer.py",
+        "prompts": [
+          {
+            "function": "create_intent_analysis_system_prompt()",
+            "description": "Intent Analysis 시스템 프롬프트 (Guardrail Policy 포함)",
+            "lines": "381-544"
+          }
+        ]
+      },
+      {
+        "source": "app/domain/langgraph/nodes/writer.py",
+        "prompts": [
+          {
+            "variable": "GUARDRAIL_SYSTEM_PROMPT_TEMPLATE",
+            "description": "가드레일 위반 시 거절 응답 프롬프트",
+            "lines": "57-82"
+          },
+          {
+            "function": "create_normal_system_prompt()",
+            "description": "일반 응답 시스템 프롬프트 (Strategy별 응답 규정 포함)",
+            "lines": "85-314"
+          }
+        ]
+      },
+      {
+        "source": "app/domain/langgraph/nodes/turn_evaluator/analysis.py",
+        "prompts": [
+          {
+            "variable": "system_prompt (inline)",
+            "description": "턴 평가 의도 분석 프롬프트",
+            "lines": "72-131"
+          }
+        ]
+      },
+      {
+        "source": "app/domain/langgraph/nodes/holistic_evaluator/flow.py",
+        "prompts": [
+          {
+            "function": "create_holistic_system_prompt()",
+            "description": "Holistic Flow 평가 시스템 프롬프트"
+          }
+        ]
+      },
+      {
+        "source": "app/domain/langgraph/nodes/turn_evaluator/evaluators.py",
+        "prompts": [
+          {
+            "function": "prepare_evaluation_input_internal()",
+            "description": "평가 프롬프트 생성 (criteria별)"
+          }
+        ]
+      }
+    ],
+    
+    "format": "YAML",
+    "format_reason": "가독성 좋고 구조화 용이, Python PyYAML 라이브러리로 쉽게 로드",
+    
+    "proposed_structure": {
+      "base_path": "app/domain/langgraph/prompts/",
+      "files": [
+        {
+          "path": "__init__.py",
+          "description": "YAML 프롬프트 로더 유틸리티",
+          "functions": ["load_prompt(name)", "render_prompt(name, **variables)"]
+        },
+        {
+          "path": "intent_analyzer.yaml",
+          "description": "Intent Analysis 시스템 프롬프트",
+          "variables": ["problem_title", "problem_description", "algorithms", "input_format", "output_format"]
+        },
+        {
+          "path": "writer_guardrail.yaml",
+          "description": "가드레일 위반 시 거절 응답",
+          "variables": ["guardrail_message"]
+        },
+        {
+          "path": "writer_normal.yaml",
+          "description": "일반 응답 시스템 프롬프트 (Strategy별 응답 규정)",
+          "variables": ["status", "guide_strategy", "keywords", "memory_summary", "problem_context"],
+          "sections": ["role_definition", "strategy_rules", "forbidden", "output_formats"]
+        },
+        {
+          "path": "eval_intent_analysis.yaml",
+          "description": "턴 평가 의도 분석 프롬프트",
+          "variables": ["turn", "human_message", "ai_message"]
+        },
+        {
+          "path": "eval_holistic_flow.yaml",
+          "description": "Holistic Flow 평가 시스템 프롬프트",
+          "variables": ["problem_context", "turn_logs"]
+        },
+        {
+          "path": "eval_criteria/generation.yaml",
+          "description": "코드 생성 평가 기준"
+        },
+        {
+          "path": "eval_criteria/optimization.yaml",
+          "description": "최적화 평가 기준"
+        },
+        {
+          "path": "eval_criteria/debugging.yaml",
+          "description": "디버깅 평가 기준"
+        },
+        {
+          "path": "eval_criteria/hint_query.yaml",
+          "description": "힌트/질의 평가 기준"
+        },
+        {
+          "path": "eval_criteria/rule_setting.yaml",
+          "description": "규칙 설정 평가 기준"
+        },
+        {
+          "path": "eval_criteria/follow_up.yaml",
+          "description": "후속 질문 평가 기준"
+        }
+      ]
+    },
+    
+    "yaml_template_example": {
+      "description": "YAML 프롬프트 파일 형식 예시",
+      "example": "version: '1.0'\nname: intent_analyzer\ndescription: Intent Analysis 시스템 프롬프트\n\ntemplate: |\n  # Role Definition\n  \n  당신은 '바이브코딩'의 **AI 시험 감독관**입니다.\n  \n  ## 문제 정보\n  - 제목: {problem_title}\n  - 설명: {problem_description}\n  \n  ...\n\nvariables:\n  - problem_title\n  - problem_description\n  - algorithms"
+    },
+    
+    "implementation_steps": [
+      {
+        "step": 1,
+        "name": "프롬프트 로더 유틸리티 생성",
+        "description": "YAML 파일을 로드하고 템플릿 변수를 치환하는 유틸리티 함수 작성",
+        "output": "app/domain/langgraph/prompts/__init__.py"
+      },
+      {
+        "step": 2,
+        "name": "Intent Analyzer 프롬프트 분리",
+        "description": "intent_analyzer.py에서 시스템 프롬프트 추출 및 YAML 파일로 이동"
+      },
+      {
+        "step": 3,
+        "name": "Writer 프롬프트 분리",
+        "description": "writer.py에서 GUARDRAIL/Normal 프롬프트 추출 및 YAML 파일로 이동"
+      },
+      {
+        "step": 4,
+        "name": "Evaluator 프롬프트 분리",
+        "description": "turn_evaluator/, holistic_evaluator/ 프롬프트 추출 및 YAML 파일로 이동"
+      },
+      {
+        "step": 5,
+        "name": "기존 코드 수정",
+        "description": "하드코딩된 프롬프트를 제거하고 프롬프트 로더 호출로 교체"
+      },
+      {
+        "step": 6,
+        "name": "테스트",
+        "description": "프롬프트 로드 및 변수 치환이 정상 작동하는지 테스트"
+      }
+    ],
+    
+    "benefits": [
+      "프롬프트 수정 시 코드 변경 없이 YAML 파일만 수정",
+      "프롬프트 버전 관리 용이",
+      "A/B 테스트 및 프롬프트 실험 용이",
+      "코드 가독성 향상 (긴 문자열 제거)",
+      "Phase 5(파인튜닝)에서 프롬프트 수정 용이"
+    ]
+  },
+  
+  "secondary_tasks": [
+    {
+      "id": "T002",
+      "name": "기존 기능 점검",
+      "description": "이미 구현된 F001~F004 기능이 제대로 작동하는지 테스트",
+      "priority": "medium",
+      "already_implemented": [
+        {
+          "id": "F001",
+          "name": "Usage Callback (토큰 추적)",
+          "file": "app/domain/langgraph/utils/token_tracking.py"
+        },
+        {
+          "id": "F002",
+          "name": "Rate Limiter",
+          "file": "app/domain/langgraph/middleware/rate_limiting.py"
+        },
+        {
+          "id": "F003",
+          "name": "인증 시스템",
+          "file": "app/core/security.py"
+        },
+        {
+          "id": "F004",
+          "name": "Langsmith 추적",
+          "file": "app/domain/langgraph/nodes/holistic_evaluator/langsmith_utils.py"
+        }
+      ]
+    },
+    {
+      "id": "T003",
+      "name": "테스트 코드 정비",
+      "description": "실패한 테스트 코드 수정",
+      "priority": "low",
+      "issues": [
+        "pytest TestClient에서 Redis 초기화 문제",
+        "archive 폴더의 레거시 테스트",
+        "session_info fixture 누락"
+      ]
+    }
+  ],
+  
+  "notes": [
+    "Main Task(T001)이 최우선 - 프롬프트 분리 작업",
+    "YAML 형식 권장 (Jinja2 템플릿과 호환 가능)",
+    "프롬프트 파일명은 snake_case 사용",
+    "각 프롬프트 파일에 버전 정보 및 설명 주석 포함"
+  ]
+}

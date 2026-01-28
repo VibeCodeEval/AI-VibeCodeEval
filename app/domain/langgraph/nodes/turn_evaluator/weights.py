@@ -81,65 +81,67 @@ INTENT_WEIGHTS: Dict[str, Dict[str, float]] = {
 def get_weights_for_intent(intent: str) -> Dict[str, float]:
     """
     의도에 따른 가중치 반환
-    
+
     Args:
         intent: 의도 타입 (예: "GENERATION", "OPTIMIZATION")
-    
+
     Returns:
         루브릭별 가중치 딕셔너리
     """
-    return INTENT_WEIGHTS.get(intent, {
-        "rules": 0.2,
-        "clarity": 0.2,
-        "examples": 0.2,
-        "problem_relevance": 0.2,
-        "context": 0.2,
-    })
+    return INTENT_WEIGHTS.get(
+        intent,
+        {
+            "rules": 0.2,
+            "clarity": 0.2,
+            "examples": 0.2,
+            "problem_relevance": 0.2,
+            "context": 0.2,
+        },
+    )
 
 
 def get_weight_for_rubric(intent: str, rubric_name: str) -> float:
     """
     특정 의도와 루브릭에 대한 가중치 반환
-    
+
     Args:
         intent: 의도 타입
         rubric_name: 루브릭 이름 (한글 또는 영문 키)
-    
+
     Returns:
         가중치 (0.0 ~ 1.0)
     """
     weights = get_weights_for_intent(intent)
-    
+
     # 한글 이름인 경우 영문 키로 변환
     rubric_key = RUBRIC_NAME_MAP.get(rubric_name, rubric_name.lower().replace(" ", "_"))
-    
+
     return weights.get(rubric_key, 0.2)  # 기본값 0.2
 
 
 def calculate_weighted_score(rubrics: list, intent: str) -> float:
     """
     가중치를 적용한 총점 계산
-    
+
     Args:
         rubrics: 루브릭 리스트 (각 항목은 {"criterion": str, "score": float} 형식)
         intent: 의도 타입
-    
+
     Returns:
         가중치 적용 후 총점 (0-100)
     """
     weights = get_weights_for_intent(intent)
     total_score = 0.0
-    
+
     for rubric in rubrics:
         criterion = rubric.get("criterion", "")
         score = rubric.get("score", 0.0)
-        
+
         # 루브릭 이름을 영문 키로 변환
         rubric_key = RUBRIC_NAME_MAP.get(criterion, criterion.lower().replace(" ", "_"))
-        
+
         # 가중치 적용
         weight = weights.get(rubric_key, 0.2)
         total_score += score * weight
-    
-    return round(total_score, 2)
 
+    return round(total_score, 2)

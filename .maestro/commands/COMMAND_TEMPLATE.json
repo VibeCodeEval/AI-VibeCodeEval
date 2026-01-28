@@ -1,0 +1,36 @@
+{
+  "_comment": "이것은 명령 파일 템플릿입니다. 실제 명령은 pending/ 폴더에 생성됩니다.",
+  
+  "command_id": "CMD_XXX",
+  "timestamp": "YYYY-MM-DDTHH:MM:SSZ",
+  "from": "maestro",
+  "to": "sub_agent_features | sub_agent_finetuning",
+  "priority": "critical | high | medium | low",
+  
+  "task_phase": "phase4 | phase5",
+  "action": "implement_feature | fix_bug | review_code | create_data | optimize",
+  
+  "title": "작업 제목",
+  "description": "상세 설명",
+  
+  "requirements": [
+    "요구사항 1",
+    "요구사항 2"
+  ],
+  
+  "acceptance_criteria": [
+    "완료 기준 1",
+    "완료 기준 2"
+  ],
+  
+  "resources": {
+    "files_to_modify": ["파일 경로 목록"],
+    "reference_docs": ["참고 문서"],
+    "related_commands": ["관련 명령 ID"]
+  },
+  
+  "deadline": "YYYY-MM-DD",
+  "status": "pending",
+  
+  "notes": "추가 메모"
+}

@@ -2,18 +2,15 @@
 PostgreSQL 세션 관리 (SQLAlchemy Async)
 Spring Boot와 테이블을 공유하므로 읽기 위주 작업
 """
+
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
+                                    create_async_engine)
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
-
 
 # Async 엔진 생성
 engine = create_async_engine(
@@ -24,11 +21,14 @@ engine = create_async_engine(
     pool_pre_ping=True,
 )
 
+
 # 세션마다 search_path 설정 함수
 async def _set_search_path(session: AsyncSession):
     """세션마다 search_path 설정 (ai_vibe_coding_test 스키마만 사용)"""
     from sqlalchemy import text
+
     await session.execute(text("SET search_path TO ai_vibe_coding_test"))
+
 
 # 세션 팩토리
 AsyncSessionLocal = async_sessionmaker(
@@ -42,6 +42,7 @@ AsyncSessionLocal = async_sessionmaker(
 
 class Base(DeclarativeBase):
     """SQLAlchemy 베이스 클래스"""
+
     pass
 
 
@@ -75,6 +76,7 @@ async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
 async def init_db():
     """DB 연결 초기화 및 테스트"""
     from sqlalchemy import text
+
     async with engine.begin() as conn:
         # Spring Boot가 테이블을 관리하므로 여기서는 테이블 생성하지 않음
         # 연결 테스트만 수행
@@ -86,5 +88,3 @@ async def init_db():
 async def close_db():
     """DB 연결 종료"""
     await engine.dispose()
-
-
