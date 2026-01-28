@@ -1,0 +1,89 @@
+{
+  "by_intent": {
+    "UNKNOWN": [],
+    "hint_or_query": [
+      {
+        "id": "resp_4_5",
+        "user_prompt": "dp에 대해 알고있어?",
+        "ai_response": "안녕하세요. 저는 바이브코딩 AI 시험 감독관입니다.\n\n네, 동적 계획법(Dynamic Programming, DP)에 대해 알고 있습니다. 문제 해결과 관련된 도움이 필요하시면 언제든지 말씀해주세요.",
+        "intent": "hint_or_query",
+        "guide_strategy": null,
+        "is_guardrail_failed": false,
+        "eval_score": 75.0,
+        "ai_summary": "",
+        "metadata": {
+          "session_id": 4,
+          "turn": 5,
+          "created_at": "2026-01-19T00:14:26.698115"
+        }
+      },
+      {
+        "id": "resp_4_3",
+        "user_prompt": "그럼 일단 TSP관련 dp에 대해 알려줄래",
+        "ai_response": "문제 특정 정답 요청 패턴 감지",
+        "intent": "hint_or_query",
+        "guide_strategy": null,
+        "is_guardrail_failed": false,
+        "eval_score": 44.0,
+        "ai_summary": "",
+        "metadata": {
+          "session_id": 4,
+          "turn": 3,
+          "created_at": "2026-01-19T00:14:09.081462"
+        }
+      }
+    ]
+  },
+  "by_strategy": {
+    "UNKNOWN": [
+      {
+        "id": "resp_4_5",
+        "user_prompt": "dp에 대해 알고있어?",
+        "ai_response": "안녕하세요. 저는 바이브코딩 AI 시험 감독관입니다.\n\n네, 동적 계획법(Dynamic Programming, DP)에 대해 알고 있습니다. 문제 해결과 관련된 도움이 필요하시면 언제든지 말씀해주세요.",
+        "intent": "hint_or_query",
+        "guide_strategy": null,
+        "is_guardrail_failed": false,
+        "eval_score": 75.0,
+        "ai_summary": "",
+        "metadata": {
+          "session_id": 4,
+          "turn": 5,
+          "created_at": "2026-01-19T00:14:26.698115"
+        }
+      },
+      {
+        "id": "resp_4_3",
+        "user_prompt": "그럼 일단 TSP관련 dp에 대해 알려줄래",
+        "ai_response": "문제 특정 정답 요청 패턴 감지",
+        "intent": "hint_or_query",
+        "guide_strategy": null,
+        "is_guardrail_failed": false,
+        "eval_score": 44.0,
+        "ai_summary": "",
+        "metadata": {
+          "session_id": 4,
+          "turn": 3,
+          "created_at": "2026-01-19T00:14:09.081462"
+        }
+      }
+    ]
+  },
+  "guardrail_examples": [],
+  "high_score_examples": [
+    {
+      "id": "resp_4_5",
+      "user_prompt": "dp에 대해 알고있어?",
+      "ai_response": "안녕하세요. 저는 바이브코딩 AI 시험 감독관입니다.\n\n네, 동적 계획법(Dynamic Programming, DP)에 대해 알고 있습니다. 문제 해결과 관련된 도움이 필요하시면 언제든지 말씀해주세요.",
+      "intent": "hint_or_query",
+      "guide_strategy": null,
+      "is_guardrail_failed": false,
+      "eval_score": 75.0,
+      "ai_summary": "",
+      "metadata": {
+        "session_id": 4,
+        "turn": 5,
+        "created_at": "2026-01-19T00:14:26.698115"
+      }
+    }
+  ]
+}

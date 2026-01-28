@@ -1,0 +1,93 @@
+{
+  "command_id": "CMD_003",
+  "completed_at": "2026-01-19T03:30:00Z",
+  "agent": "sub_agent_evaluation_tuning",
+  
+  "status": "completed",
+  
+  "result": {
+    "summary": "Phase 5-B 평가 파인튜닝 데이터 추출 완료. DB에서 평가 데이터 2개를 추출하여 정제, 분류 및 저장.",
+    
+    "files_created": [
+      "scripts/extract_evaluation_data.py",
+      ".maestro/data/finetuning/evaluation_data.jsonl",
+      ".maestro/data/finetuning/evaluation_cleaned.jsonl",
+      ".maestro/data/finetuning/eval_high_score.jsonl",
+      ".maestro/data/finetuning/eval_medium_score.jsonl",
+      ".maestro/data/finetuning/eval_low_score.jsonl",
+      ".maestro/data/finetuning/evaluation_examples.json"
+    ],
+    "files_modified": [],
+    "files_deleted": [],
+    
+    "tests_added": 0,
+    "tests_passed": true,
+    "test_coverage": "N/A",
+    
+    "breaking_changes": false,
+    "migration_required": false
+  },
+  
+  "data_statistics": {
+    "total_evaluations": 2,
+    "cleaned_evaluations": 2,
+    "by_score": {
+      "high_70plus": 1,
+      "medium_40_69": 1,
+      "low_0_39": 0
+    },
+    "by_intent": {
+      "hint_or_query": 2
+    },
+    "score_statistics": {
+      "average": 59.50,
+      "max": 75.00,
+      "min": 44.00
+    }
+  },
+  
+  "issues": [
+    {
+      "type": "note",
+      "description": "DB에 축적된 평가 데이터가 2개뿐이어서 최소 100개 목표 미달. 더 많은 테스트 세션 후 재실행 권장.",
+      "severity": "low",
+      "resolved": false
+    },
+    {
+      "type": "note",
+      "description": "의도별 분포가 hint_or_query만 존재. 다른 의도(SYSTEM_PROMPT, GENERATION, OPTIMIZATION 등) 데이터 축적 필요.",
+      "severity": "low",
+      "resolved": false
+    },
+    {
+      "type": "note",
+      "description": "저점(0-39) 프롬프트 샘플이 없음. 다양한 품질의 프롬프트 데이터 수집 필요.",
+      "severity": "low",
+      "resolved": false
+    }
+  ],
+  
+  "metrics": {
+    "time_spent": "약 20분",
+    "lines_added": 380,
+    "lines_removed": 0
+  },
+  
+  "notes": "스크립트는 재실행 가능하며, DB에 더 많은 데이터가 축적되면 동일 스크립트로 재추출 가능. 출력 디렉토리 변경도 --output-dir 옵션으로 지원. Phase 4(YAML 분리) 완료 후 evaluation_examples.json의 Few-shot 예시를 YAML 프롬프트에 적용 가능.",
+  
+  "next_steps": [
+    "더 많은 테스트 세션을 진행하여 100개 이상 평가 데이터 축적",
+    "다양한 의도(SYSTEM_PROMPT, GENERATION, OPTIMIZATION 등) 데이터 수집",
+    "저점 프롬프트 샘플 수집",
+    "Phase 4(YAML 분리) 완료 후 Few-shot 예시를 프롬프트에 적용"
+  ],
+  
+  "deliverables_check": {
+    "extraction_script": true,
+    "min_100_records": false,
+    "intent_distribution": false,
+    "score_categorization": true,
+    "fewshot_examples": true,
+    "yaml_integration": false
+  }
+}

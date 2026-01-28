@@ -1,0 +1,8 @@
+# Phase 6 파인튜닝 데이터셋
+# LLM 시뮬레이션을 통한 자동 생성
+
+# 예상 파일:
+# - bad_samples.jsonl (40-50개)
+# - medium_samples.jsonl (40-50개)
+# - good_samples.jsonl (40-50개)
+# - combined_dataset.jsonl (전체 통합)

@@ -1,0 +1,62 @@
+{
+  "phase_id": "phase4",
+  "name": "기능 수정/추가",
+  "owner": "sub_agent_features",
+  "status": "pending",
+  "priority": "medium",
+  "created_at": "2026-01-18T00:00:00Z",
+  "started_at": null,
+  "completed_at": null,
+  "progress": 0,
+  
+  "description": "새로운 기능을 추가하고 기존 기능을 개선합니다. 하부 Agent가 담당합니다.",
+  
+  "feature_backlog": [
+    {
+      "id": "F001",
+      "name": "Usage Callback 구현",
+      "priority": "P1",
+      "status": "pending",
+      "description": "토큰 사용량을 Spring Boot로 전송",
+      "estimated_effort": "2-3일"
+    },
+    {
+      "id": "F002",
+      "name": "Rate Limiter 구현",
+      "priority": "P1",
+      "status": "pending",
+      "description": "API 호출 제한 관리",
+      "estimated_effort": "1-2일"
+    },
+    {
+      "id": "F003",
+      "name": "인증 시스템",
+      "priority": "P1",
+      "status": "pending",
+      "description": "Authorization 토큰 기반 인증",
+      "estimated_effort": "2-3일"
+    },
+    {
+      "id": "F004",
+      "name": "Langsmith 추적 활성화",
+      "priority": "P2",
+      "status": "pending",
+      "description": "LLM 호출 추적 및 디버깅",
+      "estimated_effort": "1일"
+    },
+    {
+      "id": "F005",
+      "name": "성능 최적화",
+      "priority": "P2",
+      "status": "pending",
+      "description": "LLM 호출 최소화, 캐싱 전략",
+      "estimated_effort": "3-5일"
+    }
+  ],
+  
+  "dependencies": ["phase3"],
+  
+  "notes": "이 Phase는 하부 Agent가 담당합니다. Maestro의 명령을 commands/pending/ 폴더에서 확인하세요.",
+  
+  "logs": []
+}

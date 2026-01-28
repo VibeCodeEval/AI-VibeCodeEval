@@ -2,11 +2,13 @@
 데이터베이스 Enum 타입 정의
 Spring Boot와 동일한 값을 사용해야 함
 """
+
 import enum
 
 
 class DifficultyEnum(str, enum.Enum):
     """문제 난이도"""
+
     EASY = "easy"
     MEDIUM = "medium"
     HARD = "hard"
@@ -14,6 +16,7 @@ class DifficultyEnum(str, enum.Enum):
 
 class ProblemStatusEnum(str, enum.Enum):
     """문제 상태"""
+
     DRAFT = "draft"
     PUBLISHED = "published"
     ARCHIVED = "archived"
@@ -21,6 +24,7 @@ class ProblemStatusEnum(str, enum.Enum):
 
 class ExamStateEnum(str, enum.Enum):
     """시험 상태"""
+
     DRAFT = "draft"
     SCHEDULED = "scheduled"
     RUNNING = "running"
@@ -30,6 +34,7 @@ class ExamStateEnum(str, enum.Enum):
 
 class ExamParticipantStateEnum(str, enum.Enum):
     """시험 참가자 상태"""
+
     REGISTERED = "registered"
     WAITING = "waiting"
     IN_PROGRESS = "in_progress"
@@ -40,6 +45,7 @@ class ExamParticipantStateEnum(str, enum.Enum):
 
 class SubmissionStatusEnum(str, enum.Enum):
     """제출 상태 (DB ENUM과 일치: 'QUEUED', 'RUNNING', 'DONE', 'FAILED')"""
+
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
     DONE = "DONE"
@@ -48,12 +54,14 @@ class SubmissionStatusEnum(str, enum.Enum):
 
 class PromptRoleEnum(str, enum.Enum):
     """프롬프트 역할 (DB ENUM과 일치: 'USER', 'AI')"""
+
     USER = "USER"
     AI = "AI"
 
 
 class TestRunGrpEnum(str, enum.Enum):
     """테스트 실행 그룹 (DB ENUM과 일치: 'SAMPLE', 'PUBLIC', 'PRIVATE')"""
+
     SAMPLE = "SAMPLE"
     PUBLIC = "PUBLIC"
     PRIVATE = "PRIVATE"
@@ -61,6 +69,7 @@ class TestRunGrpEnum(str, enum.Enum):
 
 class VerdictEnum(str, enum.Enum):
     """평가 결과 (DB ENUM과 일치: 'AC', 'WA', 'TLE', 'MLE', 'RE')"""
+
     AC = "AC"
     WA = "WA"
     TLE = "TLE"
@@ -70,6 +79,7 @@ class VerdictEnum(str, enum.Enum):
 
 class WriterResponseStatus(str, enum.Enum):
     """Writer LLM 응답 상태 (그래프에서 사용)"""
+
     SUCCESS = "success"
     FAILED_TECHNICAL = "failed_technical"
     FAILED_GUARDRAIL = "failed_guardrail"
@@ -80,6 +90,7 @@ class WriterResponseStatus(str, enum.Enum):
 
 class IntentAnalyzerStatus(str, enum.Enum):
     """Intent Analyzer 상태 (그래프에서 사용)"""
+
     PASSED_HINT = "passed_hint"
     FAILED_GUARDRAIL = "failed_guardrail"
     FAILED_RATE_LIMIT = "failed_rate_limit"
@@ -88,6 +99,7 @@ class IntentAnalyzerStatus(str, enum.Enum):
 
 class CodeIntentType(str, enum.Enum):
     """코드 의도 타입 (8가지 패턴 - Claude Prompt Engineering)"""
+
     SYSTEM_PROMPT = "system_prompt"  # 신규 추가
     RULE_SETTING = "rule_setting"
     GENERATION = "generation"
@@ -100,8 +112,6 @@ class CodeIntentType(str, enum.Enum):
 
 class EvaluationTypeEnum(str, enum.Enum):
     """평가 유형 (DB ENUM과 일치: 'TURN_EVAL', 'HOLISTIC_FLOW')"""
+
     TURN_EVAL = "TURN_EVAL"  # 턴별 평가 (4번 노드)
     HOLISTIC_FLOW = "HOLISTIC_FLOW"  # 전체 플로우 평가 (6a 노드)
-
-
-

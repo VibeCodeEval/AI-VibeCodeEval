@@ -2,25 +2,25 @@
 콜백 서비스
 Spring Boot로 결과 전송
 """
-from typing import Dict, Any, Optional
+
 import logging
+from typing import Any, Dict, Optional
 
 import httpx
 
 from app.core.config import settings
-
 
 logger = logging.getLogger(__name__)
 
 
 class CallbackService:
     """Spring Boot 콜백 서비스"""
-    
+
     def __init__(self):
         self.callback_url = settings.SPRING_CALLBACK_URL
         self.api_key = settings.SPRING_API_KEY
         self.timeout = 30.0
-    
+
     def _get_headers(self) -> Dict[str, str]:
         """요청 헤더 생성"""
         headers = {
@@ -29,7 +29,7 @@ class CallbackService:
         if self.api_key:
             headers["X-API-Key"] = self.api_key
         return headers
-    
+
     async def send_message_response(
         self,
         session_id: str,
@@ -39,13 +39,13 @@ class CallbackService:
     ) -> bool:
         """
         메시지 응답 전송
-        
+
         Args:
             session_id: 세션 ID
             turn: 턴 번호
             ai_message: AI 응답 메시지
             metadata: 추가 메타데이터
-        
+
         Returns:
             성공 여부
         """
@@ -56,9 +56,9 @@ class CallbackService:
             "ai_message": ai_message,
             "metadata": metadata or {},
         }
-        
+
         return await self._send_callback(payload)
-    
+
     async def send_turn_evaluation(
         self,
         session_id: str,
@@ -68,13 +68,13 @@ class CallbackService:
     ) -> bool:
         """
         턴 평가 결과 전송
-        
+
         Args:
             session_id: 세션 ID
             turn: 턴 번호
             turn_log: 턴 로그
             turn_score: 턴 점수
-        
+
         Returns:
             성공 여부
         """
@@ -85,9 +85,9 @@ class CallbackService:
             "turn_log": turn_log,
             "turn_score": turn_score,
         }
-        
+
         return await self._send_callback(payload)
-    
+
     async def send_submission_status(
         self,
         submission_id: int,
@@ -95,24 +95,26 @@ class CallbackService:
     ) -> bool:
         """
         제출 상태 콜백 전송
-        
+
         Args:
             submission_id: 제출 ID
             status: 제출 상태 (QUEUED, RUNNING, DONE, FAILED)
-        
+
         Returns:
             성공 여부
         """
         # 콜백 URL 구성: 기본 URL에서 경로 변경
-        callback_url = self.callback_url.replace("/api/ai/callback", "/api/callbacks/ai/analysis")
-        
+        callback_url = self.callback_url.replace(
+            "/api/ai/callback", "/api/callbacks/ai/analysis"
+        )
+
         payload = {
             "submissionId": submission_id,
             "status": status,
         }
-        
+
         return await self._send_callback(payload, callback_url=callback_url)
-    
+
     async def send_final_scores(
         self,
         session_id: str,
@@ -124,7 +126,7 @@ class CallbackService:
     ) -> bool:
         """
         최종 점수 전송 (레거시 - 사용 안 함)
-        
+
         Args:
             session_id: 세션 ID
             exam_id: 시험 ID
@@ -132,7 +134,7 @@ class CallbackService:
             submission_id: 제출 ID
             final_scores: 최종 점수
             turn_scores: 턴별 점수
-        
+
         Returns:
             성공 여부
         """
@@ -145,9 +147,9 @@ class CallbackService:
             "final_scores": final_scores,
             "turn_scores": turn_scores,
         }
-        
+
         return await self._send_callback(payload)
-    
+
     async def send_error(
         self,
         session_id: str,
@@ -157,13 +159,13 @@ class CallbackService:
     ) -> bool:
         """
         에러 전송
-        
+
         Args:
             session_id: 세션 ID
             error_type: 에러 유형
             error_message: 에러 메시지
             metadata: 추가 메타데이터
-        
+
         Returns:
             성공 여부
         """
@@ -174,17 +176,19 @@ class CallbackService:
             "error_message": error_message,
             "metadata": metadata or {},
         }
-        
+
         return await self._send_callback(payload)
-    
-    async def _send_callback(self, payload: Dict[str, Any], callback_url: Optional[str] = None) -> bool:
+
+    async def _send_callback(
+        self, payload: Dict[str, Any], callback_url: Optional[str] = None
+    ) -> bool:
         """
         콜백 전송 (내부)
-        
+
         Args:
             payload: 전송할 데이터
             callback_url: 콜백 URL (None이면 기본 URL 사용)
-        
+
         Returns:
             성공 여부
         """
@@ -196,9 +200,12 @@ class CallbackService:
                     json=payload,
                     headers=self._get_headers(),
                 )
-                
+
                 if response.status_code == 200:
-                    callback_type = payload.get('type') or f"submission_status:{payload.get('submissionId')}"
+                    callback_type = (
+                        payload.get("type")
+                        or f"submission_status:{payload.get('submissionId')}"
+                    )
                     logger.info(f"콜백 전송 성공: {callback_type}")
                     return True
                 else:
@@ -207,14 +214,14 @@ class CallbackService:
                         f"body={response.text}, url={url}"
                     )
                     return False
-                    
+
         except httpx.TimeoutException:
             logger.error(f"콜백 전송 타임아웃: {url}")
             return False
         except Exception as e:
             logger.error(f"콜백 전송 오류: {str(e)}", exc_info=True)
             return False
-    
+
     async def health_check(self) -> bool:
         """Spring Boot 서버 헬스체크"""
         try:
@@ -224,6 +231,3 @@ class CallbackService:
                 return response.status_code == 200
         except Exception:
             return False
-
-
-

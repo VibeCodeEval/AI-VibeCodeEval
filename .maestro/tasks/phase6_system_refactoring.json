@@ -1,0 +1,350 @@
+{
+  "phase_id": "phase6",
+  "name": "시스템 리팩토링 - AST 기반 코드 생성 + 평가 통합",
+  "owner": "sub_agent_refactoring",
+  "status": "planning",
+  "priority": "high",
+  "created_at": "2026-01-26T00:00:00Z",
+  "started_at": null,
+  "completed_at": null,
+  "progress": 0,
+
+  "description": "현재 Socratic 방식의 Writer를 AST 기반 코드 생성으로 전환하고, 평가 노드를 통합합니다. 또한 파인튜닝 데이터셋 자동 생성 파이프라인을 구축합니다.",
+
+  "goals": [
+    "사용자 프롬프트의 명확성을 기반으로 한 코드 생성 시스템 구축",
+    "AST 기반 Error Injection으로 프롬프트 품질 검증",
+    "평가 노드 통합 및 Gemini 3.0 → Gemma 파인튜닝 준비",
+    "LLM 시뮬레이션을 통한 파인튜닝 데이터셋 자동 생성"
+  ],
+
+  "architecture_changes": {
+    "current_flow": {
+      "description": "Socratic 방식 - 힌트/가이드만 제공",
+      "nodes": [
+        "1. Handle Request",
+        "2. Intent Analyzer (가드레일 - 정답 요청 차단)",
+        "3. Writer LLM (Socratic 힌트)",
+        "4. Eval Turn Guard → Turn Evaluator (8의도 개별 평가)",
+        "5. Main Router",
+        "6a. Holistic Flow (Chaining 전략)",
+        "6b. Aggregate Turn Scores",
+        "6c. Code Execution (Judge0)",
+        "7. Final Scores"
+      ]
+    },
+    "new_flow": {
+      "description": "Spec 기반 코드 생성 - 명확성에 따른 코드 품질",
+      "nodes": [
+        "1. Handle Request",
+        "2. Spec Extractor (프롬프트 → 요구사항 JSON 추출)",
+        "3. AST Analyzer (정답 코드 구조 분석)",
+        "4. Error Injector (누락 Spec 기반 코드 변형)",
+        "5. Writer LLM (변형된 코드 생성)",
+        "6. Eval Turn Guard → 통합 평가기 (Turn + Holistic)",
+        "7. Code Execution (Judge0)",
+        "8. Final Scores"
+      ]
+    }
+  },
+
+  "sub_phases": {
+    "phase6a": {
+      "name": "AST 기반 코드 생성 시스템",
+      "status": "pending",
+      "progress": 0,
+      "tasks": [
+        {
+          "task_id": "6a-1",
+          "name": "Spec Extractor 구현",
+          "description": "사용자 프롬프트에서 요구사항 JSON 추출",
+          "status": "pending",
+          "files_to_create": [
+            "app/domain/langgraph/nodes/spec_extractor.py",
+            "app/domain/langgraph/prompts/spec_extractor.yaml"
+          ],
+          "output": {
+            "specified_requirements": "사용자가 명시한 요구사항",
+            "missing_requirements": "누락된 요구사항",
+            "ambiguous_requirements": "모호한 요구사항"
+          }
+        },
+        {
+          "task_id": "6a-2",
+          "name": "AST Analyzer 구현",
+          "description": "정답 코드를 AST로 분석하여 구성 요소 식별",
+          "status": "pending",
+          "files_to_create": [
+            "app/domain/langgraph/ast_injector/__init__.py",
+            "app/domain/langgraph/ast_injector/analyzer.py",
+            "app/domain/langgraph/ast_injector/components.py"
+          ],
+          "component_types": [
+            "FUNCTION_DEF - 함수 정의",
+            "BASE_CASE - 기저 조건",
+            "RECURSIVE_CALL - 재귀 호출",
+            "MEMOIZATION - 메모이제이션",
+            "BIT_OPERATION - 비트 연산",
+            "LOOP_STRUCTURE - 루프 구조",
+            "STATE_TRANSITION - 상태 전이 (점화식)"
+          ]
+        },
+        {
+          "task_id": "6a-3",
+          "name": "Spec-AST Mapper 구현",
+          "description": "누락된 Spec과 AST 구성 요소 매핑",
+          "status": "pending",
+          "files_to_create": [
+            "app/domain/langgraph/ast_injector/mapper.py"
+          ],
+          "mapping_examples": {
+            "기저조건 미명시": "BASE_CASE 노드",
+            "메모이제이션 미명시": "MEMOIZATION 노드",
+            "비트마스킹 미명시": "BIT_OPERATION 노드",
+            "시간복잡도 미명시": "LOOP_STRUCTURE 노드"
+          }
+        },
+        {
+          "task_id": "6a-4",
+          "name": "Error Injector 구현",
+          "description": "AST 기반 코드 변형 (LLM이 변형 방식 결정)",
+          "status": "pending",
+          "files_to_create": [
+            "app/domain/langgraph/ast_injector/strategies.py",
+            "app/domain/langgraph/ast_injector/modifier.py",
+            "app/domain/langgraph/ast_injector/injector.py"
+          ],
+          "modification_types": [
+            "REMOVE - 완전 제거",
+            "SIMPLIFY - 단순화",
+            "MAKE_INCORRECT - 잘못된 로직",
+            "MAKE_INCOMPLETE - 불완전하게",
+            "REPLACE_ALGORITHM - 다른 알고리즘으로 대체"
+          ],
+          "role_division": {
+            "초기_판단": "LLM - 누락 Spec 추출",
+            "위치_지정": "AST - 정확한 노드 위치 찾기",
+            "변형_방식": "LLM - 어떻게 바꿀지 결정"
+          }
+        },
+        {
+          "task_id": "6a-5",
+          "name": "Writer 노드 리팩토링",
+          "description": "Socratic → Spec 기반 코드 생성",
+          "status": "pending",
+          "files_to_modify": [
+            "app/domain/langgraph/nodes/writer.py",
+            "app/domain/langgraph/prompts/writer_normal.yaml"
+          ],
+          "changes": [
+            "가드레일 완화 (코드 생성 허용)",
+            "정답 코드 기반 + AST 변형 코드 생성",
+            "Spec 충족도에 따른 코드 품질 결정"
+          ]
+        }
+      ]
+    },
+    "phase6b": {
+      "name": "평가 노드 통합",
+      "status": "pending",
+      "progress": 0,
+      "tasks": [
+        {
+          "task_id": "6b-1",
+          "name": "Turn Evaluator 통합",
+          "description": "8가지 의도별 평가를 통합 평가기로 병합",
+          "status": "pending",
+          "files_to_modify": [
+            "app/domain/langgraph/nodes/turn_evaluator/evaluators.py",
+            "app/domain/langgraph/nodes/turn_evaluator/aggregation.py"
+          ],
+          "preserve": "기존 평가 로직 살림 (8의도 루브릭 유지)"
+        },
+        {
+          "task_id": "6b-2",
+          "name": "Holistic Flow 통합",
+          "description": "Chaining 전략 평가를 통합 평가기에 포함",
+          "status": "pending",
+          "files_to_modify": [
+            "app/domain/langgraph/nodes/holistic_evaluator/flow.py"
+          ],
+          "preserve": "기존 평가 로직 살림 (문제분해, 피드백수용, 전략탐색)"
+        },
+        {
+          "task_id": "6b-3",
+          "name": "Spec 충족 평가 추가",
+          "description": "사용자 Spec 충족 여부 평가 항목 추가",
+          "status": "pending",
+          "new_evaluation_criteria": [
+            "spec_fulfillment_score - Spec 충족률",
+            "missing_spec_penalty - 누락 Spec 감점",
+            "clarity_score - 프롬프트 명확성"
+          ]
+        },
+        {
+          "task_id": "6b-4",
+          "name": "Gemini 3.0 업그레이드",
+          "description": "평가 LLM을 Gemini 3.0으로 업그레이드",
+          "status": "pending",
+          "files_to_modify": [
+            "app/domain/langgraph/utils/llm_factory.py",
+            "app/core/config.py"
+          ],
+          "purpose": "파인튜닝 데이터 일관성 확보"
+        }
+      ]
+    },
+    "phase6c": {
+      "name": "파인튜닝 데이터 자동 생성",
+      "status": "pending",
+      "progress": 0,
+      "tasks": [
+        {
+          "task_id": "6c-1",
+          "name": "User Simulator 구현",
+          "description": "LLM이 사용자 역할을 시뮬레이션",
+          "status": "pending",
+          "files_to_create": [
+            "scripts/finetuning/user_simulator.py"
+          ],
+          "quality_levels": [
+            "bad - 모호한 프롬프트, 정답 직접 요청",
+            "medium - 부분적 Spec 명시",
+            "good - 완벽한 Spec, 구조화된 프롬프트"
+          ]
+        },
+        {
+          "task_id": "6c-2",
+          "name": "Simulation Controller 구현",
+          "description": "4-5턴 대화 시뮬레이션 관리",
+          "status": "pending",
+          "files_to_create": [
+            "scripts/finetuning/simulation_controller.py"
+          ],
+          "flow": [
+            "1. 초기 프롬프트 생성 (품질별)",
+            "2. 시스템 API 호출 (Writer 응답)",
+            "3. 후속 질문 생성",
+            "4. 반복 (4-5턴)",
+            "5. 제출 및 평가"
+          ]
+        },
+        {
+          "task_id": "6c-3",
+          "name": "데이터셋 생성 파이프라인",
+          "description": "JSONL 형식 파인튜닝 데이터셋 생성",
+          "status": "pending",
+          "files_to_create": [
+            "scripts/finetuning/generate_dataset.py"
+          ],
+          "target_samples": {
+            "bad": "40-50개",
+            "medium": "40-50개",
+            "good": "40-50개",
+            "total": "120-150개"
+          },
+          "output_format": "JSONL",
+          "output_location": ".maestro/data/finetuning/phase6_gemma/"
+        },
+        {
+          "task_id": "6c-4",
+          "name": "데이터 검수 도구",
+          "description": "생성된 데이터 품질 검수 CLI",
+          "status": "pending",
+          "files_to_create": [
+            "scripts/finetuning/review_dataset.py"
+          ],
+          "features": [
+            "라벨 분포 확인",
+            "샘플 검수 UI",
+            "라벨 수정 기능"
+          ]
+        }
+      ]
+    },
+    "phase6d": {
+      "name": "Graph 구조 변경",
+      "status": "pending",
+      "progress": 0,
+      "tasks": [
+        {
+          "task_id": "6d-1",
+          "name": "MainGraphState 수정",
+          "description": "Spec 관련 필드 추가",
+          "status": "pending",
+          "files_to_modify": [
+            "app/domain/langgraph/states.py"
+          ],
+          "new_fields": [
+            "spec_result: Dict - Spec 추출 결과",
+            "ast_analysis: Dict - AST 분석 결과",
+            "modification_plan: Dict - 변형 계획"
+          ]
+        },
+        {
+          "task_id": "6d-2",
+          "name": "Graph 노드 연결 변경",
+          "description": "새로운 노드 추가 및 엣지 연결",
+          "status": "pending",
+          "files_to_modify": [
+            "app/domain/langgraph/graph.py"
+          ],
+          "new_edges": [
+            "Handle Request → Spec Extractor",
+            "Spec Extractor → AST Analyzer",
+            "AST Analyzer → Error Injector",
+            "Error Injector → Writer",
+            "Writer → 통합 평가기"
+          ]
+        }
+      ]
+    }
+  },
+
+  "dependencies": ["phase4", "phase5a", "phase5b", "phase5c"],
+
+  "deliverables": [
+    {
+      "name": "AST 기반 코드 생성 시스템",
+      "files": [
+        "app/domain/langgraph/ast_injector/",
+        "app/domain/langgraph/nodes/spec_extractor.py"
+      ]
+    },
+    {
+      "name": "통합 평가 시스템",
+      "files": [
+        "app/domain/langgraph/nodes/integrated_evaluator.py"
+      ]
+    },
+    {
+      "name": "파인튜닝 데이터 생성 파이프라인",
+      "files": [
+        "scripts/finetuning/"
+      ]
+    },
+    {
+      "name": "파인튜닝 데이터셋",
+      "files": [
+        ".maestro/data/finetuning/phase6_gemma/*.jsonl"
+      ],
+      "target": "120-150 샘플"
+    }
+  ],
+
+  "timeline": {
+    "phase6a": "AST 기반 코드 생성 (우선)",
+    "phase6b": "평가 노드 통합",
+    "phase6c": "파인튜닝 데이터 생성",
+    "phase6d": "Graph 구조 통합"
+  },
+
+  "notes": [
+    {
+      "timestamp": "2026-01-26T00:00:00Z",
+      "content": "Phase 6 계획 수립. Socratic → Spec 기반 코드 생성으로 패러다임 전환."
+    }
+  ],
+
+  "logs": []
+}

@@ -1,0 +1,129 @@
+{
+  "command_id": "CMD_002",
+  "timestamp": "2026-01-19T00:50:00Z",
+  "from": "maestro",
+  "to": "sub_agent_response_tuning",
+  "priority": "medium",
+  
+  "phase": "phase5a",
+  "title": "응답 파인튜닝 - 사용자-LLM 문답 데이터",
+  "status": "pending",
+  
+  "description": "사용자 프롬프트와 AI 응답 쌍을 추출하여 Writer LLM 응답 품질 개선에 활용합니다.",
+  
+  "prerequisites": [
+    "Phase 4 완료: 프롬프트 YAML 분리",
+    "DB에 충분한 대화 데이터 축적"
+  ],
+  
+  "data_source": {
+    "primary_table": "prompt_messages",
+    "join_tables": ["prompt_sessions", "prompt_evaluations"],
+    "extraction_logic": "USER-ASSISTANT 쌍으로 추출"
+  },
+  
+  "sql_query": {
+    "description": "사용자 프롬프트 + AI 응답 쌍 추출",
+    "query": "SELECT pm_user.session_id, pm_user.turn, pm_user.content AS user_prompt, pm_ai.content AS ai_response, pe.details->>'intent' AS intent, pe.details->>'is_guardrail_failed' AS is_guardrail_failed, pe.details->>'score' AS eval_score FROM prompt_messages pm_user JOIN prompt_messages pm_ai ON pm_user.session_id = pm_ai.session_id AND pm_user.turn = pm_ai.turn JOIN prompt_evaluations pe ON pm_user.session_id = pe.session_id AND pm_user.turn = pe.turn WHERE pm_user.role = 'USER' AND pm_ai.role = 'ASSISTANT' AND pe.evaluation_type = 'TURN_EVAL' ORDER BY pm_user.session_id, pm_user.turn"
+  },
+  
+  "output_schema": {
+    "file": ".maestro/data/finetuning/response_pairs.jsonl",
+    "format": "JSONL",
+    "fields": {
+      "id": "고유 식별자 (resp_{session_id}_{turn})",
+      "user_prompt": "사용자 프롬프트 원문",
+      "ai_response": "AI 응답 원문",
+      "intent": "의도 분류 (HINT_OR_QUERY, GENERATION 등)",
+      "guide_strategy": "응답 전략 (SYNTAX_GUIDE, LOGIC_HINT 등)",
+      "is_guardrail_failed": "가드레일 위반 여부 (boolean)",
+      "eval_score": "해당 턴의 평가 점수 (참고용)",
+      "metadata": {
+        "session_id": "number",
+        "turn": "number",
+        "problem_spec_id": "number (optional)",
+        "created_at": "timestamp"
+      }
+    },
+    "example": {
+      "id": "resp_4_3",
+      "user_prompt": "DP에 대해 알고 있어?",
+      "ai_response": "네, 바이브코딩 AI 시험 감독관이시군요.\n동적 계획법(DP)에 대한 지식을 잘 알고 계신 점 확인했습니다.\n문제 해결에 도움이 필요하면 언제든 말씀드리겠습니다.",
+      "intent": "HINT_OR_QUERY",
+      "guide_strategy": "SYNTAX_GUIDE",
+      "is_guardrail_failed": false,
+      "eval_score": 44.0,
+      "metadata": {
+        "session_id": 4,
+        "turn": 3,
+        "created_at": "2026-01-19T00:22:53"
+      }
+    }
+  },
+  
+  "categorization": {
+    "by_guardrail": {
+      "normal_responses": "is_guardrail_failed = false",
+      "guardrail_responses": "is_guardrail_failed = true"
+    },
+    "by_intent": [
+      "SYSTEM_PROMPT", "RULE_SETTING", "GENERATION", "OPTIMIZATION",
+      "DEBUGGING", "TEST_CASE", "HINT_OR_QUERY", "FOLLOW_UP"
+    ],
+    "by_strategy": [
+      "SYNTAX_GUIDE", "LOGIC_HINT", "GENERATION", "ROADMAP", "FULL_CODE_ALLOWED"
+    ]
+  },
+  
+  "tasks": [
+    {
+      "step": 1,
+      "name": "데이터 추출 스크립트 작성",
+      "output": "scripts/extract_response_pairs.py",
+      "description": "USER-ASSISTANT 쌍 추출"
+    },
+    {
+      "step": 2,
+      "name": "가드레일 케이스 분리",
+      "description": "정상 응답과 거절 응답 별도 파일로 분리",
+      "outputs": [
+        ".maestro/data/finetuning/response_normal.jsonl",
+        ".maestro/data/finetuning/response_guardrail.jsonl"
+      ]
+    },
+    {
+      "step": 3,
+      "name": "응답 품질 필터링",
+      "description": "eval_score 기준으로 고품질 응답 선별",
+      "criteria": [
+        "eval_score >= 60: 좋은 프롬프트에 대한 응답",
+        "eval_score < 40: 나쁜 프롬프트에 대한 응답 (가이드 용도)"
+      ]
+    },
+    {
+      "step": 4,
+      "name": "Few-shot 예시 선정",
+      "description": "전략별/의도별 대표 응답 예시 선정",
+      "output": ".maestro/data/finetuning/response_examples.json"
+    }
+  ],
+  
+  "deliverables": [
+    "scripts/extract_response_pairs.py - 추출 스크립트",
+    ".maestro/data/finetuning/response_pairs.jsonl - 전체 문답 데이터",
+    ".maestro/data/finetuning/response_normal.jsonl - 정상 응답",
+    ".maestro/data/finetuning/response_guardrail.jsonl - 가드레일 응답",
+    ".maestro/data/finetuning/response_examples.json - Few-shot 예시"
+  ],
+  
+  "use_cases": [
+    "Writer LLM 응답 품질 개선",
+    "가드레일 응답 일관성 확보",
+    "전략별 응답 스타일 학습"
+  ],
+  
+  "notes": [
+    "Phase 5-B(평가 파인튜닝)와 별도 진행",
+    "응답 데이터는 Writer LLM 프롬프트 개선에 활용"
+  ]
+}

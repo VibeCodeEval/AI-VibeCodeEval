@@ -1,0 +1,66 @@
+{
+  "project_info": {
+    "name": "AI-VibeCodeEval",
+    "description": "LangGraph 기반 AI 코딩 테스트 평가 시스템",
+    "architecture": "Hybrid DDD (Domain-Driven Design)",
+    "framework": "FastAPI",
+    "ai_framework": "LangGraph + LangChain"
+  },
+  
+  "python": {
+    "current_version": ">=3.10",
+    "target_version": ">=3.12",
+    "package_manager": "uv"
+  },
+  
+  "dependencies": {
+    "core": [
+      "fastapi>=0.109.0",
+      "langgraph>=0.6.11",
+      "langchain>=0.3.27",
+      "pydantic>=2.12.3"
+    ],
+    "database": [
+      "sqlalchemy[asyncio]>=2.0.0",
+      "asyncpg>=0.29.0",
+      "redis>=5.0.0"
+    ],
+    "llm": [
+      "langchain-google-genai>=3.2.0",
+      "langchain-openai>=0.3.35",
+      "langchain-anthropic>=0.3.22"
+    ]
+  },
+  
+  "structure": {
+    "app/core/": "핵심 설정 (config, security)",
+    "app/domain/langgraph/": "LangGraph 노드 및 상태 (39개 파일)",
+    "app/application/services/": "애플리케이션 서비스",
+    "app/infrastructure/": "인프라 (DB, Redis, Repository)",
+    "app/presentation/": "API 라우터 및 스키마",
+    "tests/": "단위 테스트 (21개 파일)",
+    "test_scripts/": "통합 테스트 스크립트"
+  },
+  
+  "key_files": {
+    "pyproject.toml": "프로젝트 메타데이터 및 의존성",
+    "requirements.txt": "pip 의존성 (레거시)",
+    "uv.lock": "uv 락파일",
+    "app/main.py": "FastAPI 진입점",
+    "app/domain/langgraph/graph.py": "메인 LangGraph"
+  },
+  
+  "testing": {
+    "framework": "pytest",
+    "async_support": "pytest-asyncio",
+    "coverage_tool": "pytest-cov"
+  },
+  
+  "external_services": {
+    "database": "PostgreSQL (Docker: localhost:5435)",
+    "cache": "Redis (Docker: localhost:6379)",
+    "code_runner": "Judge0 (localhost:2358)",
+    "llm_primary": "Gemini API",
+    "llm_secondary": "Vertex AI / OpenAI"
+  }
+}

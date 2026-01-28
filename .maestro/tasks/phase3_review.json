@@ -1,0 +1,122 @@
+{
+  "phase_id": "phase3",
+  "name": "AI 생성 코드 점검",
+  "owner": "maestro",
+  "status": "pending",
+  "priority": "high",
+  "created_at": "2026-01-18T00:00:00Z",
+  "started_at": null,
+  "completed_at": null,
+  "progress": 0,
+  
+  "description": "AI로 생성된 코드를 전체적으로 리뷰하고 품질을 개선합니다.",
+  
+  "review_areas": [
+    {
+      "id": "3.1",
+      "area": "LangGraph 노드 (39개)",
+      "path": "app/domain/langgraph/nodes/",
+      "status": "pending",
+      "issues_found": [],
+      "checklist": [
+        "상태 관리 적절성",
+        "에러 핸들링",
+        "로깅 일관성",
+        "타입 힌트 완전성"
+      ]
+    },
+    {
+      "id": "3.2",
+      "area": "Turn Evaluator",
+      "path": "app/domain/langgraph/nodes/turn_evaluator/",
+      "status": "pending",
+      "issues_found": [],
+      "checklist": [
+        "8가지 의도 평가 로직 정확성",
+        "Claude PE 기준 준수",
+        "채점 루브릭 명확성"
+      ]
+    },
+    {
+      "id": "3.3",
+      "area": "Holistic Evaluator",
+      "path": "app/domain/langgraph/nodes/holistic_evaluator/",
+      "status": "pending",
+      "issues_found": [],
+      "checklist": [
+        "Chaining 평가 로직",
+        "최종 점수 계산",
+        "가중치 적용"
+      ]
+    },
+    {
+      "id": "3.4",
+      "area": "LLM Factory",
+      "path": "app/domain/langgraph/utils/llm_factory.py",
+      "status": "pending",
+      "issues_found": [],
+      "checklist": [
+        "모델 관리",
+        "프롬프트 구조",
+        "에러 핸들링"
+      ]
+    },
+    {
+      "id": "3.5",
+      "area": "Repository 계층",
+      "path": "app/infrastructure/repositories/",
+      "status": "pending",
+      "issues_found": [],
+      "checklist": [
+        "쿼리 최적화",
+        "트랜잭션 관리",
+        "N+1 문제"
+      ]
+    },
+    {
+      "id": "3.6",
+      "area": "API 계층",
+      "path": "app/presentation/",
+      "status": "pending",
+      "issues_found": [],
+      "checklist": [
+        "입력 검증",
+        "응답 형식",
+        "에러 응답"
+      ]
+    },
+    {
+      "id": "3.7",
+      "area": "Core 설정",
+      "path": "app/core/",
+      "status": "pending",
+      "issues_found": [],
+      "checklist": [
+        "환경 변수 관리",
+        "설정 검증",
+        "보안 설정"
+      ]
+    }
+  ],
+  
+  "quality_checklist": [
+    "에러 핸들링이 적절한가?",
+    "타입 힌트가 완전한가?",
+    "로깅이 일관성 있는가?",
+    "하드코딩된 값이 없는가?",
+    "테스트 가능한 구조인가?",
+    "문서화(docstring)가 되어있는가?",
+    "SOLID 원칙을 준수하는가?",
+    "DRY 원칙을 준수하는가?"
+  ],
+  
+  "dependencies": ["phase2"],
+  
+  "deliverables": [
+    "코드 리뷰 보고서",
+    "리팩토링 목록",
+    "개선된 코드"
+  ],
+  
+  "logs": []
+}
