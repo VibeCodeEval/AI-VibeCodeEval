@@ -1,8 +1,8 @@
 {
   "project": "AI-VibeCodeEval",
   "maestro_version": "1.1.0",
-  "last_updated": "2026-01-26T00:00:00Z",
-  "current_focus": "phase6_planning",
+  "last_updated": "2026-01-29T10:00:00Z",
+  "current_focus": "phase6b_integrated_evaluator",
   
   "phases": {
     "phase1": {
@@ -87,12 +87,13 @@
     },
     "phase6": {
       "name": "시스템 리팩토링 - AST 기반 코드 생성 + 평가 통합",
-      "status": "planning",
+      "status": "in_progress",
       "owner": "sub_agent_refactoring",
       "priority": 6,
-      "progress": 0,
-      "started_at": null,
+      "progress": 50,
+      "started_at": "2026-01-29T09:00:00Z",
       "completed_at": null,
+      "current_sub_phase": "phase6b",
       "depends_on": ["phase4", "phase5a", "phase5b", "phase5c"],
       "command_file": ".maestro/commands/pending/CMD_005_phase6_refactoring.json",
       "plan_document": ".maestro/PHASE6_PLAN.md",
@@ -141,10 +142,16 @@
   },
   
   "metrics": {
-    "total_progress": 50,
-    "commands_issued": 5,
-    "commands_completed": 0,
-    "blockers": []
+    "total_progress": 55,
+    "commands_issued": 6,
+    "commands_completed": 1,
+    "blockers": [],
+    "phase6_progress": {
+      "phase6a": "completed",
+      "phase6b": "completed",
+      "phase6c": "pending",
+      "phase6d": "partial"
+    }
   },
   
   "handoff_summary": {
@@ -190,7 +197,8 @@
         },
         "phase6b": {
           "name": "평가 노드 통합",
-          "components": ["Turn Evaluator 통합", "Holistic Flow 통합", "Spec 충족 평가", "Gemini 3.0 업그레이드"]
+          "components": ["TurnAnalysis 모델", "Spec Extractor 확장", "Integrated Evaluator(규칙)", "Graph 연결", "scores 통합"],
+          "gap": "Node4+Node6 통합 평가기(한번에 LLM as Judge) 미구현. 현재는 Node4→integrated_evaluator→Node6 분리 실행."
         },
         "phase6c": {
           "name": "파인튜닝 데이터 자동 생성",
@@ -222,6 +230,14 @@
     {
       "timestamp": "2026-01-26T00:00:00Z",
       "content": "Phase 6 추가: 시스템 리팩토링 계획 수립. Socratic → Spec 기반 코드 생성으로 패러다임 전환. AST 기반 Error Injection, 평가 통합, 파인튜닝 데이터 자동 생성 포함."
+    },
+    {
+      "timestamp": "2026-01-29T10:00:00Z",
+      "content": "Phase 6A 완료 (AST 기반 코드 생성). Phase 6B 시작 - Spec 중심 통합 평가 시스템 재설계. 6개 핵심 지표 (첫 프롬프트 55%, 후속 턴 25%, 효율성 20%)."
+    },
+    {
+      "timestamp": "2026-01-29T14:00:00Z",
+      "content": "Phase 6B 구현 상태 정리: 6b-1~6b-6 완료. 단 Node4(eval_turn_guard)와 Node6(eval_holistic_flow)는 통합되지 않고 분리 실행. 목표였던 'Node4+Node6 통합해서 한번에 진행'은 미구현. .maestro에 현재 구현 상태·갭 반영 완료."
     }
   ]
 }

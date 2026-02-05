@@ -51,8 +51,9 @@
   "sub_phases": {
     "phase6a": {
       "name": "AST 기반 코드 생성 시스템",
-      "status": "pending",
-      "progress": 0,
+      "status": "completed",
+      "progress": 100,
+      "completed_at": "2026-01-29T09:00:00Z",
       "tasks": [
         {
           "task_id": "6a-1",
@@ -145,52 +146,94 @@
       ]
     },
     "phase6b": {
-      "name": "평가 노드 통합",
-      "status": "pending",
-      "progress": 0,
+      "name": "Spec 중심 통합 평가 시스템",
+      "status": "completed",
+      "progress": 100,
+      "started_at": "2026-01-29T10:00:00Z",
+      "completed_at": "2026-01-29T12:00:00Z",
+      "philosophy": "불완전한 코드는 첫 프롬프트의 불완전한 Spec에서 비롯된다",
+      "implementation_reality": "6b-1~6b-6 구현 완료. 단, Node4(eval_turn_guard)와 Node6(eval_holistic_flow)는 여전히 분리 실행. integrated_evaluator는 규칙 기반만 추가된 상태.",
+      "pending_integration": "Node4 + Node6 통합 평가기: 제출 시 한 번에 LLM as Judge로 8요소·Chaining 평가하는 통합 노드 설계·구현 미완료.",
+      "weight_distribution": {
+        "first_prompt": "55%",
+        "follow_up_turns": "25%",
+        "efficiency": "20%"
+      },
       "tasks": [
         {
           "task_id": "6b-1",
-          "name": "Turn Evaluator 통합",
-          "description": "8가지 의도별 평가를 통합 평가기로 병합",
+          "name": "TurnAnalysis 모델 정의",
+          "description": "TurnAnalysis, SessionAnalysis Pydantic 모델 추가",
           "status": "pending",
           "files_to_modify": [
-            "app/domain/langgraph/nodes/turn_evaluator/evaluators.py",
-            "app/domain/langgraph/nodes/turn_evaluator/aggregation.py"
+            "app/domain/langgraph/states.py"
           ],
-          "preserve": "기존 평가 로직 살림 (8의도 루브릭 유지)"
-        },
-        {
-          "task_id": "6b-2",
-          "name": "Holistic Flow 통합",
-          "description": "Chaining 전략 평가를 통합 평가기에 포함",
-          "status": "pending",
-          "files_to_modify": [
-            "app/domain/langgraph/nodes/holistic_evaluator/flow.py"
-          ],
-          "preserve": "기존 평가 로직 살림 (문제분해, 피드백수용, 전략탐색)"
-        },
-        {
-          "task_id": "6b-3",
-          "name": "Spec 충족 평가 추가",
-          "description": "사용자 Spec 충족 여부 평가 항목 추가",
-          "status": "pending",
-          "new_evaluation_criteria": [
-            "spec_fulfillment_score - Spec 충족률",
-            "missing_spec_penalty - 누락 Spec 감점",
-            "clarity_score - 프롬프트 명확성"
+          "model_fields": [
+            "turn, is_first_prompt, spec_completeness",
+            "clarity_score, has_structure, has_examples",
+            "spec_recovery_count, references_previous, summary"
           ]
         },
         {
-          "task_id": "6b-4",
-          "name": "Gemini 3.0 업그레이드",
-          "description": "평가 LLM을 Gemini 3.0으로 업그레이드",
+          "task_id": "6b-2",
+          "name": "Spec Extractor 확장",
+          "description": "TurnAnalysis 생성 로직 추가",
           "status": "pending",
           "files_to_modify": [
-            "app/domain/langgraph/utils/llm_factory.py",
-            "app/core/config.py"
+            "app/domain/langgraph/nodes/spec_extractor.py"
           ],
-          "purpose": "파인튜닝 데이터 일관성 확보"
+          "add_functions": [
+            "calculate_clarity_score()",
+            "has_structure()",
+            "has_examples()",
+            "count_recovered_specs()",
+            "generate_summary()"
+          ]
+        },
+        {
+          "task_id": "6b-3",
+          "name": "TurnAnalysis 저장 로직",
+          "description": "PostgreSQL prompt_messages.meta에 저장",
+          "status": "pending",
+          "files_to_modify": [
+            "app/application/services/eval_service.py",
+            "app/domain/langgraph/nodes/handle_request.py"
+          ],
+          "storage_location": "prompt_messages.meta['turn_analysis']",
+          "preserve_redis": true
+        },
+        {
+          "task_id": "6b-4",
+          "name": "Integrated Evaluator 노드 생성",
+          "description": "통합 평가 노드 (규칙 기반, LLM 호출 없음)",
+          "status": "pending",
+          "files_to_create": [
+            "app/domain/langgraph/nodes/integrated_evaluator.py"
+          ],
+          "functions": [
+            "load_turn_analyses()",
+            "calculate_first_prompt_score()",
+            "calculate_follow_up_score()",
+            "calculate_efficiency_score()"
+          ]
+        },
+        {
+          "task_id": "6b-5",
+          "name": "Graph 노드 연결",
+          "description": "integrated_evaluator 노드 추가 및 연결",
+          "status": "pending",
+          "files_to_modify": [
+            "app/domain/langgraph/graph.py"
+          ]
+        },
+        {
+          "task_id": "6b-6",
+          "name": "최종 점수 통합",
+          "description": "scores.py에서 integrated_score 반영, rubric_json 상세화",
+          "status": "pending",
+          "files_to_modify": [
+            "app/domain/langgraph/nodes/holistic_evaluator/scores.py"
+          ]
         }
       ]
     },
@@ -343,6 +386,18 @@
     {
       "timestamp": "2026-01-26T00:00:00Z",
       "content": "Phase 6 계획 수립. Socratic → Spec 기반 코드 생성으로 패러다임 전환."
+    },
+    {
+      "timestamp": "2026-01-29T10:00:00Z",
+      "content": "Phase 6A 완료. Phase 6B 시작 - Spec 중심 통합 평가 시스템으로 재설계. 기존 43+ 지표를 6개 핵심 지표로 통합. 첫 프롬프트 55%, 후속 턴 25%, 효율성 20% 가중치."
+    },
+    {
+      "timestamp": "2026-01-29T10:00:00Z",
+      "content": "DB 구조 분석 완료: prompt_messages.meta (JSONB)에 turn_analysis 저장, scores.rubric_json에 상세 결과 저장. 스키마 변경 없이 JSONB 활용."
+    },
+    {
+      "timestamp": "2026-01-29T14:00:00Z",
+      "content": "Phase 6B 현재 구현 정리: Node4·Node6은 그대로 분리 실행. '통합해서 한번에' 미구현. PHASE6_PLAN.md 4.8절, phase6_system_refactoring.json implementation_reality·pending_integration, 일일 리포트 current_implementation_gap, maestro_state notes·handoff_summary 업데이트 완료."
     }
   ],
 

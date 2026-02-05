@@ -1,0 +1,276 @@
+{
+  "command_id": "CMD_006",
+  "phase": "phase6b",
+  "name": "Spec 중심 통합 평가 시스템",
+  "created_at": "2026-01-29T10:00:00Z",
+  "priority": "high",
+  "status": "in_progress",
+  "owner": "sub_agent_refactoring",
+
+  "description": "기존 Turn Evaluator + Holistic Flow + Spec 평가를 Spec 중심으로 통합. 첫 프롬프트 품질을 최우선으로 평가하고, 후속 턴은 보완/회복으로 평가.",
+
+  "philosophy": {
+    "core_principle": "불완전한 코드는 첫 프롬프트의 불완전한 Spec에서 비롯된다",
+    "weight_distribution": {
+      "first_prompt": "55% (Spec 완전성 35% + 표현 품질 20%)",
+      "follow_up_turns": "25% (맥락 연결 15% + Spec 회복 10%)",
+      "efficiency": "20% (턴 수 + 회복 속도)"
+    }
+  },
+
+  "evaluation_metrics": {
+    "total_metrics": 6,
+    "details": [
+      {
+        "id": 1,
+        "name": "spec_completeness",
+        "weight": 0.35,
+        "description": "필수 Spec 명시 여부 (알고리즘, 자료구조, 시간복잡도 등)"
+      },
+      {
+        "id": 2,
+        "name": "clarity",
+        "weight": 0.07,
+        "description": "구체적 값, 조건 명시 여부"
+      },
+      {
+        "id": 3,
+        "name": "structure",
+        "weight": 0.07,
+        "description": "XML 태그, 마크다운, 리스트 활용"
+      },
+      {
+        "id": 4,
+        "name": "specificity",
+        "weight": 0.06,
+        "description": "I/O 예시, 엣지 케이스 포함"
+      },
+      {
+        "id": 5,
+        "name": "context_connection",
+        "weight": 0.25,
+        "description": "이전 턴 참조, Spec 회복 품질"
+      },
+      {
+        "id": 6,
+        "name": "efficiency",
+        "weight": 0.20,
+        "description": "턴 수, 회복 속도"
+      }
+    ]
+  },
+
+  "tasks": [
+    {
+      "task_id": "6b-1",
+      "name": "TurnAnalysis 모델 정의",
+      "status": "pending",
+      "file": "app/domain/langgraph/states.py",
+      "action": "modify",
+      "details": {
+        "add_models": [
+          {
+            "name": "TurnAnalysis",
+            "fields": [
+              "turn: int",
+              "is_first_prompt: bool",
+              "spec_completeness: float (0-100)",
+              "specified_specs: List[str]",
+              "missing_specs: List[dict]",
+              "clarity_score: float (0-100)",
+              "has_structure: bool",
+              "has_examples: bool",
+              "has_specific_values: bool",
+              "spec_recovery_count: int",
+              "references_previous: bool",
+              "summary: str (max 100자)"
+            ]
+          },
+          {
+            "name": "SessionAnalysis",
+            "fields": [
+              "session_id: str",
+              "turn_analyses: List[TurnAnalysis]",
+              "final_spec_completeness: float",
+              "spec_recovery_timeline: List[dict]"
+            ]
+          }
+        ],
+        "modify_state": {
+          "MainGraphState": [
+            "turn_analysis: Optional[Dict]",
+            "integrated_score: Optional[float]"
+          ]
+        }
+      }
+    },
+    {
+      "task_id": "6b-2",
+      "name": "Spec Extractor 확장",
+      "status": "pending",
+      "file": "app/domain/langgraph/nodes/spec_extractor.py",
+      "action": "modify",
+      "details": {
+        "add_functions": [
+          "calculate_clarity_score(prompt: str) -> float",
+          "has_structure(prompt: str) -> bool - XML/마크다운 감지",
+          "has_examples(prompt: str) -> bool - I/O 예시 감지",
+          "has_specific_values(prompt: str) -> bool - 숫자/조건 감지",
+          "count_recovered_specs(state: MainGraphState) -> int",
+          "generate_summary(prompt: str, spec_result: dict) -> str (100자)"
+        ],
+        "modify_output": "TurnAnalysis 객체 반환 추가"
+      }
+    },
+    {
+      "task_id": "6b-3",
+      "name": "TurnAnalysis 저장 로직",
+      "status": "pending",
+      "files": [
+        "app/application/services/eval_service.py",
+        "app/domain/langgraph/nodes/handle_request.py"
+      ],
+      "action": "modify",
+      "details": {
+        "storage_location": "PostgreSQL prompt_messages.meta['turn_analysis']",
+        "preserve_redis": true,
+        "note": "기존 Redis turn_logs 저장 유지 (호환성)"
+      }
+    },
+    {
+      "task_id": "6b-4",
+      "name": "Integrated Evaluator 노드 생성",
+      "status": "pending",
+      "file": "app/domain/langgraph/nodes/integrated_evaluator.py",
+      "action": "create",
+      "details": {
+        "functions": [
+          {
+            "name": "integrated_evaluator",
+            "description": "통합 평가 노드 (제출 시 실행)",
+            "input": "MainGraphState",
+            "output": "Dict[str, Any] with integrated_score"
+          },
+          {
+            "name": "load_turn_analyses",
+            "description": "PostgreSQL에서 turn_analysis 조회"
+          },
+          {
+            "name": "calculate_first_prompt_score",
+            "description": "첫 프롬프트 점수 계산 (55%)"
+          },
+          {
+            "name": "calculate_follow_up_score",
+            "description": "후속 턴 점수 계산 (25%)"
+          },
+          {
+            "name": "calculate_efficiency_score",
+            "description": "효율성 점수 계산 (20%)"
+          }
+        ],
+        "evaluation_type": "rule_based",
+        "note": "LLM 호출 없이 규칙 기반으로 점수 계산"
+      }
+    },
+    {
+      "task_id": "6b-5",
+      "name": "Graph 노드 연결",
+      "status": "pending",
+      "file": "app/domain/langgraph/graph.py",
+      "action": "modify",
+      "details": {
+        "add_node": "integrated_evaluator",
+        "connection": "main_router → integrated_evaluator → eval_holistic_flow (또는 내부 호출)"
+      }
+    },
+    {
+      "task_id": "6b-6",
+      "name": "최종 점수 통합",
+      "status": "pending",
+      "file": "app/domain/langgraph/nodes/holistic_evaluator/scores.py",
+      "action": "modify",
+      "details": {
+        "integrate": "integrated_score를 final_scores에 반영",
+        "rubric_json_structure": {
+          "first_prompt": {
+            "spec_completeness": "number",
+            "expression_quality": "number",
+            "score": "number"
+          },
+          "follow_up": {
+            "context_quality": "number",
+            "spec_recovery": "number",
+            "score": "number"
+          },
+          "efficiency": {
+            "total_turns": "number",
+            "recovery_speed": "number",
+            "score": "number"
+          },
+          "turn_details": "array",
+          "suggestions": "array"
+        }
+      }
+    }
+  ],
+
+  "data_flow": {
+    "during_conversation": {
+      "step1": "User 입력",
+      "step2": "Spec Extractor → TurnAnalysis 생성",
+      "step3": "PromptMessage.meta에 turn_analysis 저장 (PostgreSQL)",
+      "step4": "Redis turn_logs 저장 (기존 호환성)"
+    },
+    "on_submission": {
+      "step1": "PostgreSQL에서 모든 turn_analysis 조회",
+      "step2": "Integrated Evaluator 실행 (규칙 기반)",
+      "step3": "6개 지표 기반 점수 계산",
+      "step4": "scores 테이블에 저장"
+    }
+  },
+
+  "context_optimization": {
+    "before": "5000+ 토큰 (원본 대화)",
+    "after": "500 토큰 (turn_analysis 배열)",
+    "reduction": "약 90%"
+  },
+
+  "compatibility": {
+    "preserve": [
+      "Redis turn_logs 저장",
+      "TURN_EVAL 평가 로직",
+      "HOLISTIC_FLOW 평가 로직",
+      "scores 테이블 구조"
+    ],
+    "add": [
+      "prompt_messages.meta.turn_analysis",
+      "integrated_evaluator 노드",
+      "6개 핵심 지표 기반 점수"
+    ]
+  },
+
+  "expected_output": {
+    "files_to_modify": [
+      "app/domain/langgraph/states.py",
+      "app/domain/langgraph/nodes/spec_extractor.py",
+      "app/application/services/eval_service.py",
+      "app/domain/langgraph/graph.py",
+      "app/domain/langgraph/nodes/holistic_evaluator/scores.py"
+    ],
+    "files_to_create": [
+      "app/domain/langgraph/nodes/integrated_evaluator.py"
+    ],
+    "tests": [
+      "test_turn_analysis_model",
+      "test_spec_extractor_turn_analysis",
+      "test_integrated_evaluator",
+      "test_meta_storage"
+    ]
+  },
+
+  "notes": [
+    "DB 스키마 변경 없음 - JSONB 컬럼 활용",
+    "기존 평가 로직 유지하면서 점진적 통합",
+    "LLM 호출 없이 규칙 기반 평가로 비용 절감"
+  ]
+}

@@ -82,6 +82,10 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         aggregate_turn_score = state.get("aggregate_turn_score")
         code_performance_score = state.get("code_performance_score")
         code_correctness_score = state.get("code_correctness_score")
+        
+        # Phase 6B: 통합 평가 결과
+        integrated_score = state.get("integrated_score")
+        integrated_evaluation = state.get("integrated_evaluation")
 
         logger.info(f"[7. Aggregate Final Scores] 입력 점수:")
         logger.info(
@@ -95,6 +99,9 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         )
         logger.info(
             f"[7. Aggregate Final Scores]   - Code Correctness Score: {code_correctness_score}"
+        )
+        logger.info(
+            f"[7. Aggregate Final Scores]   - Integrated Score (Phase 6B): {integrated_score}"
         )
 
         # 가중치 설정
@@ -303,6 +310,9 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                                 "performance_details"
                             ),
                             "holistic_flow_analysis": holistic_flow_analysis,
+                            # Phase 6B: 통합 평가 결과
+                            "integrated_score": integrated_score,
+                            "integrated_evaluation": integrated_evaluation,
                         },
                     )
                     logger.info(

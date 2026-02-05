@@ -194,7 +194,11 @@ class SubmitCodeResponse(BaseModel):
 
 
 class SaveChatMessageRequest(BaseModel):
-    """Spring Boot에서 메시지 저장 요청"""
+    """Spring Boot에서 메시지 저장 요청
+
+    SAVE(Phase 1 확정) 시 meta에 code_snapshot, is_v1_checkpoint를 포함하면
+    prompt_messages.meta (JSONB)에 그대로 저장되며, Step 04에서 v1_code 복원에 사용됩니다.
+    """
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -206,7 +210,21 @@ class SaveChatMessageRequest(BaseModel):
                 "content": "안녕하세요",
                 "tokenCount": 10,
                 "meta": '{"key": "value"}',
-            }
+            },
+            "examples": {
+                "save_phase1_checkpoint": {
+                    "summary": "Phase 1 확정(SAVE) 시 코드 스냅샷",
+                    "value": {
+                        "examId": 1,
+                        "participantId": 1,
+                        "turn": 2,
+                        "role": "user",
+                        "content": "Phase 1 구현 완료, 저장합니다.",
+                        "tokenCount": 5,
+                        "meta": '{"code_snapshot": "def check_passenger(...):\\n    ...", "is_v1_checkpoint": true}',
+                    },
+                },
+            },
         }
     )
 
@@ -218,7 +236,10 @@ class SaveChatMessageRequest(BaseModel):
     tokenCount: Optional[int] = Field(
         None, description="토큰 사용량", alias="tokenCount"
     )
-    meta: Optional[str] = Field(None, description="메타데이터 (JSON 문자열)")
+    meta: Optional[str] = Field(
+        None,
+        description="메타데이터 (JSON 문자열). Phase 1 SAVE 시 code_snapshot(코드 전체), is_v1_checkpoint(true) 포함 권장.",
+    )
 
 
 class SaveChatMessageResponse(BaseModel):

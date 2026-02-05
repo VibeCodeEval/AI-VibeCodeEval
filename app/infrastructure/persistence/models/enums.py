@@ -115,3 +115,35 @@ class EvaluationTypeEnum(str, enum.Enum):
 
     TURN_EVAL = "TURN_EVAL"  # 턴별 평가 (4번 노드)
     HOLISTIC_FLOW = "HOLISTIC_FLOW"  # 전체 플로우 평가 (6a 노드)
+
+
+# ===== v2.1 도메인 Enum (평가·의도·루브릭) =====
+
+
+class GradeType(str, enum.Enum):
+    """최종 학점 (A=Senior ~ F=Fail)"""
+
+    A = "A"
+    B = "B"
+    C = "C"
+    D = "D"
+    F = "F"
+
+
+class UnifiedIntentType(str, enum.Enum):
+    """4대 통합 의도"""
+
+    SETTING = "SETTING"
+    CREATION = "CREATION"
+    REFINEMENT = "REFINEMENT"
+    VALIDATION = "VALIDATION"
+
+
+class RubricType(str, enum.Enum):
+    """5대 루브릭"""
+
+    SPECIFICITY = "SPECIFICITY"
+    DESIGN_CONTROL = "DESIGN_CONTROL"
+    ROBUSTNESS = "ROBUSTNESS"
+    CONSISTENCY = "CONSISTENCY"
+    EFFICIENCY = "EFFICIENCY"

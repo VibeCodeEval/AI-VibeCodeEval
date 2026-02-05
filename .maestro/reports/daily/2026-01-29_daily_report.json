@@ -1,0 +1,151 @@
+{
+  "date": "2026-01-29",
+  "report_type": "daily",
+  "generated_at": "2026-01-29T10:00:00Z",
+
+  "summary": "Phase 6A 완료, Phase 6B (Spec 중심 통합 평가) 완료",
+
+  "completed_today": {
+    "phase6a": {
+      "name": "AST 기반 코드 생성 시스템",
+      "status": "completed",
+      "tasks_completed": [
+        "6a-1: Spec Extractor 구현",
+        "6a-2: AST Analyzer 구현",
+        "6a-3: Spec-AST Mapper 구현",
+        "6a-4: Error Injector 구현",
+        "6a-5: Writer 리팩토링"
+      ],
+      "files_created": [
+        "app/domain/langgraph/nodes/spec_extractor.py",
+        "app/domain/langgraph/prompts/spec_extractor.yaml",
+        "app/domain/langgraph/ast_injector/__init__.py",
+        "app/domain/langgraph/ast_injector/analyzer.py",
+        "app/domain/langgraph/ast_injector/components.py",
+        "app/domain/langgraph/ast_injector/mapper.py",
+        "app/domain/langgraph/ast_injector/strategies.py",
+        "app/domain/langgraph/ast_injector/modifier.py",
+        "app/domain/langgraph/ast_injector/injector.py"
+      ],
+      "files_modified": [
+        "app/domain/langgraph/states.py",
+        "app/domain/langgraph/nodes/writer.py",
+        "app/domain/langgraph/prompts/writer_normal.yaml"
+      ]
+    }
+  },
+
+  "completed_phase6b": {
+    "phase6b": {
+      "name": "Spec 중심 통합 평가 시스템",
+      "status": "completed",
+      "started_at": "2026-01-29T10:00:00Z",
+      "philosophy": "불완전한 코드는 첫 프롬프트의 불완전한 Spec에서 비롯된다",
+      "design_decisions": {
+        "weight_distribution": {
+          "first_prompt": "55% (Spec 완전성 35% + 표현 품질 20%)",
+          "follow_up_turns": "25% (맥락 연결 15% + Spec 회복 10%)",
+          "efficiency": "20% (턴 수 + 회복 속도)"
+        },
+        "evaluation_metrics": {
+          "before": "43+ 개별 지표 (8 Intent × 5 루브릭 + Holistic Flow)",
+          "after": "6개 핵심 지표"
+        },
+        "context_optimization": {
+          "before": "5000+ 토큰 (원본 대화)",
+          "after": "500 토큰 (turn_analysis 구조화)",
+          "reduction": "약 90%"
+        }
+      },
+      "tasks": [
+        {
+          "id": "6b-1",
+          "name": "TurnAnalysis 모델 정의",
+          "status": "pending",
+          "file": "app/domain/langgraph/states.py"
+        },
+        {
+          "id": "6b-2",
+          "name": "Spec Extractor 확장",
+          "status": "pending",
+          "file": "app/domain/langgraph/nodes/spec_extractor.py"
+        },
+        {
+          "id": "6b-3",
+          "name": "TurnAnalysis 저장 로직",
+          "status": "pending",
+          "files": ["eval_service.py", "handle_request.py"]
+        },
+        {
+          "id": "6b-4",
+          "name": "Integrated Evaluator 노드",
+          "status": "pending",
+          "file": "integrated_evaluator.py (신규)"
+        },
+        {
+          "id": "6b-5",
+          "name": "Graph 노드 연결",
+          "status": "pending",
+          "file": "graph.py"
+        },
+        {
+          "id": "6b-6",
+          "name": "최종 점수 통합",
+          "status": "pending",
+          "file": "scores.py"
+        }
+      ]
+    }
+  },
+
+  "analysis_completed": {
+    "db_structure": {
+      "storage_strategy": "JSONB 컬럼 활용 (스키마 변경 없음)",
+      "turn_analysis_location": "prompt_messages.meta['turn_analysis']",
+      "final_result_location": "scores.rubric_json",
+      "existing_tables_used": [
+        "prompt_sessions",
+        "prompt_messages",
+        "prompt_evaluations",
+        "submissions",
+        "scores"
+      ]
+    },
+    "data_flow": {
+      "during_conversation": "Spec Extractor → TurnAnalysis → prompt_messages.meta",
+      "on_submission": "PostgreSQL 조회 → Integrated Evaluator → scores 저장"
+    }
+  },
+
+  "files_created_today": [
+    ".maestro/commands/pending/CMD_006_phase6b_integrated_evaluator.json"
+  ],
+
+  "files_modified_today": [
+    ".maestro/PHASE6_PLAN.md",
+    ".maestro/maestro_state.json",
+    ".maestro/tasks/phase6_system_refactoring.json"
+  ],
+
+  "blockers": [],
+
+  "next_steps": [
+    "6b-1: TurnAnalysis, SessionAnalysis 모델 정의",
+    "6b-2: Spec Extractor에 TurnAnalysis 생성 로직 추가",
+    "6b-3: prompt_messages.meta에 저장 로직 구현",
+    "6b-4: Integrated Evaluator 노드 구현"
+  ],
+
+  "notes": [
+    "기존 Turn Evaluator, Holistic Flow 평가 로직 유지 (호환성)",
+    "DB 스키마 변경 없이 JSONB 필드 활용",
+    "LLM 호출 없이 규칙 기반 평가로 비용 절감"
+  ],
+
+  "current_implementation_gap": {
+    "description": "Phase 6B 목표였던 Node4+Node6 통합은 미완료",
+    "current_flow": "eval_turn_guard(Node4, 턴별 8의도 LLM) → integrated_evaluator(규칙만) → eval_holistic_flow(Node6, LLM) — 분리 실행",
+    "intended_flow": "제출 시 통합 평가기 하나가 LLM as Judge로 8요소·Chaining 한번에 평가",
+    "pending": "Node4+Node6 통합 평가기 설계·구현"
+  }
+}
