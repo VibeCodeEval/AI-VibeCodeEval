@@ -103,6 +103,8 @@ class EvaluationStorageService:
                 "analysis": analysis,  # 분석 내용 (종합 평가 근거)
                 "intent": intent,  # UNKNOWN 대신 실제 intent 사용
                 "intent_types": intent_types,
+                "unified_intent": turn_log.get("unified_intent")
+                or prompt_eval_details.get("unified_intent"),  # v2.1 4대 통합 의도
                 "intent_confidence": turn_log.get(
                     "intent_confidence",
                     prompt_eval_details.get("intent_confidence", 0.0),

@@ -19,6 +19,34 @@ from app.domain.langgraph.utils.token_tracking import (accumulate_tokens,
                                                        extract_token_usage)
 from app.infrastructure.persistence.models.enums import WriterResponseStatus
 
+# Step 03 (V2.1): 스마트 게이트 2026 Writer 분기 – 구조적 용어 감지
+# 이 키워드가 사용자 메시지에 포함되면 "클린 아키텍처" 응답, 미포함 시 "스파게티" 유도 응답
+SMART_GATE_2026_SPEC_ID = 20
+STRUCTURAL_TERMS = [
+    "규칙 인터페이스",
+    "인터페이스 상속",
+    "BaseRule",
+    "SecurityRule",
+    "전략 패턴",
+    "Strategy",
+    "상속받아",
+    "확장해서",
+    "패턴으로",
+    "분리해서",
+    "Rule로",
+]
+
+
+def has_structural_intent(text: str) -> bool:
+    """
+    사용자 메시지에 구조적 지시 용어가 포함되어 있는지 감지.
+    Step 03: 스마트 게이트 2026에서 클린 vs 스파게티 분기 시 사용.
+    """
+    if not text or not isinstance(text, str):
+        return False
+    t = text.strip()
+    return any(term in t for term in STRUCTURAL_TERMS)
+
 
 def get_llm():
     """LLM 인스턴스 생성 (Vertex AI 또는 AI Studio)"""
@@ -61,136 +89,6 @@ def get_guardrail_system_prompt(guardrail_message: str) -> str:
     return render_prompt("writer_guardrail", guardrail_message=guardrail_message)
 
 
-def create_spec_based_system_prompt(
-    problem_context: Dict[str, Any],
-    spec_result: Dict[str, Any],
-    modified_code: Optional[str],
-    memory_summary: str,
-) -> str:
-    """
-    Spec 기반 코드 생성용 시스템 프롬프트 생성 (Phase 6)
-    
-    사용자 프롬프트의 Spec 충족도에 따라 코드 품질을 조절합니다.
-    
-    Args:
-        problem_context: 문제 정보
-        spec_result: Spec Extractor 결과
-        modified_code: Error Injector가 생성한 변형 코드
-        memory_summary: 이전 대화 요약
-        
-    Returns:
-        str: 시스템 프롬프트
-    """
-    from app.domain.langgraph.prompts import load_prompt, render_prompt
-    
-    # Spec 분석 결과 추출
-    specified_requirements = spec_result.get("specified_requirements", [])
-    missing_requirements = spec_result.get("missing_requirements", [])
-    prompt_quality_score = spec_result.get("prompt_quality_score", 50.0)
-    
-    # 문제 정보 추출
-    basic_info = problem_context.get("basic_info", {})
-    problem_title = basic_info.get("title", "알 수 없음")
-    
-    # 코드 결정: 품질 점수에 따라 다른 코드 제공
-    if modified_code and prompt_quality_score < 80:
-        code_to_provide = modified_code
-    else:
-        # 높은 품질이면 정답 코드 제공
-        code_to_provide = problem_context.get("solution_code", "# 정답 코드 없음")
-    
-    # 명시된 요구사항 텍스트
-    specified_text = ", ".join(specified_requirements) if specified_requirements else "없음"
-    
-    # 누락된 요구사항 텍스트
-    if missing_requirements:
-        missing_text = ", ".join([
-            f"{mr.get('category', '알 수 없음')} ({mr.get('importance', 'MEDIUM')})"
-            for mr in missing_requirements
-        ])
-    else:
-        missing_text = "없음 (모든 요구사항 충족)"
-    
-    # 기본 프롬프트 섹션
-    base_prompt = f"""# Role Definition
-
-당신은 '바이브코딩'의 **AI 시험 감독관(AI Test Proctor)**입니다.
-
-**미션**: 사용자의 프롬프트 품질(Spec 충족도)에 따라 적절한 수준의 코드를 제공합니다.
-
-**톤앤매너**:
-- **건조하고 객관적임 (Dry & Objective)**: 감정을 배제하고 시스템 메시지처럼 응답.
-- **코드 중심**: 요청에 따라 코드를 제공하되, 품질은 Spec 충족도에 비례.
-
-[문제 정보]
-- 문제: {problem_title}
-
-**현재 상태**:
-- Status: SAFE
-- Strategy: SPEC_BASED_CODE
-
-# 📝 Spec 기반 코드 생성 모드
-
-## Spec 분석 결과
-- 명시된 요구사항: {specified_text}
-- 누락된 요구사항: {missing_text}
-- 프롬프트 품질 점수: {prompt_quality_score:.1f}/100
-
-## 코드 생성 지침
-
-"""
-
-    # 품질 점수에 따른 지침 추가
-    if prompt_quality_score >= 80:
-        base_prompt += """### 품질 점수 80-100 (우수한 프롬프트)
-- 완전한 정답 코드를 제공합니다.
-- 모든 요구사항이 충족되었습니다.
-- 주석을 포함한 깔끔한 코드를 제공합니다.
-
-"""
-    elif prompt_quality_score >= 50:
-        base_prompt += """### 품질 점수 50-79 (보통 프롬프트)
-- 핵심 로직은 제공하되, 누락된 Spec 부분은 TODO 주석으로 표시합니다.
-- 일부 최적화가 빠진 코드를 제공합니다.
-- 개선 방향 힌트를 함께 제공합니다.
-
-**개선 제안**: 다음 요구사항을 명시하면 더 완전한 코드를 받을 수 있습니다:
-""" + missing_text + "\n\n"
-    else:
-        base_prompt += """### 품질 점수 0-49 (미흡한 프롬프트)
-- 함수 시그니처와 기본 구조만 제공합니다.
-- 핵심 로직은 TODO로 표시합니다.
-- Spec을 더 명확히 해달라는 안내를 제공합니다.
-
-**안내**: 더 구체적인 요구사항을 명시해주세요. 예를 들어:
-- 사용할 알고리즘 (예: DP, 비트마스킹)
-- 시간복잡도 요구사항
-- 상태 정의 방식
-- 점화식 힌트
-
-"""
-
-    # 코드 섹션 추가
-    base_prompt += f"""## 제공 코드
-
-```python
-{code_to_provide}
-```
-
-# Output Format
-
-**[Code]** 헤더를 사용하여 위 코드를 제공하세요.
-품질 점수가 낮은 경우, 코드 아래에 개선 방향을 간단히 안내하세요.
-
-"""
-
-    # 메모리 요약 추가
-    if memory_summary:
-        base_prompt += f"\n이전 대화 요약:\n{memory_summary}"
-    
-    return base_prompt
-
-
 def create_normal_system_prompt(
     status: str,
     guide_strategy: str,
@@ -198,6 +96,7 @@ def create_normal_system_prompt(
     memory_summary: str,
     problem_context: Optional[Dict[str, Any]] = None,
     is_code_generation_request: bool = False,
+    writer_clean_spaghetti_section: str = "",
 ) -> str:
     """
     Writer LLM 시스템 프롬프트 생성 (문제 정보 포함)
@@ -297,7 +196,7 @@ def create_normal_system_prompt(
         yaml_data = load_prompt("writer_normal")
         code_generation_section = yaml_data.get("code_generation_section_template", "")
 
-    # YAML 템플릿에서 프롬프트 렌더링
+    # YAML 템플릿에서 프롬프트 렌더링 (Step 03: 클린/스파게티 섹션은 spec_id=20일 때만 주입)
     return render_prompt(
         "writer_normal",
         problem_info_section=problem_info_section,
@@ -306,6 +205,7 @@ def create_normal_system_prompt(
         code_generation_section=code_generation_section,
         hint_roadmap_section=hint_roadmap_section,
         memory_summary=memory_summary,
+        writer_clean_spaghetti_section=writer_clean_spaghetti_section,
     )
 
 
@@ -317,10 +217,6 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
     is_guardrail_failed = state.get("is_guardrail_failed", False)
     guardrail_message = state.get("guardrail_message", "")
     
-    # Phase 6: Spec 기반 코드 생성 관련 상태
-    spec_result = state.get("spec_result")
-    modified_code = state.get("modified_code")
-
     # Guide Strategy 정보 가져오기
     guide_strategy_raw = state.get("guide_strategy")
     guide_strategy = guide_strategy_raw or "LOGIC_HINT"  # None인 경우 기본값 사용
@@ -381,6 +277,28 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
             ):
                 is_code_generation_request = True
 
+    # Step 03 (V2.1): 스마트 게이트 2026(spec_id=20)일 때만 클린 vs 스파게티 분기 적용
+    spec_id = state.get("spec_id")
+    writer_clean_spaghetti_section = ""
+    if spec_id == SMART_GATE_2026_SPEC_ID:
+        from app.domain.langgraph.prompts import load_prompt as load_prompt_for_writer
+
+        yaml_data_sg = load_prompt_for_writer("writer_normal")
+        if has_structural_intent(human_message):
+            writer_clean_spaghetti_section = yaml_data_sg.get(
+                "writer_clean_architecture_section_template", ""
+            )
+            logger.info(
+                "[prepare_writer_input] 스마트 게이트 2026 - 구조적 지시 감지 → 클린 아키텍처 지시 적용"
+            )
+        else:
+            writer_clean_spaghetti_section = yaml_data_sg.get(
+                "writer_spaghetti_section_template", ""
+            )
+            logger.info(
+                "[prepare_writer_input] 스마트 게이트 2026 - 모호한 지시 → 스파게티 유도 지시 적용"
+            )
+
     # 시스템 프롬프트 선택
     if is_guardrail_failed:
         system_prompt = get_guardrail_system_prompt(
@@ -399,20 +317,6 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
 
             yaml_data = load_prompt("writer_normal")
             system_prompt = yaml_data.get("submission_template", "")
-        # Phase 6: Spec 기반 코드 생성 모드
-        elif spec_result and modified_code:
-            # Spec Extractor + Error Injector 결과가 있으면 Spec 기반 코드 생성
-            logger.info(
-                f"[prepare_writer_input] Spec 기반 코드 생성 모드 - "
-                f"품질점수: {spec_result.get('prompt_quality_score', 0)}"
-            )
-            system_prompt = create_spec_based_system_prompt(
-                problem_context=problem_context or {},
-                spec_result=spec_result,
-                modified_code=modified_code,
-                memory_summary=memory_text,
-            )
-            guide_strategy = "SPEC_BASED_CODE"
         # 코드 생성 요청인 경우 Guide Strategy를 FULL_CODE_ALLOWED로 변경
         elif is_code_generation_request:
             guide_strategy = "FULL_CODE_ALLOWED"
@@ -423,6 +327,7 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
                 memory_summary=memory_text,
                 problem_context=problem_context,
                 is_code_generation_request=True,
+                writer_clean_spaghetti_section=writer_clean_spaghetti_section,
             )
         else:
             system_prompt = create_normal_system_prompt(
@@ -432,6 +337,7 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
                 memory_summary=memory_text,
                 problem_context=problem_context,
                 is_code_generation_request=False,
+                writer_clean_spaghetti_section=writer_clean_spaghetti_section,
             )
             logger.info(
                 f"[prepare_writer_input] 시스템 프롬프트 생성 완료 - guide_strategy: {guide_strategy or 'LOGIC_HINT'}, 프롬프트 길이: {len(system_prompt)}"

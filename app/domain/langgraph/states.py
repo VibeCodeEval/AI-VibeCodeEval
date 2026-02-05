@@ -132,6 +132,7 @@ class EvalTurnState(TypedDict):
     # Intent 분석 결과 (복수 의도 지원)
     intent_types: Optional[list[str]]  # CodeIntentType 목록
     intent_confidence: float
+    unified_intent: Optional[str]  # v2.1 4대 통합 의도 (UnifiedIntentType: SETTING/CREATION/REFINEMENT/VALIDATION)
 
     # 8가지 의도별 평가 결과
     system_prompt_eval: Optional[Dict[str, Any]]  # 신규 추가

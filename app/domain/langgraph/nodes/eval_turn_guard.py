@@ -332,6 +332,7 @@ async def _evaluate_turn_sync(
             [intent_type] if intent_type and intent_type != "UNKNOWN" else [],
         )
         intent_confidence = result.get("intent_confidence", 0.0)
+        unified_intent = result.get("unified_intent")  # v2.1 4대 통합 의도
         turn_score = result.get("turn_score", 0)
         turn_log_data = result.get("turn_log", {})
         evaluations = turn_log_data.get("evaluations", {})
@@ -685,6 +686,7 @@ async def _evaluate_turn_sync(
             "prompt_evaluation_details": {
                 "intent": final_intent,  # UNKNOWN 대신 실제 intent 사용
                 "intent_types": intent_types,
+                "unified_intent": unified_intent,  # v2.1 4대 통합 의도
                 "intent_confidence": intent_confidence,
                 "score": turn_score,
                 "rubrics": detailed_rubrics,  # 상세 루브릭 정보 (중복 제거)
@@ -730,6 +732,7 @@ async def _evaluate_turn_sync(
                         "comprehensive_reasoning": comprehensive_reasoning
                         or detailed_turn_log.get("llm_answer_reasoning", ""),
                         "intent_types": intent_types,
+                        "unified_intent": unified_intent,  # v2.1 4대 통합 의도
                         "intent_confidence": intent_confidence,
                         "evaluations": evaluations,  # 전체 평가 결과 (상세 정보 포함)
                         "detailed_feedback": detailed_feedback,  # 상세 피드백
