@@ -36,6 +36,7 @@ async def aggregate_turn_log(state: EvalTurnState) -> Dict[str, Any]:
     # 의도 타입 추출 (가중치 적용을 위해)
     intent_types = state.get("intent_types", [])
     primary_intent = intent_types[0] if intent_types else state.get("intent_type")
+    unified_intent = state.get("unified_intent")  # v2.1 4대 통합 의도
 
     # 의도 타입을 대문자로 변환 (weights.py의 INTENT_WEIGHTS 키 형식에 맞춤)
     if primary_intent:
@@ -123,6 +124,7 @@ async def aggregate_turn_log(state: EvalTurnState) -> Dict[str, Any]:
         "turn": state.get("turn"),
         "intent_type": primary_intent,  # 대표 의도 (호환성)
         "intent_types": intent_types,  # 전체 의도 리스트
+        "unified_intent": unified_intent,  # v2.1 4대 통합 의도 (SETTING/CREATION/REFINEMENT/VALIDATION)
         "intent_confidence": state.get("intent_confidence"),
         "is_guardrail_failed": is_guardrail_failed,
         "guardrail_message": state.get("guardrail_message"),

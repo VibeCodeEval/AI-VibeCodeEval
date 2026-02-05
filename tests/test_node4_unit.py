@@ -83,7 +83,10 @@ class TestIntentAnalysis:
         assert "intent_confidence" in result
         assert result["intent_confidence"] >= 0.0
         assert result["intent_confidence"] <= 1.0
-        print(f"\n[Intent Analysis] 의도: {result['intent_types']}, 신뢰도: {result['intent_confidence']:.2f}")
+        # v2.1: 4대 통합 의도
+        assert "unified_intent" in result
+        assert result["unified_intent"] in ("SETTING", "CREATION", "REFINEMENT", "VALIDATION")
+        print(f"\n[Intent Analysis] 의도: {result['intent_types']}, unified_intent: {result['unified_intent']}, 신뢰도: {result['intent_confidence']:.2f}")
     
     @pytest.mark.asyncio
     async def test_intent_analysis_hint_query(self, base_eval_state):
@@ -95,7 +98,9 @@ class TestIntentAnalysis:
         result = await intent_analysis(state)
         
         assert "intent_types" in result
-        print(f"\n[Intent Analysis] 의도: {result['intent_types']}, 신뢰도: {result['intent_confidence']:.2f}")
+        assert "unified_intent" in result
+        assert result["unified_intent"] in ("SETTING", "CREATION", "REFINEMENT", "VALIDATION")
+        print(f"\n[Intent Analysis] 의도: {result['intent_types']}, unified_intent: {result['unified_intent']}, 신뢰도: {result['intent_confidence']:.2f}")
 
 
 class TestGenerationEvaluation:

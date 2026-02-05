@@ -10,7 +10,10 @@ from app.domain.langgraph.utils.structured_output_parser import \
     parse_structured_output_async
 from app.domain.langgraph.utils.token_tracking import (accumulate_tokens,
                                                        extract_token_usage)
-from app.infrastructure.persistence.models.enums import CodeIntentType
+from app.infrastructure.persistence.models.enums import (
+    CodeIntentType,
+    UnifiedIntentType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,29 @@ def has_xml_tags(text: str) -> bool:
 def has_role_content_tags(text: str) -> bool:
     """<Role> 또는 <Content> 태그가 있는지 확인"""
     return bool(re.search(r"<Role>|<Content>", text, re.IGNORECASE))
+
+
+# v2.1 공식 매핑: 8가지 CodeIntentType → 4대 UnifiedIntentType
+_CODE_TO_UNIFIED_INTENT = {
+    CodeIntentType.SYSTEM_PROMPT.value: UnifiedIntentType.SETTING.value,
+    CodeIntentType.RULE_SETTING.value: UnifiedIntentType.SETTING.value,
+    CodeIntentType.GENERATION.value: UnifiedIntentType.CREATION.value,
+    CodeIntentType.FOLLOW_UP.value: UnifiedIntentType.CREATION.value,
+    CodeIntentType.OPTIMIZATION.value: UnifiedIntentType.REFINEMENT.value,
+    CodeIntentType.DEBUGGING.value: UnifiedIntentType.REFINEMENT.value,
+    CodeIntentType.TEST_CASE.value: UnifiedIntentType.VALIDATION.value,
+    CodeIntentType.HINT_OR_QUERY.value: UnifiedIntentType.VALIDATION.value,
+}
+
+
+def map_to_unified_intent(primary_intent_value: str) -> str:
+    """
+    8가지 의도(CodeIntentType) → 4대 통합 의도(UnifiedIntentType) 매핑.
+    Step 02 공식 매핑 표 기준.
+    """
+    return _CODE_TO_UNIFIED_INTENT.get(
+        primary_intent_value, UnifiedIntentType.VALIDATION.value
+    )
 
 
 async def intent_analysis(state: EvalTurnState) -> Dict[str, Any]:
@@ -201,13 +227,19 @@ async def intent_analysis(state: EvalTurnState) -> Dict[str, Any]:
                     f"[4.0 Intent Analysis] XML 태그 감지되었으나 {selected_intent} 선택됨 - 유지 (LLM 판단 존중)"
                 )
 
+        # v2.1: 8→4 통합 의도 매핑 (턴당 하나)
+        primary_intent = intent_values[0] if intent_values else CodeIntentType.HINT_OR_QUERY.value
+        unified_intent = map_to_unified_intent(primary_intent)
+
         logger.info(
-            f"[4.0 Intent Analysis] 완료 - session_id: {session_id}, turn: {turn}, 의도: {intent_values}, 신뢰도: {parsed_response.confidence:.2f}"
+            f"[4.0 Intent Analysis] 완료 - session_id: {session_id}, turn: {turn}, "
+            f"의도: {intent_values}, unified_intent: {unified_intent}, 신뢰도: {parsed_response.confidence:.2f}"
         )
 
         result = {
             "intent_types": intent_values,
             "intent_confidence": parsed_response.confidence,
+            "unified_intent": unified_intent,
         }
 
         # State에 누적된 토큰 정보를 result에 포함 (LangGraph 병합을 위해)
@@ -224,4 +256,5 @@ async def intent_analysis(state: EvalTurnState) -> Dict[str, Any]:
         return {
             "intent_types": [CodeIntentType.HINT_OR_QUERY.value],
             "intent_confidence": 0.0,
+            "unified_intent": UnifiedIntentType.VALIDATION.value,
         }

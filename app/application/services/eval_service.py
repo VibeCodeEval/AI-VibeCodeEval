@@ -952,6 +952,8 @@ class EvalService:
                 "prompt_evaluation_details": {
                     "intent": final_intent,  # UNKNOWN 대신 실제 intent 사용
                     "intent_types": intent_types if intent_types else [final_intent],
+                    "unified_intent": result.get("unified_intent")
+                    or turn_log_data.get("unified_intent"),  # v2.1 4대 통합 의도
                     "intent_confidence": main_state.get("intent_confidence", 0.0),
                     "score": turn_score,
                     "rubrics": detailed_rubrics,  # 상세 루브릭 정보 (name, score, reasoning 포함) - 중복 제거
@@ -1002,6 +1004,8 @@ class EvalService:
                             "intent_types": prompt_eval_details.get(
                                 "intent_types", [intent_type]
                             ),
+                            "unified_intent": result.get("unified_intent")
+                            or turn_log_data.get("unified_intent"),  # v2.1 4대 통합 의도
                             "intent_confidence": prompt_eval_details.get(
                                 "intent_confidence",
                                 main_state.get("intent_confidence", 0.0),
