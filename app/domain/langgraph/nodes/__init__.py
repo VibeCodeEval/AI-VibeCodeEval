@@ -9,6 +9,7 @@ from app.domain.langgraph.nodes.holistic_evaluator.performance import \
     eval_code_performance
 from app.domain.langgraph.nodes.holistic_evaluator.scores import (
     aggregate_final_scores, aggregate_turn_scores)
+from app.domain.langgraph.nodes.integrated_evaluator import integrated_evaluator
 from app.domain.langgraph.nodes.intent_analyzer import intent_analyzer
 from app.domain.langgraph.nodes.system_nodes import (handle_failure,
                                                      summarize_memory)
@@ -27,4 +28,5 @@ __all__ = [
     "eval_code_performance",
     "eval_code_correctness",
     "aggregate_final_scores",
+    "integrated_evaluator",  # Phase 6B
 ]

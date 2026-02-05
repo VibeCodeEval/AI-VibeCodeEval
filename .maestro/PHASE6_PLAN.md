@@ -192,13 +192,27 @@ class ModificationType(Enum):
 
 ---
 
-## 4. Phase 6B: 평가 노드 통합
+## 4. Phase 6B: Spec 중심 통합 평가 시스템
 
-### 4.1 통합 구조
+> **2026-01-29 업데이트**: 기존 계획을 "Spec 중심 통합 평가"로 재설계
 
-**현재**:
+### 4.1 핵심 철학 변경
+
 ```
-Turn Evaluator (8개 개별 함수)
+┌─────────────────────────────────────────────────────────────────┐
+│ "불완전한 코드는 첫 프롬프트의 불완전한 Spec에서 비롯된다"       │
+│                                                                 │
+│ → 첫 프롬프트 품질이 가장 중요 (55% 가중치)                     │
+│ → 후속 턴은 보완/회복 (25%)                                     │
+│ → 효율성은 부수적 (20%)                                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 4.2 평가 지표 변경
+
+**AS-IS (기존 43+ 개별 지표)**:
+```
+Turn Evaluator (8개 의도 × 5개 루브릭 = 40개)
 ├── eval_system_prompt
 ├── eval_rule_setting
 ├── eval_generation
@@ -208,27 +222,129 @@ Turn Evaluator (8개 개별 함수)
 ├── eval_hint_query
 └── eval_follow_up
 
-Holistic Flow (별도 노드)
-└── eval_holistic_flow
+Holistic Flow (3개 지표)
+└── problem_decomposition, feedback_integration, strategic_exploration
 ```
 
-**변경 후**:
+**TO-BE (6개 핵심 지표)**:
 ```
-Integrated Evaluator (단일 통합 평가기)
-├── Turn 평가 (기존 8의도 로직 유지)
-├── Holistic Flow 평가 (기존 로직 유지)
-└── Spec 충족 평가 (신규)
+Integrated Evaluator (Spec 중심)
+├── 1. Spec 완전성 (35%) - 필수 Spec 명시 여부
+├── 2. 명확성 (7%) - 구체적 값, 조건 명시
+├── 3. 구조화 (7%) - XML 태그, 마크다운 활용
+├── 4. 예시/구체성 (6%) - I/O 예시, 엣지 케이스
+├── 5. 맥락 연결 (15%) - 이전 턴 참조, Spec 회복
+└── 6. 효율성 (20%) - 턴 수, 회복 속도
 ```
 
-### 4.2 Spec 충족 평가 (신규)
+### 4.3 가중치 구조
 
-```python
-class SpecFulfillmentEvaluation(BaseModel):
-    spec_fulfillment_score: float    # Spec 충족률 (0-100)
-    missing_spec_penalty: float      # 누락 Spec 감점
-    clarity_score: float             # 프롬프트 명확성
-    details: List[SpecEvalDetail]    # 각 Spec별 평가
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│ 첫 프롬프트 (55%)                                               │
+│ ├── Spec 완전성 (35%)                                          │
+│ └── 표현 품질 (20%) = 명확성(7%) + 구조화(7%) + 예시(6%)        │
+├─────────────────────────────────────────────────────────────────┤
+│ 후속 턴 (25%)                                                   │
+│ ├── 맥락 연결 (15%) - 이전 턴 참조 품질                         │
+│ └── Spec 회복 (10%) - 누락 Spec 보완 품질                       │
+├─────────────────────────────────────────────────────────────────┤
+│ 효율성 (20%)                                                    │
+│ ├── 턴 수 효율성 - 적은 턴으로 완료                             │
+│ └── 회복 속도 - 빠른 Spec 보완                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 4.4 데이터 저장 전략
+
+```
+[대화 중 - 매 턴]
+User 입력 → Spec Extractor → TurnAnalysis 생성
+                                    │
+                                    ▼
+                    PostgreSQL prompt_messages.meta에 저장
+                    {
+                      "turn_analysis": {
+                        "is_first_prompt": true,
+                        "spec_completeness": 20,
+                        "clarity_score": 25,
+                        "has_structure": false,
+                        "has_examples": false,
+                        "spec_recovery_count": 0,
+                        "summary": "DP만 명시, 세부 요구사항 없음"
+                      }
+                    }
+
+[제출 시]
+PostgreSQL에서 turn_analysis 조회
+    │
+    ▼
+Integrated Evaluator (규칙 기반, LLM 호출 없음)
+    │
+    ▼
+scores 테이블에 최종 점수 저장
+```
+
+### 4.5 Context Window 최적화
+
+```
+AS-IS: 원본 대화 전체 → LLM (5000+ 토큰)
+TO-BE: turn_analysis 배열 → 규칙 기반 (500 토큰)
+
+약 90% 토큰 절감
+```
+
+### 4.6 Task 상세
+
+| Task ID | 작업 | 파일 | 설명 |
+|---------|------|------|------|
+| 6b-1 | TurnAnalysis 모델 정의 | `states.py` | Pydantic 모델 추가 |
+| 6b-2 | Spec Extractor 확장 | `spec_extractor.py` | TurnAnalysis 생성 로직 |
+| 6b-3 | TurnAnalysis 저장 | `eval_service.py` | meta에 저장 로직 |
+| 6b-4 | Integrated Evaluator | `integrated_evaluator.py` (신규) | 통합 평가 노드 |
+| 6b-5 | Graph 연결 | `graph.py` | 노드 연결 |
+| 6b-6 | 최종 점수 통합 | `scores.py` | rubric_json 상세 저장 |
+
+### 4.7 기존 호환성
+
+```
+✅ 유지 항목:
+- Redis turn_logs 저장 (기존 eval_holistic_flow 호환)
+- TURN_EVAL, HOLISTIC_FLOW 평가 (기존 로직 유지)
+- scores 테이블 구조 (변경 없음)
+
+🆕 추가 항목:
+- prompt_messages.meta에 turn_analysis 저장
+- Integrated Evaluator 노드
+- 6개 핵심 지표 기반 점수 계산
+```
+
+### 4.8 현재 구현 상태 vs 목표 (2026-01-29 정리)
+
+**실제 구현된 제출 시 플로우**:
+```
+eval_turn_guard (Node4)
+  → 턴마다 Eval Turn SubGraph 실행 (8가지 의도 LLM 평가)  ← 그대로 유지
+  → main_router
+  → integrated_evaluator (규칙 기반만, LLM 없음)           ← 6B에서 추가
+  → eval_holistic_flow (Node6, LLM)                      ← 그대로 유지
+  → aggregate_turn_scores → eval_code_execution → aggregate_final_scores
+```
+
+**목표였던 설계**:
+- Node4(턴별 8의도 LLM) + Node6(Holistic Flow LLM) 을 **통합해서 한번에** 진행
+- 제출 시 **하나의 통합 평가기**가 LLM as Judge로 사용자 프롬프트 품질 평가 (8요소 + Chaining)
+- 6개 핵심 지표로 정리하되, **평가 자체는 LLM**으로 수행
+
+**갭 (미완료)**:
+| 항목 | 현재 | 목표 |
+|------|------|------|
+| Node4·Node6 통합 | ❌ 분리 실행 (Node4 → Node6 순차) | ✅ 통합해서 한번에 진행 |
+| 사용자 프롬프트 LLM 평가 | ✅ Node4에서 8의도 LLM 유지 | ✅ 유지 (통합 평가기 내에서 수행하기로 함) |
+| Integrated Evaluator | 규칙 기반만 (TurnAnalysis 합산) | LLM as Judge 포함 통합 평가기로 확장 예정 |
+
+**정리**: 6b-1~6b-6 구현은 완료되었으나, "Node4 + Node6 통합해서 한번에" 는 **미구현**.  
+추가 작업: 제출 시 **통합 평가 노드 하나**에서 구조화 데이터(TurnAnalysis 등) + LLM 호출로 8요소·Chaining을 한번에 평가하는 설계 및 구현 필요.
 
 ---
 
@@ -319,18 +435,20 @@ class MainGraphState(TypedDict):
 ### 체크리스트
 
 ```
-Phase 6A: AST 기반 코드 생성
-[ ] 6a-1: Spec Extractor 구현
-[ ] 6a-2: AST Analyzer 구현
-[ ] 6a-3: Spec-AST Mapper 구현
-[ ] 6a-4: Error Injector 구현
-[ ] 6a-5: Writer 리팩토링
+Phase 6A: AST 기반 코드 생성 ✅ COMPLETED (2026-01-29)
+[x] 6a-1: Spec Extractor 구현
+[x] 6a-2: AST Analyzer 구현
+[x] 6a-3: Spec-AST Mapper 구현
+[x] 6a-4: Error Injector 구현
+[x] 6a-5: Writer 리팩토링
 
-Phase 6B: 평가 노드 통합
-[ ] 6b-1: Turn Evaluator 통합
-[ ] 6b-2: Holistic Flow 통합
-[ ] 6b-3: Spec 충족 평가 추가
-[ ] 6b-4: Gemini 3.0 업그레이드
+Phase 6B: Spec 중심 통합 평가 ✅ COMPLETED (2026-01-29)
+[x] 6b-1: TurnAnalysis 모델 정의 (states.py)
+[x] 6b-2: Spec Extractor 확장 - TurnAnalysis 생성
+[x] 6b-3: TurnAnalysis 저장 로직 (prompt_messages.meta)
+[x] 6b-4: Integrated Evaluator 노드 생성 (신규 파일)
+[x] 6b-5: Graph 노드 연결
+[x] 6b-6: 최종 점수 통합 (scores.py 수정)
 
 Phase 6C: 파인튜닝 데이터 생성
 [ ] 6c-1: User Simulator 구현
@@ -339,8 +457,8 @@ Phase 6C: 파인튜닝 데이터 생성
 [ ] 6c-4: 데이터 검수 도구
 
 Phase 6D: Graph 구조 변경
-[ ] 6d-1: MainGraphState 수정
-[ ] 6d-2: Graph 노드 연결 변경
+[x] 6d-1: MainGraphState 수정 (Phase 6A에서 선행 완료)
+[ ] 6d-2: Graph 노드 연결 변경 (Phase 6B와 통합)
 ```
 
 ---

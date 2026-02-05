@@ -174,6 +174,22 @@ class EvalService:
             # 상태 저장
             await self.state_repo.save_state(session_id, result)
 
+            # Phase 6B: TurnAnalysis를 PostgreSQL prompt_messages.meta에 저장
+            turn_analysis = result.get("turn_analysis")
+            if turn_analysis and not is_submission:
+                try:
+                    await self._save_turn_analysis_to_db(
+                        session_id=session_id,
+                        turn=result.get("current_turn", 1),
+                        turn_analysis=turn_analysis,
+                    )
+                except Exception as ta_error:
+                    # TurnAnalysis 저장 실패해도 응답은 정상 반환
+                    logger.warning(
+                        f"[EvalService] TurnAnalysis 저장 실패 (응답은 정상) - "
+                        f"session_id: {session_id}, error: {str(ta_error)}"
+                    )
+
             # 응답 구성
             # ai_message가 없으면 messages 리스트에서 마지막 assistant 메시지 추출
             ai_message = result.get("ai_message")
@@ -535,6 +551,79 @@ class EvalService:
     async def get_session_state(self, session_id: str) -> Optional[Dict[str, Any]]:
         """세션 상태 조회"""
         return await self.state_repo.get_state(session_id)
+
+    async def _save_turn_analysis_to_db(
+        self,
+        session_id: str,
+        turn: int,
+        turn_analysis: Dict[str, Any],
+    ) -> bool:
+        """
+        TurnAnalysis를 PostgreSQL prompt_messages.meta에 저장
+        
+        [Phase 6B]
+        - Spec Extractor에서 생성된 TurnAnalysis를 영구 저장
+        - 제출 시 Integrated Evaluator에서 조회하여 통합 평가에 사용
+        
+        Args:
+            session_id: 세션 ID (예: "session_123")
+            turn: 턴 번호
+            turn_analysis: TurnAnalysis 딕셔너리
+            
+        Returns:
+            저장 성공 여부
+        """
+        try:
+            from app.infrastructure.persistence.models.enums import PromptRoleEnum
+            
+            # session_id에서 PostgreSQL ID 추출 (session_123 → 123)
+            postgres_session_id = (
+                int(session_id.replace("session_", ""))
+                if session_id.startswith("session_")
+                else None
+            )
+            
+            if not postgres_session_id:
+                logger.warning(
+                    f"[EvalService] TurnAnalysis 저장 실패 - "
+                    f"유효하지 않은 session_id: {session_id}"
+                )
+                return False
+            
+            async with get_db_context() as db:
+                session_repo = SessionRepository(db)
+                
+                # USER 메시지의 meta에 turn_analysis 저장
+                updated_message = await session_repo.update_message_meta(
+                    session_id=postgres_session_id,
+                    turn=turn,
+                    role=PromptRoleEnum.USER,
+                    meta_update={"turn_analysis": turn_analysis},
+                    merge=True,
+                )
+                
+                if updated_message:
+                    await db.commit()
+                    logger.info(
+                        f"[EvalService] TurnAnalysis 저장 완료 - "
+                        f"session_id: {postgres_session_id}, turn: {turn}, "
+                        f"spec_completeness: {turn_analysis.get('spec_completeness', 'N/A')}"
+                    )
+                    return True
+                else:
+                    logger.warning(
+                        f"[EvalService] TurnAnalysis 저장 실패 - "
+                        f"메시지를 찾을 수 없음: session_id={postgres_session_id}, turn={turn}"
+                    )
+                    return False
+                    
+        except Exception as e:
+            logger.error(
+                f"[EvalService] TurnAnalysis 저장 중 오류 - "
+                f"session_id: {session_id}, turn: {turn}, error: {str(e)}",
+                exc_info=True,
+            )
+            return False
 
     async def get_session_scores(self, session_id: str) -> Optional[Dict[str, Any]]:
         """세션 점수 조회"""

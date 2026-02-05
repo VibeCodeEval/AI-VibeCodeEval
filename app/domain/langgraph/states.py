@@ -91,6 +91,24 @@ class MainGraphState(TypedDict):
         Dict[str, int]
     ]  # 평가 토큰 (Eval Turn SubGraph + Holistic Evaluators)
 
+    # Phase 6: AST 기반 코드 생성 시스템
+    spec_result: Optional[Dict[str, Any]]  # Spec Extractor 결과
+    ast_analysis: Optional[Dict[str, Any]]  # AST Analyzer 결과
+    modification_plan: Optional[Dict[str, Any]]  # Spec-AST 매핑 결과
+    modified_code: Optional[str]  # Error Injector가 생성한 변형 코드
+    injection_result: Optional[Dict[str, Any]]  # 전체 Injection 결과
+
+    # Phase 6B: Spec 중심 통합 평가 시스템
+    turn_analysis: Optional[Dict[str, Any]]  # 현재 턴의 TurnAnalysis 결과
+    integrated_score: Optional[float]  # 통합 평가 점수 (제출 시)
+    integrated_evaluation: Optional[Dict[str, Any]]  # 통합 평가 상세 결과
+
+    # v2.1 Snapshot: Phase 1 확정 / 최종 제출 코드 추적
+    v1_code: Optional[str]  # Phase 1 SAVE로 확정된 Baseline 코드
+    v2_code: Optional[str]  # 최종 제출 시점의 Final 코드
+    v1_metrics: Optional[Dict[str, Any]]  # v1_code 분석 결과 (예: Radon CC 등)
+    v2_metrics: Optional[Dict[str, Any]]  # v2_code 분석 결과 (예: Radon CC, AST 패턴 등)
+
 
 # ===== Eval Turn SubGraph 상태 =====
 
@@ -222,3 +240,169 @@ class FinalScoreAggregation(BaseModel):
     total_score: float = Field(..., ge=0.0, le=100.0, description="총점")
     grade: str = Field(..., description="등급 (A, B, C, D, F)")
     summary: str = Field(..., description="평가 요약")
+
+
+# ===== Phase 6B: Spec 중심 통합 평가 모델 =====
+
+
+class MissingSpecDetail(BaseModel):
+    """누락된 Spec 상세 정보"""
+
+    category: str = Field(..., description="누락된 요구사항 카테고리 (예: 비트마스킹, 기저조건)")
+    importance: str = Field(
+        ..., description="중요도 (HIGH, MEDIUM, LOW)"
+    )
+    related_component: Optional[str] = Field(
+        None, description="관련 코드 컴포넌트 (예: BIT_OPERATION)"
+    )
+
+
+class TurnAnalysis(BaseModel):
+    """
+    턴별 분석 결과 (Spec 중심 통합 평가용)
+    
+    대화 중 매 턴마다 생성되어 prompt_messages.meta에 저장됨.
+    제출 시 모든 턴의 TurnAnalysis를 조회하여 통합 평가 수행.
+    """
+
+    turn: int = Field(..., description="턴 번호")
+    is_first_prompt: bool = Field(..., description="첫 프롬프트 여부")
+
+    # Spec 분석 (from Spec Extractor)
+    spec_completeness: float = Field(
+        ..., ge=0.0, le=100.0, description="Spec 완전성 점수 (0-100)"
+    )
+    specified_specs: List[str] = Field(
+        default_factory=list, description="명시된 요구사항 목록"
+    )
+    missing_specs: List[MissingSpecDetail] = Field(
+        default_factory=list, description="누락된 요구사항 목록"
+    )
+    ambiguous_specs: List[str] = Field(
+        default_factory=list, description="모호한 요구사항 목록"
+    )
+
+    # 표현 품질 지표
+    clarity_score: float = Field(
+        ..., ge=0.0, le=100.0, description="명확성 점수 (0-100)"
+    )
+    has_structure: bool = Field(
+        ..., description="구조화 여부 (XML 태그, 마크다운, 리스트 등)"
+    )
+    has_examples: bool = Field(
+        ..., description="예시 포함 여부 (I/O 예시, 엣지 케이스)"
+    )
+    has_specific_values: bool = Field(
+        ..., description="구체적 값 포함 여부 (숫자, 조건, 제약)"
+    )
+
+    # 맥락 연결 (후속 턴용)
+    spec_recovery_count: int = Field(
+        default=0, description="이번 턴에서 회복한 Spec 수"
+    )
+    references_previous: bool = Field(
+        default=False, description="이전 턴 참조 여부"
+    )
+    recovered_specs: List[str] = Field(
+        default_factory=list, description="이번 턴에서 회복한 Spec 목록"
+    )
+
+    # 요약
+    summary: str = Field(
+        ..., max_length=150, description="프롬프트 요약 (최대 150자)"
+    )
+
+    # 표현 품질 종합 점수 (계산됨)
+    @property
+    def expression_score(self) -> float:
+        """표현 품질 종합 점수 계산"""
+        structure_bonus = 30 if self.has_structure else 0
+        examples_bonus = 35 if self.has_examples else 0
+        values_bonus = 35 if self.has_specific_values else 0
+        return min(100.0, self.clarity_score * 0.5 + structure_bonus + examples_bonus + values_bonus)
+
+
+class SessionAnalysis(BaseModel):
+    """
+    세션 전체 분석 결과 (제출 시 생성)
+    
+    모든 턴의 TurnAnalysis를 집계하여 통합 평가에 사용.
+    """
+
+    session_id: str = Field(..., description="세션 ID")
+    total_turns: int = Field(..., description="총 턴 수")
+    turn_analyses: List[TurnAnalysis] = Field(
+        default_factory=list, description="턴별 분석 결과 목록"
+    )
+
+    # Spec 회복 타임라인
+    spec_recovery_timeline: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Spec 회복 타임라인 [{turn, recovered_specs, cumulative_completeness}]"
+    )
+
+    # 최종 Spec 완전성
+    final_spec_completeness: float = Field(
+        ..., ge=0.0, le=100.0, description="최종 Spec 완전성 (마지막 턴 기준)"
+    )
+
+    # 첫 프롬프트 정보 (빠른 접근용)
+    first_prompt_spec_completeness: float = Field(
+        ..., ge=0.0, le=100.0, description="첫 프롬프트 Spec 완전성"
+    )
+    first_prompt_expression_score: float = Field(
+        ..., ge=0.0, le=100.0, description="첫 프롬프트 표현 품질"
+    )
+
+
+class IntegratedEvaluationResult(BaseModel):
+    """
+    통합 평가 결과 (제출 시 생성)
+    
+    6개 핵심 지표 기반 평가 결과.
+    가중치: 첫 프롬프트 55%, 후속 턴 25%, 효율성 20%
+    """
+
+    # 첫 프롬프트 평가 (55%)
+    first_prompt_score: float = Field(
+        ..., ge=0.0, le=100.0, description="첫 프롬프트 점수"
+    )
+    first_prompt_details: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="첫 프롬프트 상세 {spec_completeness, expression_quality}"
+    )
+
+    # 후속 턴 평가 (25%)
+    follow_up_score: float = Field(
+        ..., ge=0.0, le=100.0, description="후속 턴 점수"
+    )
+    follow_up_details: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="후속 턴 상세 {context_quality, spec_recovery}"
+    )
+
+    # 효율성 평가 (20%)
+    efficiency_score: float = Field(
+        ..., ge=0.0, le=100.0, description="효율성 점수"
+    )
+    efficiency_details: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="효율성 상세 {total_turns, recovery_speed}"
+    )
+
+    # 통합 점수
+    integrated_score: float = Field(
+        ..., ge=0.0, le=100.0, description="통합 평가 점수 (가중 합계)"
+    )
+
+    # 피드백 및 제안
+    analysis: str = Field(..., description="종합 분석")
+    suggestions: List[str] = Field(
+        default_factory=list, description="개선 제안 목록"
+    )
+
+    # 턴별 상세 (프론트엔드 표시용)
+    turn_details: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="턴별 상세 [{turn, spec_completeness, expression_score, ...}]"
+    )

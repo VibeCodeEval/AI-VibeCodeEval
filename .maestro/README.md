@@ -17,6 +17,11 @@
 ├── commands/              # Agent 간 명령 전달
 │   ├── pending/           # 대기 중인 명령 (하부 Agent가 읽음)
 │   └── completed/         # 완료된 명령 (하부 Agent가 작성)
+├── data/finetuning/       # 파인튜닝 데이터 (자동 생성 스크립트로 채움)
+│   ├── phase5a_response/  # 응답 쌍, ideal_evaluation 시드
+│   ├── phase5b_evaluation/
+│   ├── phase5c_chaining/
+│   └── phase6_gemma/      # V2.1 CC/AST 페어 (v21_cc_ast_pairs.jsonl)
 ├── reports/               # 작업 보고서
 │   └── daily/             # 일일 진행 보고
 └── shared/                # 공유 컨텍스트
@@ -81,6 +86,31 @@
 | `review` | 검토 대기 |
 | `completed` | 완료 |
 | `cancelled` | 취소됨 |
+
+## 📦 파인튜닝 데이터 자동 생성
+
+Maestro 정의(`tasks/phase5_finetuning.json`, `docs/V2.1_Step_06_Finetuning_Data.md`)에 맞춰 파인튜닝용 데이터를 한 번에 생성할 수 있다.
+
+**스크립트**: 프로젝트 루트에서 `scripts/generate_finetuning_data.py`
+
+| 옵션 | 설명 |
+|------|------|
+| (없음) | DB 추출(5-A, 5-B, 5-C) 실행 후 합성 시드도 추가 |
+| `--synthetic` | **DB 없이** 합성 시드만 생성 (V2.1 CC/AST 페어 + Phase 5 ideal_evaluation) |
+| `--db-only` | DB 추출만 수행, 합성 시드 생성 안 함 |
+| `--output-dir <경로>` | 출력 루트 (기본: `.maestro/data/finetuning`) |
+
+**예시 (DB 없이 먼저 시드만 생성)**:
+```bash
+python scripts/generate_finetuning_data.py --synthetic
+```
+
+**생성 파일 요약**:
+- `phase6_gemma/v21_cc_ast_pairs.jsonl`: 수정 프롬프트, cc_before/after, ast_pattern_matched, label
+- `phase5a_response/phase5_ideal_evaluation_seed.jsonl`: intent, user_prompt, ideal_evaluation
+- DB 연결 시: `phase5a_response/`, `phase5b_evaluation/`, `phase5c_chaining/` 에 기존 추출 스크립트 결과 추가
+
+---
 
 ## ⚠️ 규칙
 

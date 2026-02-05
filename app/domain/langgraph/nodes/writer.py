@@ -61,6 +61,136 @@ def get_guardrail_system_prompt(guardrail_message: str) -> str:
     return render_prompt("writer_guardrail", guardrail_message=guardrail_message)
 
 
+def create_spec_based_system_prompt(
+    problem_context: Dict[str, Any],
+    spec_result: Dict[str, Any],
+    modified_code: Optional[str],
+    memory_summary: str,
+) -> str:
+    """
+    Spec 기반 코드 생성용 시스템 프롬프트 생성 (Phase 6)
+    
+    사용자 프롬프트의 Spec 충족도에 따라 코드 품질을 조절합니다.
+    
+    Args:
+        problem_context: 문제 정보
+        spec_result: Spec Extractor 결과
+        modified_code: Error Injector가 생성한 변형 코드
+        memory_summary: 이전 대화 요약
+        
+    Returns:
+        str: 시스템 프롬프트
+    """
+    from app.domain.langgraph.prompts import load_prompt, render_prompt
+    
+    # Spec 분석 결과 추출
+    specified_requirements = spec_result.get("specified_requirements", [])
+    missing_requirements = spec_result.get("missing_requirements", [])
+    prompt_quality_score = spec_result.get("prompt_quality_score", 50.0)
+    
+    # 문제 정보 추출
+    basic_info = problem_context.get("basic_info", {})
+    problem_title = basic_info.get("title", "알 수 없음")
+    
+    # 코드 결정: 품질 점수에 따라 다른 코드 제공
+    if modified_code and prompt_quality_score < 80:
+        code_to_provide = modified_code
+    else:
+        # 높은 품질이면 정답 코드 제공
+        code_to_provide = problem_context.get("solution_code", "# 정답 코드 없음")
+    
+    # 명시된 요구사항 텍스트
+    specified_text = ", ".join(specified_requirements) if specified_requirements else "없음"
+    
+    # 누락된 요구사항 텍스트
+    if missing_requirements:
+        missing_text = ", ".join([
+            f"{mr.get('category', '알 수 없음')} ({mr.get('importance', 'MEDIUM')})"
+            for mr in missing_requirements
+        ])
+    else:
+        missing_text = "없음 (모든 요구사항 충족)"
+    
+    # 기본 프롬프트 섹션
+    base_prompt = f"""# Role Definition
+
+당신은 '바이브코딩'의 **AI 시험 감독관(AI Test Proctor)**입니다.
+
+**미션**: 사용자의 프롬프트 품질(Spec 충족도)에 따라 적절한 수준의 코드를 제공합니다.
+
+**톤앤매너**:
+- **건조하고 객관적임 (Dry & Objective)**: 감정을 배제하고 시스템 메시지처럼 응답.
+- **코드 중심**: 요청에 따라 코드를 제공하되, 품질은 Spec 충족도에 비례.
+
+[문제 정보]
+- 문제: {problem_title}
+
+**현재 상태**:
+- Status: SAFE
+- Strategy: SPEC_BASED_CODE
+
+# 📝 Spec 기반 코드 생성 모드
+
+## Spec 분석 결과
+- 명시된 요구사항: {specified_text}
+- 누락된 요구사항: {missing_text}
+- 프롬프트 품질 점수: {prompt_quality_score:.1f}/100
+
+## 코드 생성 지침
+
+"""
+
+    # 품질 점수에 따른 지침 추가
+    if prompt_quality_score >= 80:
+        base_prompt += """### 품질 점수 80-100 (우수한 프롬프트)
+- 완전한 정답 코드를 제공합니다.
+- 모든 요구사항이 충족되었습니다.
+- 주석을 포함한 깔끔한 코드를 제공합니다.
+
+"""
+    elif prompt_quality_score >= 50:
+        base_prompt += """### 품질 점수 50-79 (보통 프롬프트)
+- 핵심 로직은 제공하되, 누락된 Spec 부분은 TODO 주석으로 표시합니다.
+- 일부 최적화가 빠진 코드를 제공합니다.
+- 개선 방향 힌트를 함께 제공합니다.
+
+**개선 제안**: 다음 요구사항을 명시하면 더 완전한 코드를 받을 수 있습니다:
+""" + missing_text + "\n\n"
+    else:
+        base_prompt += """### 품질 점수 0-49 (미흡한 프롬프트)
+- 함수 시그니처와 기본 구조만 제공합니다.
+- 핵심 로직은 TODO로 표시합니다.
+- Spec을 더 명확히 해달라는 안내를 제공합니다.
+
+**안내**: 더 구체적인 요구사항을 명시해주세요. 예를 들어:
+- 사용할 알고리즘 (예: DP, 비트마스킹)
+- 시간복잡도 요구사항
+- 상태 정의 방식
+- 점화식 힌트
+
+"""
+
+    # 코드 섹션 추가
+    base_prompt += f"""## 제공 코드
+
+```python
+{code_to_provide}
+```
+
+# Output Format
+
+**[Code]** 헤더를 사용하여 위 코드를 제공하세요.
+품질 점수가 낮은 경우, 코드 아래에 개선 방향을 간단히 안내하세요.
+
+"""
+
+    # 메모리 요약 추가
+    if memory_summary:
+        base_prompt += f"\n이전 대화 요약:\n{memory_summary}"
+    
+    return base_prompt
+
+
 def create_normal_system_prompt(
     status: str,
     guide_strategy: str,
@@ -180,12 +310,16 @@ def create_normal_system_prompt(
 
 
 def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
-    """Writer Chain 입력 준비 (Guide Strategy 기반)"""
+    """Writer Chain 입력 준비 (Guide Strategy 기반 + Spec 기반 코드 생성)"""
     human_message = state.get("human_message", "")
     messages = state.get("messages", [])
     memory_summary = state.get("memory_summary", "")
     is_guardrail_failed = state.get("is_guardrail_failed", False)
     guardrail_message = state.get("guardrail_message", "")
+    
+    # Phase 6: Spec 기반 코드 생성 관련 상태
+    spec_result = state.get("spec_result")
+    modified_code = state.get("modified_code")
 
     # Guide Strategy 정보 가져오기
     guide_strategy_raw = state.get("guide_strategy")
@@ -265,6 +399,20 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
 
             yaml_data = load_prompt("writer_normal")
             system_prompt = yaml_data.get("submission_template", "")
+        # Phase 6: Spec 기반 코드 생성 모드
+        elif spec_result and modified_code:
+            # Spec Extractor + Error Injector 결과가 있으면 Spec 기반 코드 생성
+            logger.info(
+                f"[prepare_writer_input] Spec 기반 코드 생성 모드 - "
+                f"품질점수: {spec_result.get('prompt_quality_score', 0)}"
+            )
+            system_prompt = create_spec_based_system_prompt(
+                problem_context=problem_context or {},
+                spec_result=spec_result,
+                modified_code=modified_code,
+                memory_summary=memory_text,
+            )
+            guide_strategy = "SPEC_BASED_CODE"
         # 코드 생성 요청인 경우 Guide Strategy를 FULL_CODE_ALLOWED로 변경
         elif is_code_generation_request:
             guide_strategy = "FULL_CODE_ALLOWED"

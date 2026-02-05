@@ -306,6 +306,55 @@ print(tsp(0, 1))
             "bitmasking",
         ],
     },
+    20: {  # spec_id = 20 (스마트 게이트 2026)
+        "basic_info": {
+            "problem_id": "20",
+            "title": "스마트 게이트 2026",
+            "description_summary": "공항 게이트 보안·수하물 과금 로직을 Phase 1(기본)/Phase 2(긴급 정책)로 구현. Rule 인터페이스 분리, 전략 패턴, 상속 구조 평가.",
+            "input_format": "승객 정보(여권 만료일, 항공편 상태, 수하물 무게 등) 및 정책 파라미터(threat_level, 누적 과금 등).",
+            "output_format": "REJECT / WAIT / CHARGE_FEE 후 통과 / 통과 등 게이트 처리 결과.",
+        },
+        "constraints": {
+            "time_limit_sec": 2.0,
+            "memory_limit_mb": 256,
+            "variable_ranges": {},
+            "logic_reasoning": "Phase 1: 여권 만료(2026-02-04 이전 REJECT), 항공편 상태(BOARDING만 통과, DELAYED=WAIT, 그 외 REJECT), 수하물(이코노미 20kg/비즈니스 30kg 초과 시 CHARGE_FEE 후 통과). Phase 2: threat_level==HIGH이면 SECURITY_CHECK, 누적 과금 3명 발생 시 해당 항공편 4번째부터 허용 무게 -5kg.",
+        },
+        "ai_guide": {
+            "key_algorithms": ["Strategy Pattern", "Rule Interface", "Inheritance"],
+            "solution_architecture": "GateManager + BaseRule/SecurityRule, 전략 패턴 유지",
+            "hint_roadmap": {},
+            "common_pitfalls": [
+                "Rule 인터페이스 없이 하드코딩",
+                "SecurityRule이 BaseRule을 상속하지 않음",
+                "GateManager에서 전략 패턴을 깨고 직접 분기 처리",
+            ],
+        },
+        "solution_code": None,
+        "test_cases": [],
+        "rubric": {
+            "correctness": {"weight": 0.4, "description": "Phase 1/2 규칙 정확성"},
+            "performance": {"weight": 0.1, "description": "실행 성능"},
+            "code_quality": {"weight": 0.5, "description": "Rule 분리, 상속, 전략 패턴"},
+        },
+        "keywords": [
+            "GateManager",
+            "BaseRule",
+            "SecurityRule",
+            "전략 패턴",
+            "규칙 인터페이스",
+            "상속",
+        ],
+        "evaluation_points": [
+            "Rule 인터페이스 분리",
+            "SecurityRule이 BaseRule 상속",
+            "GateManager 전략 패턴 유지",
+        ],
+        "phase_summary": {
+            "phase_1": "기본 보안 통과 및 수하물 과금. 여권 만료(2026-02-04 이전 REJECT), 항공편(BOARDING만 통과, DELAYED=WAIT), 수하물(이코노미 20kg/비즈니스 30kg 초과 시 CHARGE_FEE 후 통과).",
+            "phase_2": "긴급 보안 등급(HIGH) 시 SECURITY_CHECK, 누적 과금 3명 발생 시 해당 항공편 4번째부터 허용 무게 -5kg.",
+        },
+    },
     # 추후 다른 문제 추가 가능
     # 11: {
     #     "basic_info": {...},

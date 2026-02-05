@@ -90,3 +90,17 @@ test-results/
 # LangGraph checkpoints (로컬 테스트용)
 checkpoints/
 *.checkpoint
+
+# 로컬/생성된 테스트 데이터 (환경별 ID, 스크립트 출력)
+test_ids.json
+test_tsp_ids.json
+test_chat_session.json
+test_chat_sessions.json
+data/*.json
+chat_diff.txt
+
+# Cursor IDE
+.cursor/
+
+# Ruff (사용 시)
+.ruff_cache/

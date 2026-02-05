@@ -341,6 +341,7 @@ class SessionRepository:
         - meta.is_guardrail_failed: 가드레일 위반 여부
         - meta.llm_model: 사용한 LLM 모델명
         - meta.timestamp: 생성 시각 (ISO 8601)
+        - meta.code_snapshot, meta.is_v1_checkpoint: SAVE(Phase 1 확정) 시 v1_code 복원용 (Step 04)
 
         [현재 상태]
         - ⏳ 아직 API에서 호출 안 함
@@ -494,6 +495,115 @@ class SessionRepository:
         if session:
             session.ended_at = datetime.utcnow()
             await self.db.flush()
+
+    async def update_message_meta(
+        self,
+        session_id: int,
+        turn: int,
+        role: PromptRoleEnum,
+        meta_update: dict,
+        merge: bool = True,
+    ) -> Optional[PromptMessage]:
+        """
+        메시지의 meta 필드 업데이트
+        
+        [Phase 6B]
+        - TurnAnalysis를 prompt_messages.meta에 저장
+        - LangGraph 실행 후 Spec Extractor 결과를 메시지에 연결
+        
+        [호출 시점]
+        - LangGraph 실행 후 turn_analysis 생성 완료 시
+        - eval_service.py에서 호출
+        
+        [동작]
+        - merge=True: 기존 meta에 새 데이터 병합
+        - merge=False: 기존 meta 덮어쓰기
+        
+        Args:
+            session_id: 세션 ID
+            turn: 턴 번호
+            role: 메시지 역할 (USER 메시지의 meta에 저장)
+            meta_update: 업데이트할 meta 데이터 (예: {"turn_analysis": {...}})
+            merge: 기존 meta와 병합 여부 (기본: True)
+            
+        Returns:
+            업데이트된 PromptMessage 또는 None
+        """
+        # 해당 메시지 조회
+        query = select(PromptMessage).where(
+            and_(
+                PromptMessage.session_id == session_id,
+                PromptMessage.turn == turn,
+                PromptMessage.role == role,
+            )
+        )
+        result = await self.db.execute(query)
+        message = result.scalar_one_or_none()
+        
+        if not message:
+            return None
+        
+        # meta 업데이트
+        if merge and message.meta:
+            # 기존 meta에 병합
+            updated_meta = {**message.meta, **meta_update}
+        else:
+            # 새 meta로 대체
+            updated_meta = meta_update
+        
+        message.meta = updated_meta
+        await self.db.flush()
+        
+        return message
+
+    async def get_all_turn_analyses(self, session_id: int) -> List[dict]:
+        """
+        세션의 모든 턴의 turn_analysis 조회
+        
+        [Phase 6B]
+        - 제출 시 통합 평가를 위해 모든 턴의 TurnAnalysis 조회
+        - prompt_messages.meta['turn_analysis']에서 추출
+        
+        [사용처]
+        - Integrated Evaluator 노드에서 호출
+        - 제출 시점에 모든 턴 데이터 수집
+        
+        Args:
+            session_id: 세션 ID
+            
+        Returns:
+            TurnAnalysis 딕셔너리 리스트 (턴 순서대로)
+            [
+                {"turn": 1, "spec_completeness": 20, ...},
+                {"turn": 2, "spec_completeness": 60, ...},
+                ...
+            ]
+        """
+        # USER 메시지만 조회 (turn_analysis는 USER 메시지에 저장)
+        query = (
+            select(PromptMessage)
+            .where(
+                and_(
+                    PromptMessage.session_id == session_id,
+                    PromptMessage.role == PromptRoleEnum.USER,
+                )
+            )
+            .order_by(PromptMessage.turn.asc())
+        )
+        
+        result = await self.db.execute(query)
+        messages = result.scalars().all()
+        
+        turn_analyses = []
+        for msg in messages:
+            if msg.meta and "turn_analysis" in msg.meta:
+                turn_analysis = msg.meta["turn_analysis"]
+                # turn 번호가 없으면 추가
+                if "turn" not in turn_analysis:
+                    turn_analysis["turn"] = msg.turn
+                turn_analyses.append(turn_analysis)
+        
+        return turn_analyses
 
     async def get_conversation_history(self, session_id: int) -> List[dict]:
         """

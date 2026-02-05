@@ -72,7 +72,8 @@ class MessageStorageService:
             role: 역할 ('user' 또는 'assistant')
             content: 메시지 내용
             token_count: 토큰 사용량 (선택)
-            meta: 메타데이터 (선택)
+            meta: 메타데이터 (선택). SAVE(Phase 1 확정) 시 {"code_snapshot": "코드 전체", "is_v1_checkpoint": true} 포함 시
+                prompt_messages.meta(JSONB)에 그대로 저장됨. Step 04에서 v1_code 복원에 사용.
 
         Returns:
             {

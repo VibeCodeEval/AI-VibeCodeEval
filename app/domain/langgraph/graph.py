@@ -49,6 +49,7 @@ from app.domain.langgraph.nodes.holistic_evaluator.flow import \
     eval_holistic_flow
 from app.domain.langgraph.nodes.holistic_evaluator.scores import (
     aggregate_final_scores, aggregate_turn_scores)
+from app.domain.langgraph.nodes.integrated_evaluator import integrated_evaluator
 from app.domain.langgraph.nodes.intent_analyzer import intent_analyzer
 from app.domain.langgraph.nodes.system_nodes import (handle_failure,
                                                      summarize_memory)
@@ -148,6 +149,9 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
 
     # 5. Main Router (조건부 분기 함수로 처리)
 
+    # Phase 6B: Integrated Evaluator (Spec 중심 통합 평가)
+    builder.add_node("integrated_evaluator", integrated_evaluator)
+
     # 6a-6c. 평가 노드들
     builder.add_node("eval_holistic_flow", eval_holistic_flow)
     builder.add_node("aggregate_turn_scores", aggregate_turn_scores)
@@ -193,11 +197,12 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
 
     # Eval Turn Guard -> Main Router (조건부)
     # 제출 시 모든 턴 평가 완료 후 Main Router로 진행
+    # Phase 6B: integrated_evaluator를 eval_holistic_flow 전에 실행
     builder.add_conditional_edges(
         "eval_turn_guard",
         main_router,
         {
-            "eval_holistic_flow": "eval_holistic_flow",  # 제출 시 평가 진행
+            "eval_holistic_flow": "integrated_evaluator",  # 제출 시 integrated_evaluator 먼저
             "handle_request": "handle_request",
             "end": END,
         },
@@ -208,7 +213,7 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
         "handle_failure",
         main_router,
         {
-            "eval_holistic_flow": "eval_holistic_flow",
+            "eval_holistic_flow": "integrated_evaluator",  # Phase 6B: integrated_evaluator 먼저
             "handle_request": "handle_request",
             "end": END,
         },
@@ -218,6 +223,9 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     builder.add_edge("summarize_memory", "handle_request")
 
     # 평가 노드들 (순차 실행)
+    # Phase 6B: Integrated Evaluator -> Holistic Flow
+    builder.add_edge("integrated_evaluator", "eval_holistic_flow")
+
     # 6a -> 6b
     builder.add_edge("eval_holistic_flow", "aggregate_turn_scores")
 
@@ -302,4 +310,8 @@ def get_initial_state(
         created_at=now,
         updated_at=now,
         enable_langsmith_tracing=None,  # None이면 환경 변수 사용
+        # Phase 6B: Spec 중심 통합 평가
+        turn_analysis=None,
+        integrated_score=None,
+        integrated_evaluation=None,
     )
