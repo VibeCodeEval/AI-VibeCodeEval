@@ -21,8 +21,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 from app.domain.langgraph.states import MainGraphState
-from app.domain.langgraph.nodes.intent_analyzer import intent_analyzer
-from app.domain.langgraph.nodes.writer import writer_llm
+from app.domain.langgraph.nodes.chat.n2_intent_analyzer import intent_analyzer
+from app.domain.langgraph.nodes.chat.n3_writer import writer_llm
 from app.infrastructure.persistence.models.enums import IntentAnalyzerStatus, WriterResponseStatus
 
 

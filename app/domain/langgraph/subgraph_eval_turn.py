@@ -5,19 +5,20 @@ Eval Turn SubGraph
 
 from langgraph.graph import END, START, StateGraph
 
-from app.domain.langgraph.nodes.turn_evaluator import \
-    eval_system_prompt  # 신규 추가
-from app.domain.langgraph.nodes.turn_evaluator import (aggregate_turn_log,
-                                                       eval_debugging,
-                                                       eval_follow_up,
-                                                       eval_generation,
-                                                       eval_hint_query,
-                                                       eval_optimization,
-                                                       eval_rule_setting,
-                                                       eval_test_case,
-                                                       intent_analysis,
-                                                       intent_router,
-                                                       summarize_answer)
+from app.domain.langgraph.nodes.eval_turn import \
+    eval_system_prompt
+from app.domain.langgraph.nodes.eval_turn import (aggregate_turn_log,
+                                                   eval_debugging,
+                                                   eval_exploration,
+                                                   eval_follow_up,
+                                                   eval_generation,
+                                                   eval_hint_query,
+                                                   eval_optimization,
+                                                   eval_rule_setting,
+                                                   eval_test_case,
+                                                   intent_analysis,
+                                                   intent_router,
+                                                   summarize_answer)
 from app.domain.langgraph.states import EvalTurnState
 
 
@@ -38,6 +39,7 @@ def create_eval_turn_subgraph() -> StateGraph:
     builder.add_node("eval_generation", eval_generation)
     builder.add_node("eval_optimization", eval_optimization)
     builder.add_node("eval_debugging", eval_debugging)
+    builder.add_node("eval_exploration", eval_exploration)
     builder.add_node("eval_test_case", eval_test_case)
     builder.add_node("eval_hint_query", eval_hint_query)
     builder.add_node("eval_follow_up", eval_follow_up)
@@ -58,6 +60,7 @@ def create_eval_turn_subgraph() -> StateGraph:
         "eval_generation",
         "eval_optimization",
         "eval_debugging",
+        "eval_exploration",
         "eval_test_case",
         "eval_hint_query",
         "eval_follow_up",

@@ -10,9 +10,9 @@ from app.domain.langgraph.utils.problem_info import (
     get_problem_info,
     HARDCODED_PROBLEM_SPEC
 )
-from app.domain.langgraph.nodes.intent_analyzer import create_intent_analysis_system_prompt
-from app.domain.langgraph.nodes.writer import create_normal_system_prompt
-from app.domain.langgraph.nodes.holistic_evaluator.flow import create_holistic_system_prompt
+from app.domain.langgraph.nodes.chat.n2_intent_analyzer import create_intent_analysis_system_prompt
+from app.domain.langgraph.nodes.chat.n3_writer import create_normal_system_prompt
+from app.domain.langgraph.nodes.eval.n6_holistic_flow import create_holistic_system_prompt
 
 
 class TestProblemInfoStructure:
@@ -143,8 +143,8 @@ class TestPromptGeneration:
         """Intent Analyzer 프롬프트 (문제 정보 없음)"""
         prompt = create_intent_analysis_system_prompt(None)
         
-        # 기본 프롬프트 구조 확인
-        assert "보안관" in prompt or "Gatekeeper" in prompt
+        # 기본 프롬프트 구조 확인 (현재: AI 시험 감독관 / Test Proctor)
+        assert "감독관" in prompt or "Proctor" in prompt
         assert "정답 코드 유출 방지" in prompt
     
     def test_writer_prompt_with_problem_context(self):
@@ -176,8 +176,8 @@ class TestPromptGeneration:
             problem_context=None
         )
         
-        # 기본 프롬프트 구조 확인
-        assert "소크라테스" in prompt or "튜터" in prompt
+        # 기본 프롬프트 구조 확인 (현재: AI 시험 감독관 / Proctor)
+        assert "감독관" in prompt or "Proctor" in prompt
         assert "LOGIC_HINT" in prompt
     
     def test_holistic_prompt_with_problem_context(self):
@@ -206,7 +206,7 @@ class TestStateIntegration:
     
     def test_handle_request_problem_context(self):
         """handle_request에서 problem_context 저장 확인"""
-        from app.domain.langgraph.nodes.handle_request import handle_request_load_state
+        from app.domain.langgraph.nodes.chat.n1_handle_request import handle_request_load_state
         from app.domain.langgraph.graph import get_initial_state
         
         # get_initial_state로 초기 상태 생성

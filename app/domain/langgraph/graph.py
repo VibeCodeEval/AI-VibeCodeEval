@@ -19,15 +19,16 @@ START → 1. Handle Request → 2. Intent Analyzer → 3. Writer LLM → END
 
 [노드 설명]
 1. Handle Request: Redis 상태 로드, 턴 번호 증가
-2. Intent Analyzer: 의도 분석 + 가드레일 체크
-3. Writer LLM: AI 답변 생성 (Socratic 방식)
+2. Intent Analyzer: 의도 분석 + 가드레일 체크 (v2.1: 4대 통합 의도 unified_intent)
+3. Writer LLM: AI 답변 생성. v2.1: spec_id=20일 때 클린/스파게티 분기(구조적 용어 감지)
 4. Eval Turn Guard: 제출 시 State의 messages에서 모든 턴 추출하여 동기 평가 실행
 5. Main Router: 제출 여부에 따른 분기
 6a. Holistic Flow: Chaining 전략 평가
-6b. Aggregate Scores: 턴별 점수 집계
-6c. Code Performance: 성능 평가
-6d. Code Correctness: 정확성 평가
-7. Final Scores: 최종 점수 산출
+6b. Integrated Evaluator: v2.1 통합 평가(turn_analysis, Radon CC, ΔCC, AST 패턴, 5대 루브릭)
+6c. Aggregate Scores: 턴별 점수 집계
+6d. Code Performance: 성능 평가
+6e. Code Correctness: 정확성 평가
+7. Final Scores: 최종 점수·등급. v2.1: integrated_score 블렌딩, ΔCC·AST 학점 보정, v21_summary 저장
 
 [상태 관리]
 - MainGraphState: 모든 노드가 공유하는 상태 객체
@@ -41,22 +42,26 @@ from typing import Optional
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from app.domain.langgraph.nodes.eval_turn_guard import eval_turn_submit_guard
-from app.domain.langgraph.nodes.handle_request import handle_request_load_state
-from app.domain.langgraph.nodes.holistic_evaluator.execution import \
-    eval_code_execution
-from app.domain.langgraph.nodes.holistic_evaluator.flow import \
-    eval_holistic_flow
-from app.domain.langgraph.nodes.holistic_evaluator.scores import (
-    aggregate_final_scores, aggregate_turn_scores)
-from app.domain.langgraph.nodes.integrated_evaluator import integrated_evaluator
-from app.domain.langgraph.nodes.intent_analyzer import intent_analyzer
-from app.domain.langgraph.nodes.system_nodes import (handle_failure,
-                                                     summarize_memory)
-from app.domain.langgraph.nodes.writer import writer_llm
-from app.domain.langgraph.nodes.writer_router import (intent_router,
+from app.domain.langgraph.nodes.chat.n1_handle_request import \
+    handle_request_load_state
+from app.domain.langgraph.nodes.chat.n2_intent_analyzer import intent_analyzer
+from app.domain.langgraph.nodes.chat.n3_writer import writer_llm
+from app.domain.langgraph.nodes.chat.routers import (intent_router,
                                                       main_router,
                                                       writer_router)
+from app.domain.langgraph.nodes.eval.n4_eval_turn_guard import \
+    eval_turn_submit_guard
+from app.domain.langgraph.nodes.eval.n5_integrated_evaluator import \
+    integrated_evaluator
+from app.domain.langgraph.nodes.eval.n6_holistic_flow import eval_holistic_flow
+from app.domain.langgraph.nodes.eval.n7_aggregate_turn_scores import \
+    aggregate_turn_scores
+from app.domain.langgraph.nodes.eval.n8_code_execution import \
+    eval_code_execution
+from app.domain.langgraph.nodes.eval.n9_final_scores import \
+    aggregate_final_scores
+from app.domain.langgraph.nodes.system.system_nodes import (handle_failure,
+                                                             summarize_memory)
 from app.domain.langgraph.states import MainGraphState
 from app.domain.langgraph.subgraph_eval_turn import create_eval_turn_subgraph
 from app.domain.langgraph.utils.problem_info import get_problem_info_sync
@@ -314,4 +319,9 @@ def get_initial_state(
         turn_analysis=None,
         integrated_score=None,
         integrated_evaluation=None,
+        # v2.1 Snapshot·평가 (제출 플로우에서 채워짐)
+        v1_code=None,
+        v2_code=None,
+        v1_metrics=None,
+        v2_metrics=None,
     )

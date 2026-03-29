@@ -19,7 +19,7 @@ from app.domain.langgraph.states import (
     IntegratedEvaluationResult,
     MissingSpecDetail,
 )
-from app.domain.langgraph.nodes.spec_extractor import (
+from app.domain.langgraph.nodes.eval.spec_extractor import (
     calculate_clarity_score,
     has_structure,
     has_examples,
@@ -28,7 +28,7 @@ from app.domain.langgraph.nodes.spec_extractor import (
     generate_turn_summary,
     create_turn_analysis,
 )
-from app.domain.langgraph.nodes.integrated_evaluator import (
+from app.domain.langgraph.nodes.eval.n5_integrated_evaluator import (
     calculate_expression_score,
     calculate_first_prompt_score,
     calculate_follow_up_score,

@@ -355,7 +355,7 @@ ai_vibe_worker/
 │   ├── Database_Changes_Summary.md         # DB 변경사항 요약
 │   ├── Test_Execution_Guide.md            # 테스트 실행 가이드
 │   ├── State_Flow_and_DB_Storage.md       # LangGraph State 흐름 및 DB 저장
-│   ├── Docker_PostgreSQL_Setup_Guide.md   # Docker 설정 가이드
+│   ├── Backend_Docker_And_DB_Guide.md     # Backend Docker · DB 연동
 │   ├── Judge0_Complete_Guide.md           # Judge0 완전 가이드
 │   ├── Vertex_AI_Setup_Guide.md           # Vertex AI 설정 가이드
 │   └── archive/                            # 아카이브 문서
@@ -835,7 +835,7 @@ docker-compose logs -f ai_worker
 - [엔드포인트 변경 이력](./docs/Endpoint_Change_History.md)
 - [DB 변경사항](./docs/Database_Changes_Summary.md)
 - [LangGraph State 흐름](./docs/State_Flow_and_DB_Storage.md)
-- [Docker 설정](./docs/Docker_PostgreSQL_Setup_Guide.md)
+- [Backend Docker · DB 연동](./docs/Backend_Docker_And_DB_Guide.md)
 
 ---
 

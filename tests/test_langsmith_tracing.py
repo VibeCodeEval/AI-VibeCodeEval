@@ -8,9 +8,8 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from datetime import datetime
 
 from app.core.config import settings
-from app.domain.langgraph.nodes.holistic_evaluator.flow import eval_holistic_flow
-from app.domain.langgraph.nodes.holistic_evaluator.performance import eval_code_performance
-from app.domain.langgraph.nodes.holistic_evaluator.correctness import eval_code_correctness
+from app.domain.langgraph.nodes.eval.n6_holistic_flow import eval_holistic_flow
+from app.domain.langgraph.nodes.eval.n8_code_execution import eval_code_execution
 from app.domain.langgraph.states import MainGraphState
 
 
@@ -95,7 +94,7 @@ async def test_eval_holistic_flow_with_langsmith():
         })
         
         # LLM Mock 설정
-        with patch('app.domain.langgraph.nodes.holistic_evaluator.flow.get_llm') as mock_get_llm:
+        with patch('app.domain.langgraph.nodes.eval.n6_holistic_flow.get_llm') as mock_get_llm:
             mock_llm = MagicMock()
             mock_structured_llm = MagicMock()
             mock_eval_result = MagicMock()
@@ -121,71 +120,50 @@ async def test_eval_holistic_flow_with_langsmith():
 
 
 @pytest.mark.asyncio
-async def test_eval_code_performance_with_langsmith():
-    """6c 노드가 LangSmith 추적과 함께 정상 작동하는지 확인"""
+async def test_eval_code_execution_with_langsmith():
+    """6c 노드(eval_code_execution)가 LangSmith 추적과 함께 정상 작동하는지 확인.
+
+    구 코드의 eval_code_performance / eval_code_correctness는 n8_code_execution으로 통합됨.
+    Judge0 큐(create_queue_adapter)를 목업하여 Correctness·Performance 점수 필드를 검증한다.
+    """
     code_content = "def fibonacci(n):\n    return n if n <= 1 else fibonacci(n-1) + fibonacci(n-2)"
     state = create_test_state(code_content=code_content)
-    
-    # LLM Mock 설정
-    with patch('app.domain.langgraph.nodes.holistic_evaluator.performance.get_llm') as mock_get_llm:
-        mock_llm = MagicMock()
-        mock_structured_llm = MagicMock()
-        mock_eval_result = MagicMock()
-        mock_eval_result.efficiency = 85.0
-        mock_eval_result.correctness = 90.0
-        mock_eval_result.best_practices = 80.0
-        mock_structured_llm.ainvoke = AsyncMock(return_value=mock_eval_result)
-        mock_llm.with_structured_output = MagicMock(return_value=mock_structured_llm)
-        mock_get_llm.return_value = mock_llm
-        
+    state["problem_context"] = {
+        "test_cases": [{"input": "1", "expected": "1", "description": "tc1"}],
+        "constraints": {"time_limit_sec": 2.0, "memory_limit_mb": 128},
+    }
+
+    mock_result = MagicMock()
+    mock_result.status = "success"
+    mock_result.output = ""
+    mock_result.error = None
+    mock_result.execution_time = 0.04
+    mock_result.memory_used = 5 * 1024 * 1024
+
+    mock_queue = MagicMock()
+    mock_queue.enqueue = AsyncMock()
+    mock_queue.get_status = AsyncMock(return_value="completed")
+    mock_queue.get_result = AsyncMock(return_value=mock_result)
+
+    with patch("app.domain.queue.create_queue_adapter", return_value=mock_queue):
         try:
-            result = await eval_code_performance(state)
-            
+            result = await eval_code_execution(state)
+
+            assert "code_correctness_score" in result
             assert "code_performance_score" in result
-            print(f"\n[6c 노드 테스트] 성공 - score: {result.get('code_performance_score')}")
-            
-            # LangSmith 추적 활성화 여부 확인
+            print(
+                f"\n[6c eval_code_execution 테스트] 성공 - "
+                f"correctness: {result.get('code_correctness_score')}, "
+                f"performance: {result.get('code_performance_score')}"
+            )
+
             if settings.LANGCHAIN_TRACING_V2:
                 print("[LangSmith] 6c 노드 추적 활성화됨")
             else:
                 print("[LangSmith] 6c 노드 추적 비활성화 (정상)")
-                
-        except Exception as e:
-            pytest.fail(f"6c 노드 실행 실패: {str(e)}")
 
-
-@pytest.mark.asyncio
-async def test_eval_code_correctness_with_langsmith():
-    """6d 노드가 LangSmith 추적과 함께 정상 작동하는지 확인"""
-    code_content = "def fibonacci(n):\n    return n if n <= 1 else fibonacci(n-1) + fibonacci(n-2)"
-    state = create_test_state(code_content=code_content)
-    
-    # LLM Mock 설정
-    with patch('app.domain.langgraph.nodes.holistic_evaluator.correctness.get_llm') as mock_get_llm:
-        mock_llm = MagicMock()
-        mock_structured_llm = MagicMock()
-        mock_eval_result = MagicMock()
-        mock_eval_result.correctness = 95.0
-        mock_eval_result.efficiency = 85.0
-        mock_eval_result.best_practices = 90.0
-        mock_structured_llm.ainvoke = AsyncMock(return_value=mock_eval_result)
-        mock_llm.with_structured_output = MagicMock(return_value=mock_structured_llm)
-        mock_get_llm.return_value = mock_llm
-        
-        try:
-            result = await eval_code_correctness(state)
-            
-            assert "code_correctness_score" in result
-            print(f"\n[6d 노드 테스트] 성공 - score: {result.get('code_correctness_score')}")
-            
-            # LangSmith 추적 활성화 여부 확인
-            if settings.LANGCHAIN_TRACING_V2:
-                print("[LangSmith] 6d 노드 추적 활성화됨")
-            else:
-                print("[LangSmith] 6d 노드 추적 비활성화 (정상)")
-                
         except Exception as e:
-            pytest.fail(f"6d 노드 실행 실패: {str(e)}")
+            pytest.fail(f"6c eval_code_execution 실행 실패: {str(e)}")
 
 
 def test_langsmith_environment_variables():

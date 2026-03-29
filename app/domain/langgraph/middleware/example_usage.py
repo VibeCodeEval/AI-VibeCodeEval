@@ -26,7 +26,7 @@ def example_intent_analyzer_with_middleware():
     2. Retry (에러 발생 시)
     3. Logging (실행 전후)
     """
-    from app.domain.langgraph.nodes.intent_analyzer import (
+    from app.domain.langgraph.nodes.chat.n2_intent_analyzer import (
         IntentAnalysisResult, get_llm, intent_analysis_prompt)
 
     # 1. 기본 Chain 구성
@@ -64,7 +64,7 @@ def example_writer_with_middleware():
     """
     from langchain_core.runnables import RunnableLambda
 
-    from app.domain.langgraph.nodes.writer import (format_writer_messages,
+    from app.domain.langgraph.nodes.chat.n3_writer import (format_writer_messages,
                                                    get_llm,
                                                    prepare_writer_input)
 
@@ -98,7 +98,7 @@ def example_simple_usage():
     """
     간단한 사용법 - 함수형으로 Middleware 적용
     """
-    from app.domain.langgraph.nodes.intent_analyzer import \
+    from app.domain.langgraph.nodes.chat.n2_intent_analyzer import \
         intent_analysis_chain
 
     # Middleware 생성
@@ -123,7 +123,7 @@ def example_conditional_middleware(enable_rate_limiting: bool = True):
     """
     조건부로 Middleware 적용
     """
-    from app.domain.langgraph.nodes.intent_analyzer import \
+    from app.domain.langgraph.nodes.chat.n2_intent_analyzer import \
         intent_analysis_chain
 
     chain = intent_analysis_chain
@@ -152,7 +152,7 @@ async def example_node_function_with_middleware(state):
     """
     from langchain_core.runnables import RunnableLambda
 
-    from app.domain.langgraph.nodes.intent_analyzer import (
+    from app.domain.langgraph.nodes.chat.n2_intent_analyzer import (
         IntentAnalysisResult, get_llm, intent_analysis_prompt, prepare_input,
         process_output)
 

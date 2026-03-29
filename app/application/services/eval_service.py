@@ -706,6 +706,7 @@ class EvalService:
                 "turn": main_state.get("current_turn", 0),
                 "human_message": main_state.get("human_message", ""),
                 "ai_message": main_state.get("ai_message", ""),
+                "previous_turns_summary": None,  # V2.2: 실시간 턴 평가는 단일 턴이므로 이전 요약 없음
                 "problem_context": main_state.get("problem_context"),  # 문제 정보 전달
                 "is_guardrail_failed": main_state.get("is_guardrail_failed", False),
                 "guardrail_message": main_state.get("guardrail_message"),
@@ -834,15 +835,12 @@ class EvalService:
             if not detailed_feedback_from_log and detailed_evaluations:
                 detailed_feedback_from_log = detailed_evaluations
 
-            # weights 정보 가져오기 (intent_type을 대문자로 변환)
-            from app.domain.langgraph.nodes.turn_evaluator.weights import \
-                get_weights_for_intent
-
-            # intent_type이 소문자 형식("hint_or_query")이면 대문자로 변환
-            intent_for_weights = (
-                intent_type.upper().replace("-", "_") if intent_type else "UNKNOWN"
+            # 루브릭 순서 (Hybrid: 가중치 미사용, 응답 형식 호환용)
+            from app.domain.langgraph.nodes.eval_turn.weights import (
+                RUBRIC_DISPLAY_ORDER,
             )
-            weights = get_weights_for_intent(intent_for_weights)
+
+            weights = {k: 0 for k in RUBRIC_DISPLAY_ORDER}
 
             # 상세 루브릭 정보 생성
             # 1순위: detailed_feedback에서 primary intent의 rubrics 사용

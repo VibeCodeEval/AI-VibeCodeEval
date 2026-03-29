@@ -6,8 +6,8 @@ import pytest
 import asyncio
 from typing import Dict, Any
 
-from app.domain.langgraph.nodes.turn_evaluator.evaluators import eval_generation
-from app.domain.langgraph.nodes.turn_evaluator.analysis import intent_analysis
+from app.domain.langgraph.nodes.eval_turn.evaluators import eval_generation
+from app.domain.langgraph.nodes.eval_turn.analysis import intent_analysis
 from app.domain.langgraph.states import EvalTurnState
 
 
