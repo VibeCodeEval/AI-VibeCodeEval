@@ -35,7 +35,7 @@ PostgreSQL에서 세션 정보를 조회하고 관리
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import and_, select
+from sqlalchemy import String, and_, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -529,12 +529,13 @@ class SessionRepository:
         Returns:
             업데이트된 PromptMessage 또는 None
         """
-        # 해당 메시지 조회
+        # 해당 메시지 조회 (role 비교: CAST로 타입 통일)
+        role_str = "USER" if (role if isinstance(role, str) else getattr(role, "value", "USER")) == "USER" else "AI"
         query = select(PromptMessage).where(
             and_(
                 PromptMessage.session_id == session_id,
                 PromptMessage.turn == turn,
-                PromptMessage.role == role,
+                cast(PromptMessage.role, String) == role_str,
             )
         )
         result = await self.db.execute(query)
@@ -580,20 +581,20 @@ class SessionRepository:
             ]
         """
         # USER 메시지만 조회 (turn_analysis는 USER 메시지에 저장)
+        # role 비교: CAST(role AS TEXT) = 'USER' 로 타입 통일 (varchar = prompt_role_enum 오류 방지)
         query = (
             select(PromptMessage)
             .where(
                 and_(
                     PromptMessage.session_id == session_id,
-                    PromptMessage.role == PromptRoleEnum.USER,
+                    cast(PromptMessage.role, String) == "USER",
                 )
             )
             .order_by(PromptMessage.turn.asc())
         )
-        
         result = await self.db.execute(query)
         messages = result.scalars().all()
-        
+
         turn_analyses = []
         for msg in messages:
             if msg.meta and "turn_analysis" in msg.meta:
@@ -604,6 +605,39 @@ class SessionRepository:
                 turn_analyses.append(turn_analysis)
         
         return turn_analyses
+
+    async def get_v1_checkpoint_code(self, session_id: int) -> Optional[str]:
+        """
+        Step 04: SAVE(Phase 1 확정) 시 저장된 v1 코드 조회.
+
+        prompt_messages.meta에 is_v1_checkpoint=true, code_snapshot=코드전체 인
+        메시지가 있으면 해당 code_snapshot 반환. 없으면 None.
+
+        Args:
+            session_id: 세션 ID (PostgreSQL prompt_sessions.id)
+
+        Returns:
+            v1 기준 코드 문자열 또는 None
+        """
+        # role 비교: CAST(role AS TEXT) = 'USER' 로 타입 통일
+        query = (
+            select(PromptMessage)
+            .where(
+                and_(
+                    PromptMessage.session_id == session_id,
+                    cast(PromptMessage.role, String) == "USER",
+                )
+            )
+            .order_by(PromptMessage.turn.asc())
+        )
+        result = await self.db.execute(query)
+        messages = result.scalars().all()
+        for msg in messages:
+            if not msg.meta:
+                continue
+            if msg.meta.get("is_v1_checkpoint") and msg.meta.get("code_snapshot"):
+                return msg.meta.get("code_snapshot")
+        return None
 
     async def get_conversation_history(self, session_id: int) -> List[dict]:
         """

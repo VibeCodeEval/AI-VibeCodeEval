@@ -36,6 +36,8 @@ dependencies = [
     "unicorn>=2.1.4",
     # YAML Processing
     "pyyaml>=6.0.0",
+    # Step 04: 코드 품질 (Radon CC)
+    "radon>=6.0.0",
 ]
 
 [project.optional-dependencies]

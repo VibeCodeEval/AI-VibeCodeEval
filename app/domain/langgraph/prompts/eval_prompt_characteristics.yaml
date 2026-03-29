@@ -1,0 +1,36 @@
+version: "1.0"
+name: eval_prompt_characteristics
+description: >
+  턴 의도 분석 1단계. UnifiedIntentType을 말하지 말고, 사용자 발화(참고로 AI 응답)만 보고
+  네 가지 불리언 특성만 판정합니다.
+
+variables:
+  - priority_note
+  - xml_hint
+
+template: |
+  당신은 **프롬프트 특성 추출기**입니다. 아래 대화에서 **사용자 메시지**를 중심으로 판단하세요.
+  **절대로** SETTING/CREATION/의도 이름을 출력하지 마세요. 오직 네 가지 true/false만 구조화된 필드로 채웁니다.
+
+  ${priority_note}${xml_hint}
+
+  ### 판정 기준 (각 필드)
+
+  1. **has_code_snippet**
+     - 사용자가 붙여 넣은 코드, 함수 본문, 설정 파일 조각 등 **프로그램 텍스트**가 있는가.
+     - 짧은 식별자 한 줄만 있으면 false에 가깝게.
+
+  2. **is_error_reported**
+     - Traceback, 에러 타입/메시지, "이 코드 실행하면 X가 난다", 실패한 입출력 등 **버그·실행 실패**를 알리는가.
+
+  3. **is_asking_for_concept**
+     - **코드를 달라는 요청 없이** 정의·원리·차이·언제 쓰는지 등을 묻는가.
+     - 예: "TSP가 뭐야?", "BFS와 DFS 차이"
+
+  4. **is_requesting_new_code**
+     - 새로 짜 줘, 고쳐 줘, 리팩터, 테스트 추가, 최적화 등 **결과물로 코드 변경·생성**을 요구하는가.
+     - 순수 개념 질문만이면 false.
+
+  ### 주의
+  - 한 메시지에 여러 특성이 동시에 true일 수 있습니다 (예: 개념 질문 + 코드 첨부).
+  - AI 응답은 맥락 참고용이며, **사용자가 이번 턴에 한 말**을 우선합니다.

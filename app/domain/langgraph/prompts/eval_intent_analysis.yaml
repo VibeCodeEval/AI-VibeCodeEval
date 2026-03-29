@@ -1,6 +1,8 @@
-version: "1.0"
+version: "2.3"
 name: eval_intent_analysis
-description: 턴 평가 의도 분석 프롬프트
+description: >
+  V2.3 6대 통합 의도.
+  VALIDATION을 DEBUGGING(코드·에러·검증)과 EXPLORATION(순수 개념·지식 질문)으로 분리.
 
 variables:
   - priority_note
@@ -8,76 +10,73 @@ variables:
 
 template: |
   당신은 코딩 대화의 의도를 분류하는 전문가입니다.
-  사용자와 AI의 대화를 분석하여 다음 8가지 중 가장 적절한 의도를 **단일 선택**하세요.
+  사용자와 AI의 한 턴 대화를 보고 **아래 6가지 중 가장 적절한 의도를 단 하나만** 선택하세요.
 
   ${priority_note}${xml_hint}
-  **의도 우선순위 규칙** (우선순위가 높은 것을 선택):
-  1. GENERATION (최우선): 즉시 실행 가능한 코드 생성이 목적이면 최우선
-  2. OPTIMIZATION: 기존 코드 개선
-  3. DEBUGGING: 버그 수정
-  4. TEST_CASE: 테스트 작성
-  5. RULE_SETTING: 제약조건 명시, 향후 코드 생성에 대한 규칙 설정
-  6. SYSTEM_PROMPT: 역할 정의
-  7. HINT_OR_QUERY: 질문/힌트
-  8. FOLLOW_UP: 후속 질문 (⚠️ 첫 턴에서는 선택 불가)
 
-  **의도 정의 및 구분 기준**:
-  1. SYSTEM_PROMPT: 시스템 프롬프트 설정, AI 역할/페르소나 정의, 답변 스타일 지정
-     - 예: "<Role>너는 문제 분해 전문가다</Role>"
-     - <Role> 태그가 있으면 SYSTEM_PROMPT를 우선 고려
+  **[6대 통합 의도] (우선순위 참고용)**
 
-  2. RULE_SETTING: 규칙 설정, 요구사항 정의, 제약조건 설명
-     - **핵심**: 현재 코드를 생성하는 것이 아니라, 향후 코드 생성에 대한 규칙/제약조건을 설정하는 것
-     - **중요 구분**: "설명해줘", "알려줘", "진행해봐" 같은 동작 요청은 RULE_SETTING이 아님
-     - 예: "Interface 구조나 pesudo code로 제시해줘야한다" → RULE_SETTING (향후 코드 생성 규칙)
-     - 예: "한 번에 하나씩 수행해야 한다" → RULE_SETTING (작업 순서 규칙)
-     - 예: "각 전략에서 구조는 Interface구조나 pesudo code로 제시해줘야한다" → RULE_SETTING (출력 형식 규칙)
-     - ❌ "다음 내용 진행해보면서 설명해" → RULE_SETTING 아님 (HINT_OR_QUERY 또는 FOLLOW_UP)
-     - ❌ "진행해봐" → RULE_SETTING 아님 (FOLLOW_UP 또는 GENERATION)
-     - <Content> 태그가 있으면 RULE_SETTING을 우선 고려
-     - ⚠️ "코드로 제시"라는 표현이 있어도, 즉시 실행 가능한 코드 생성이 아니라 규칙 설정이면 RULE_SETTING
+  1. **SETTING**
+     - AI의 역할·페르소나, 답변 톤·형식, 앞으로의 코드 생성에 적용할 규칙·제약을 **미리** 정하는 턴입니다.
+     - 코드 블록을 짜 달라기보다 "이렇게 답해 줘", "이 규칙 지켜 줘"에 가깝습니다.
+     - 예: "앞으로 코드는 타입 힌트 필수로 줘", "<Role>백엔드 시니어</Role><Content>REST만 사용</Content>"
 
-  3. GENERATION: 새로운 코드 생성 요청
-     - **핵심**: 즉시 실행 가능한 코드를 생성하라는 명시적 요청
-     - 예: "이 함수를 구현해줘", "코드를 작성해줘", "진행해봐" (이전 맥락에서 코드 생성 의미)
-     - ⚠️ 규칙 설정 중에 코드 예시를 요청하는 것은 GENERATION이 아닌 RULE_SETTING
+  2. **CREATION**
+     - **새로운** 코드·기능을 처음부터 작성해 달라는 요청입니다 (기존 코드 수정이 아님).
+     - 목표 동작·입출력·환경이 어느 정도 드러나 있으면 CREATION에 가깝습니다.
+     - 예: "파이썬으로 이진 탐색 함수 짜줘", "Flask로 간단한 로그인 API 뼈대 만들어줘"
 
-  4. OPTIMIZATION: 기존 코드 최적화, 성능 개선
-  5. DEBUGGING: 버그 수정, 오류 해결
-  6. TEST_CASE: 테스트 케이스 작성, 테스트 관련
-  7. HINT_OR_QUERY: 힌트 요청, 질문, 설명 요청
-     - **핵심**: 개념 설명, 방법론 질문, 정보 요청
-     - 예: "비트마스킹에 대한 개념 간단히 설명해" → HINT_OR_QUERY
-     - 예: "다음 내용 진행해보면서 비트마스킹에 대한 개념 간단히 설명해" → HINT_OR_QUERY (설명 요청이 주 목적)
-     - ❌ "진행해봐"만 있으면 HINT_OR_QUERY 아님 (FOLLOW_UP 또는 GENERATION)
-  8. FOLLOW_UP: 후속 질문, 추가 요청, 확인
-     - **핵심**: 이전 대화를 참조하여 다음 단계를 진행하거나 확인하는 것
-     - 예: "진행해봐" (이전 대화 맥락에서 다음 단계 진행) → FOLLOW_UP
-     - 예: "그럼 다음은?" → FOLLOW_UP
-     - ⚠️ 첫 턴(turn=1)에서는 선택 불가 (이전 대화가 없으므로)
+  3. **REFINEMENT**
+     - **이미 제시·생성된 코드나 설명**을 바꾸거나 덧붙이거나 최적화해 달라는 요청입니다.
+     - "그거", "아까 코드", "이 함수"처럼 **기존 결과물을 변형**하려는 말이면 대부분 REFINEMENT입니다.
+     - 예: "방금 코드에 예외 처리 추가해줘", "시간복잡도 O(n²) 말고 O(n log n)으로 줄여줘"
 
-  **구분 예시**:
-  - "Interface 구조나 pesudo code로 제시해줘야한다" → RULE_SETTING (향후 코드 생성 규칙)
-  - "이 함수를 구현해줘" → GENERATION (즉시 코드 생성)
-  - "코드를 작성하고 최적화해주세요" → GENERATION (코드 생성이 최우선 목적)
-  - "비트마스킹에 대한 개념 간단히 설명해" → HINT_OR_QUERY (설명 요청)
-  - "다음 내용 진행해보면서 비트마스킹에 대한 개념 간단히 설명해" → HINT_OR_QUERY (설명 요청이 주 목적)
-  - "진행해봐" (이전 대화 맥락 있음) → FOLLOW_UP (후속 진행 요청)
-  - "어, 진행해봐" → FOLLOW_UP (이전 대화 맥락에서 다음 단계 진행)
-  - "<Role>너는 전문가다</Role><Content>규칙을 설정한다</Content>" → SYSTEM_PROMPT 또는 RULE_SETTING
+  4. **DEBUGGING**
+     - **실제 코드가 왜 안 도는지**, 에러를 고치거나, 테스트·엣지 케이스로 **동작을 검증**해 달라는 요청입니다.
+     - 에러 로그, 재현 절차, 실패 입력, "이 테스트 통과하게" 등 **무결성·실행 결과**와 직결됩니다.
+     - 예: "Traceback 붙였어, 왜 KeyError 나는지 봐줘", "이 단위 테스트 케이스 추가해줘"
 
-  **중요**: 여러 의도가 관련되어 있어도, 우선순위가 가장 높은 **단일 의도만** 선택하세요.
+  5. **EXPLORATION**
+     - **코드 작성·수정 없이** 알고리즘, 자료구조, 라이브러리(LangGraph 등), CS 개념, 아키텍처를 **배우거나 비교**하려는 질문입니다.
+     - "뭐야?", "차이가 뭐야?", "어떻게 동작해?"처럼 **지식·개념**만 묻는 경우입니다 (에러 수정 요청이 아님).
+     - 예: "외판원 순회(TSP) 문제가 정확히 뭐야?", "BFS랑 DFS 선택 기준이 뭐가 달라?"
+
+  6. **FOLLOW_UP**
+     - **코드 변경·생성·버그 수정·테스트 요청이 문장에 없을 때만** 선택합니다.
+     - 단순 동의, 감사, "계속해", "다음 단계로"처럼 **대화만 이어가는** 발화입니다.
+     - 예: "응 좋아", "고마워 그렇게 할게", "알겠어 설명만 더 해줘" (단, "알겠어, 근데 이거 고쳐줘" → REFINEMENT)
+
+  ---
+
+  **[핵심 구분]**
+  - "이거 왜 안 돼?" + 로그/코드 있음 → **DEBUGGING**
+  - "TSP가 뭐야?" / "LangGraph 노드가 뭐야?" → **EXPLORATION** (코드 짜 달라는 말이 없으면)
+  - "그 코드 설명만 해줘" (수정 X) → **EXPLORATION** 또는 **FOLLOW_UP** (설명 요청이면 EXPLORATION 쪽)
+  - "그 코드 for문으로 바꿔줘" → **REFINEMENT**
+
+  ---
+
+  **[출력 형식]** 다음 JSON만 출력하세요.
+  ```json
+  {
+    "intent_types": ["EXPLORATION"],
+    "confidence": 0.95,
+    "reasoning": "코드 수정 없이 문제 정의만 물었으므로 EXPLORATION으로 분류했습니다."
+  }
+  ```
+  - intent_types: 위 6개 문자열 중 **하나만** 담은 리스트 (예: ["DEBUGGING"])
+  - confidence: 0.0 ~ 1.0
+  - reasoning: 한 문장 이상의 분류 이유
 
 # 첫 턴 특별 규칙 (priority_note에 삽입)
 first_turn_priority_note: |
-  
+
   **⚠️ 첫 턴 특별 규칙**:
-  - 첫 턴(turn=1)에서는 FOLLOW_UP을 선택할 수 없습니다. (이전 대화가 없으므로 후속 질문 불가능)
-  - <Role> 또는 <Content> 태그가 있으면 SYSTEM_PROMPT 또는 RULE_SETTING을 우선 고려하세요.
-  - 규칙 설정 중에 코드 예시를 요청하는 것은 RULE_SETTING입니다. (즉시 실행 가능한 코드 생성이 아닌 경우)
+  - 첫 턴에서는 **FOLLOW_UP**을 선택할 수 없습니다. (이전 AI 답변에 이어지는 후속이 아님)
+  - 개념 질문·문제 소개는 **EXPLORATION**, 규칙·역할 설정은 **SETTING**, 새 코드 요청은 **CREATION**을 우선 고려하세요.
 
 # XML 태그 힌트 (xml_hint에 삽입)
 xml_tag_hint: |
-  
+
   **XML 태그 힌트**: <Role> 또는 <Content> 태그가 감지되었습니다.
-  이는 SYSTEM_PROMPT 또는 RULE_SETTING 의도를 강하게 시사합니다.
+  **SETTING** 의도를 우선 고려하세요.

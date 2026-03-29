@@ -131,12 +131,14 @@ class GradeType(str, enum.Enum):
 
 
 class UnifiedIntentType(str, enum.Enum):
-    """4대 통합 의도"""
+    """6대 통합 의도 (v2.3: VALIDATION → DEBUGGING / EXPLORATION 분리)"""
 
     SETTING = "SETTING"
     CREATION = "CREATION"
     REFINEMENT = "REFINEMENT"
-    VALIDATION = "VALIDATION"
+    DEBUGGING = "DEBUGGING"
+    EXPLORATION = "EXPLORATION"
+    FOLLOW_UP = "FOLLOW_UP"
 
 
 class RubricType(str, enum.Enum):

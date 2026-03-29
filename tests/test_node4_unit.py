@@ -8,7 +8,7 @@ import pytest
 import asyncio
 from typing import Dict, Any
 
-from app.domain.langgraph.nodes.turn_evaluator.evaluators import (
+from app.domain.langgraph.nodes.eval_turn.evaluators import (
     eval_generation,
     eval_optimization,
     eval_debugging,
@@ -18,7 +18,7 @@ from app.domain.langgraph.nodes.turn_evaluator.evaluators import (
     eval_system_prompt,
     eval_rule_setting,
 )
-from app.domain.langgraph.nodes.turn_evaluator.analysis import intent_analysis
+from app.domain.langgraph.nodes.eval_turn.analysis import intent_analysis
 from app.domain.langgraph.states import EvalTurnState
 
 
@@ -83,9 +83,17 @@ class TestIntentAnalysis:
         assert "intent_confidence" in result
         assert result["intent_confidence"] >= 0.0
         assert result["intent_confidence"] <= 1.0
-        # v2.1: 4대 통합 의도
+        # v2.1: 5대 통합 의도 (FOLLOW_UP 독립)
         assert "unified_intent" in result
-        assert result["unified_intent"] in ("SETTING", "CREATION", "REFINEMENT", "VALIDATION")
+        assert result["unified_intent"] in (
+            "SETTING",
+            "CREATION",
+            "REFINEMENT",
+            "DEBUGGING",
+            "EXPLORATION",
+            "FOLLOW_UP",
+            "VALIDATION",  # 구버전 저장 호환
+        )
         print(f"\n[Intent Analysis] 의도: {result['intent_types']}, unified_intent: {result['unified_intent']}, 신뢰도: {result['intent_confidence']:.2f}")
     
     @pytest.mark.asyncio
@@ -99,7 +107,15 @@ class TestIntentAnalysis:
         
         assert "intent_types" in result
         assert "unified_intent" in result
-        assert result["unified_intent"] in ("SETTING", "CREATION", "REFINEMENT", "VALIDATION")
+        assert result["unified_intent"] in (
+            "SETTING",
+            "CREATION",
+            "REFINEMENT",
+            "DEBUGGING",
+            "EXPLORATION",
+            "FOLLOW_UP",
+            "VALIDATION",  # 구버전 저장 호환
+        )
         print(f"\n[Intent Analysis] 의도: {result['intent_types']}, unified_intent: {result['unified_intent']}, 신뢰도: {result['intent_confidence']:.2f}")
 
 

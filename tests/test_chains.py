@@ -7,13 +7,13 @@ from unittest.mock import Mock, AsyncMock, patch
 from datetime import datetime
 from typing import Dict, Any
 
-from app.domain.langgraph.nodes.intent_analyzer import (
+from app.domain.langgraph.nodes.chat.n2_intent_analyzer import (
     prepare_input,
     process_output,
     IntentAnalysisResult,
     intent_analysis_chain,
 )
-from app.domain.langgraph.nodes.writer import (
+from app.domain.langgraph.nodes.chat.n3_writer import (
     prepare_writer_input,
     format_writer_messages,
     get_writer_chain,
@@ -354,7 +354,7 @@ class TestChainIntegration:
         assert processed["intent_status"] == "passed_hint"
     
     @pytest.mark.asyncio
-    @patch('app.domain.langgraph.nodes.writer.get_llm')
+    @patch('app.domain.langgraph.nodes.chat.n3_writer.get_llm')
     async def test_writer_chain_mock(self, mock_get_llm):
         """Writer Chain Mock 테스트"""
         # Mock LLM 설정

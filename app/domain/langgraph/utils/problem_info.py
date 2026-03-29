@@ -13,6 +13,86 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+def _smart_gate_2026_test_suite_code() -> str:
+    """
+    스마트 게이트 2026 Judge0 검증용 테스트 스크립트.
+    사용자 v2_code 끝에 붙여 실행 시, 통과하면 stdout에 "ALL_TESTS_PASSED" 출력.
+
+    검증 내용:
+    1. 보안 등급 HIGH: threat_level="HIGH"일 때 모든 승객 SECURITY_CHECK
+    2. 수하물 과금: 비즈니스 30kg/이코노미 20kg 초과 시 CHARGE_FEE
+    3. 누적 과금 페널티: 동일 항공편 4번째 과금 승객부터 허용 무게 -5kg
+    """
+    return r'''
+# === 스마트 게이트 2026 검증 스위트 (Judge0) ===
+def _sg_run_tests():
+    class Ctx:
+        pass
+    class Pax:
+        pass
+    overcharge = {}
+    try:
+        rules = [SecurityRule(), PassportRule(), FlightStatusRule(), LuggageRule(overcharge)]
+        gm = GateManager(rules)
+        ref = 99999999  # 만료 이후 날짜
+        ctx = Ctx()
+        ctx.reference_date = ref
+        ctx.flight_id = "F001"
+        # 1. HIGH -> SECURITY_CHECK
+        ctx.threat_level = "HIGH"
+        p = Pax()
+        p.passport_expiry = ref + 1
+        p.flight_status = "BOARDING"
+        p.seat_class = "ECONOMY"
+        p.luggage_kg = 10
+        p.flight_id = "F001"
+        r = gm.process(p, ctx)
+        assert r == "SECURITY_CHECK", "HIGH threat must return SECURITY_CHECK, got %r" % r
+        # 2. 수하물: 비즈니스 31kg -> CHARGE_FEE
+        ctx.threat_level = "LOW"
+        p2 = Pax()
+        p2.passport_expiry = ref + 1
+        p2.flight_status = "BOARDING"
+        p2.seat_class = "BUSINESS"
+        p2.luggage_kg = 31
+        p2.flight_id = "F002"
+        r2 = gm.process(p2, ctx)
+        assert r2 == "CHARGE_FEE", "BUSINESS 31kg must return CHARGE_FEE, got %r" % r2
+        # 이코노미 21kg -> CHARGE_FEE
+        p3 = Pax()
+        p3.passport_expiry = ref + 1
+        p3.flight_status = "BOARDING"
+        p3.seat_class = "ECONOMY"
+        p3.luggage_kg = 21
+        p3.flight_id = "F003"
+        r3 = gm.process(p3, ctx)
+        assert r3 == "CHARGE_FEE", "ECONOMY 21kg must return CHARGE_FEE, got %r" % r3
+        # 3. 누적 과금: F004에서 3명 CHARGE_FEE 후 4번째는 16kg(기준 15kg) -> CHARGE_FEE
+        fid = "F004"
+        for _ in range(3):
+            px = Pax()
+            px.passport_expiry = ref + 1
+            px.flight_status = "BOARDING"
+            px.seat_class = "ECONOMY"
+            px.luggage_kg = 21
+            px.flight_id = fid
+            gm.process(px, ctx)
+        p4 = Pax()
+        p4.passport_expiry = ref + 1
+        p4.flight_status = "BOARDING"
+        p4.seat_class = "ECONOMY"
+        p4.luggage_kg = 16
+        p4.flight_id = fid
+        r4 = gm.process(p4, ctx)
+        assert r4 == "CHARGE_FEE", "4th passenger 16kg (limit 15) must return CHARGE_FEE, got %r" % r4
+        print("ALL_TESTS_PASSED")
+    except AssertionError as e:
+        print("ASSERTION_FAILED:", str(e))
+        raise
+_sg_run_tests()
+'''
+
+
 # 하드코딩 딕셔너리 (상세 구조)
 # 추후 DB의 ProblemSpec.meta (JSON) 컬럼과 동일한 구조
 HARDCODED_PROBLEM_SPEC: Dict[int, Dict[str, Any]] = {
@@ -332,6 +412,8 @@ print(tsp(0, 1))
         },
         "solution_code": None,
         "test_cases": [],
+        # Judge0 검증: v2_code 끝에 붙여 실행, stdout에 "ALL_TESTS_PASSED" 출력 시 100점
+        "test_suite_code": _smart_gate_2026_test_suite_code(),
         "rubric": {
             "correctness": {"weight": 0.4, "description": "Phase 1/2 규칙 정확성"},
             "performance": {"weight": 0.1, "description": "실행 성능"},
@@ -383,6 +465,9 @@ def get_problem_info_sync(spec_id: int) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: 상세한 문제 정보 (basic_info, constraints, ai_guide, solution_code 포함)
     """
+    # DB에 스마트 게이트 2026이 spec_id=11로 저장된 환경: 11 → 20(스마트 게이트) 매핑
+    if spec_id == 11 and 20 in HARDCODED_PROBLEM_SPEC:
+        spec_id = 20
     # 하드코딩 딕셔너리 사용
     if spec_id in HARDCODED_PROBLEM_SPEC:
         problem_context = HARDCODED_PROBLEM_SPEC[spec_id].copy()

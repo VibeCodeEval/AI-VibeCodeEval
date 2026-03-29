@@ -12,6 +12,7 @@ from typing_extensions import TypedDict
 
 from app.infrastructure.persistence.models.enums import (CodeIntentType,
                                                          IntentAnalyzerStatus,
+                                                         UnifiedIntentType,
                                                          WriterResponseStatus)
 
 # ===== 메인 그래프 상태 =====
@@ -122,6 +123,12 @@ class EvalTurnState(TypedDict):
     human_message: str
     ai_message: str
 
+    # 이전 턴 대화 요약 (V2.2 Context-Integrated: 턴 N 평가 시 1~N-1 요약)
+    previous_turns_summary: Optional[str]
+
+    # Phase 2 첫 지시 여부 (SAVE 직후 턴 → 문맥 감점 없음)
+    is_phase2_first_turn: Optional[bool]
+
     # 문제 정보 (평가 시 문제 적절성 판단용)
     problem_context: Optional[Dict[str, Any]]
 
@@ -132,7 +139,7 @@ class EvalTurnState(TypedDict):
     # Intent 분석 결과 (복수 의도 지원)
     intent_types: Optional[list[str]]  # CodeIntentType 목록
     intent_confidence: float
-    unified_intent: Optional[str]  # v2.1 4대 통합 의도 (UnifiedIntentType: SETTING/CREATION/REFINEMENT/VALIDATION)
+    unified_intent: Optional[str]  # v2.3 6대 통합 의도 (SETTING/CREATION/REFINEMENT/DEBUGGING/EXPLORATION/FOLLOW_UP)
 
     # 8가지 의도별 평가 결과
     system_prompt_eval: Optional[Dict[str, Any]]  # 신규 추가
@@ -142,6 +149,7 @@ class EvalTurnState(TypedDict):
     debugging_eval: Optional[Dict[str, Any]]
     test_case_eval: Optional[Dict[str, Any]]
     hint_query_eval: Optional[Dict[str, Any]]
+    exploration_eval: Optional[Dict[str, Any]]
     follow_up_eval: Optional[Dict[str, Any]]
 
     # 답변 요약
@@ -158,14 +166,36 @@ class EvalTurnState(TypedDict):
 # ===== Pydantic 모델 (LLM 구조화 출력용) =====
 
 
-class IntentClassification(BaseModel):
-    """Intent 분류 결과 (복수 의도 지원)"""
+class PromptCharacteristics(BaseModel):
+    """1단계: 사용자 프롬프트 특성만 추출 (의도 라벨 금지)"""
 
-    intent_types: list[CodeIntentType] = Field(
-        ..., description="분류된 코드 의도 타입 목록 (복수 선택 가능)"
+    has_code_snippet: bool = Field(
+        ...,
+        description="사용자 메시지에 실행·수정 대상이 되는 코드 블록 또는 의미 있는 코드 조각이 포함되는가",
+    )
+    is_error_reported: bool = Field(
+        ...,
+        description="Traceback, 스택, 에러 메시지, '왜 안 돼', 실패 증상 등 실행 오류·버그를 보고하는가",
+    )
+    is_asking_for_concept: bool = Field(
+        ...,
+        description="알고리즘 정의, 개념 비교, 도구/라이브러리 설명 등 코드 작성 없이 지식·이해를 묻는가",
+    )
+    is_requesting_new_code: bool = Field(
+        ...,
+        description="새 코드 작성, 기존 코드 수정·리팩터, 최적화, 테스트 추가 등 결과물로 코드를 바꾸거나 만들어 달라는 요청인가",
+    )
+
+
+class IntentClassification(BaseModel):
+    """Intent 분류 결과 (V2.3: 6대 통합 의도 단일 선택)"""
+
+    intent_types: list[UnifiedIntentType] = Field(
+        ...,
+        description="6대 통합 의도 중 하나: SETTING, CREATION, REFINEMENT, DEBUGGING, EXPLORATION, FOLLOW_UP",
     )
     confidence: float = Field(..., ge=0.0, le=1.0, description="분류 신뢰도 (0-1)")
-    reasoning: str = Field(..., description="분류 이유")
+    reasoning: Optional[str] = Field(None, description="분류 이유")
 
 
 class GuardrailCheck(BaseModel):
@@ -213,22 +243,22 @@ class CodeQualityEvaluation(BaseModel):
 
 
 class HolisticFlowEvaluation(BaseModel):
-    """전체 플로우 평가 결과"""
+    """전체 플로우 평가 결과 (V2.3: 1~5 정수, 외부에서 0~100 환산)"""
 
-    problem_decomposition: float = Field(
-        ..., ge=0.0, le=100.0, description="문제 분해 점수 (항목 1)"
+    problem_decomposition: int = Field(
+        ..., ge=1, le=5, description="문제 분해 점수 (1~5 정수)"
     )
-    feedback_integration: float = Field(
-        ..., ge=0.0, le=100.0, description="피드백 수용성 점수 (항목 2)"
+    feedback_integration: int = Field(
+        ..., ge=1, le=5, description="피드백 수용성 점수 (1~5 정수)"
     )
-    strategic_exploration: float = Field(
-        ..., ge=0.0, le=100.0, description="전략적 탐색 점수 (항목 4)"
+    strategic_exploration: int = Field(
+        ..., ge=1, le=5, description="전략적 탐색 및 관리 점수 (1~5 정수)"
     )
-    overall_flow_score: float = Field(
-        ..., ge=0.0, le=100.0, description="전체 플로우 점수 (종합 점수)"
+    overall_flow_score: int = Field(
+        ..., ge=1, le=5, description="종합 점수 (1~5 정수, Holistic Impression)"
     )
     analysis: str = Field(
-        ..., description="상세 분석 내용 (주도성 및 오류 수정, 고급 프롬프트 기법 포함)"
+        ..., description="상세 분석 (위임 전략·고급 기법·주도성 포함)"
     )
 
 

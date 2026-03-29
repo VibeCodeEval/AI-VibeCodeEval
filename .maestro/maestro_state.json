@@ -1,8 +1,8 @@
 {
   "project": "AI-VibeCodeEval",
-  "maestro_version": "1.1.0",
-  "last_updated": "2026-01-29T10:00:00Z",
-  "current_focus": "phase6b_integrated_evaluator",
+  "maestro_version": "1.2.0",
+  "last_updated": "2026-03-30T16:30:00Z",
+  "current_focus": "v2.1_stabilization_and_reporting",
   
   "phases": {
     "phase1": {
@@ -38,68 +38,98 @@
     },
     "phase4": {
       "name": "LangGraph 프롬프트 구조 리팩토링",
-      "status": "ready_for_handoff",
+      "status": "completed",
       "owner": "sub_agent_features",
       "priority": 4,
-      "progress": 0,
-      "started_at": null,
-      "completed_at": null,
+      "progress": 100,
+      "started_at": "2026-01-26T00:00:00Z",
+      "completed_at": "2026-02-15T00:00:00Z",
       "depends_on": ["phase3"],
       "command_file": ".maestro/commands/pending/CMD_001_phase4_features.json",
       "main_task": "하드코딩된 프롬프트를 YAML 파일로 분리",
-      "format": "YAML"
+      "format": "YAML",
+      "notes": "YAML 프롬프트 파일 분리 완료. app/domain/langgraph/prompts/ 디렉토리에 eval_turn.yaml, eval_holistic_flow.yaml, eval_intent_analysis.yaml, intent_analyzer.yaml, writer_normal_v1.yaml, writer_guardrail.yaml 등 존재."
     },
     "phase5a": {
       "name": "응답 파인튜닝 (사용자-LLM 문답)",
-      "status": "ready_for_handoff",
+      "status": "partial",
       "owner": "sub_agent_response_tuning",
       "priority": 5,
-      "progress": 0,
+      "progress": 30,
       "started_at": null,
       "completed_at": null,
       "depends_on": ["phase4"],
       "command_file": ".maestro/commands/pending/CMD_002_phase5a_response.json",
-      "data_source": "prompt_messages (USER + ASSISTANT 쌍)"
+      "data_source": "prompt_messages (USER + ASSISTANT 쌍)",
+      "notes": "데이터 추출 예시 파일은 .maestro/data/finetuning/phase5a_response/ 에 존재. 본격 학습 파이프라인은 미구축."
     },
     "phase5b": {
       "name": "평가 파인튜닝 (LLM 평가)",
-      "status": "ready_for_handoff",
+      "status": "partial",
       "owner": "sub_agent_evaluation_tuning",
       "priority": 5,
-      "progress": 0,
+      "progress": 30,
       "started_at": null,
       "completed_at": null,
       "depends_on": ["phase4"],
       "command_file": ".maestro/commands/pending/CMD_003_phase5b_evaluation.json",
-      "data_source": "prompt_evaluations (TURN_EVAL - 평가 점수, 분석, 루브릭)"
+      "data_source": "prompt_evaluations (TURN_EVAL - 평가 점수, 분석, 루브릭)",
+      "notes": "데이터 추출 예시 파일은 .maestro/data/finetuning/phase5b_evaluation/ 에 존재."
     },
     "phase5c": {
       "name": "Chaining 파인튜닝 (전략 평가)",
-      "status": "ready_for_handoff",
+      "status": "partial",
       "owner": "sub_agent_chaining_tuning",
       "priority": 5,
-      "progress": 0,
+      "progress": 30,
       "started_at": null,
       "completed_at": null,
       "depends_on": ["phase4"],
       "command_file": ".maestro/commands/pending/CMD_004_phase5c_chaining.json",
-      "data_source": "prompt_evaluations (HOLISTIC_FLOW - Chaining 전략 평가)"
+      "data_source": "prompt_evaluations (HOLISTIC_FLOW - Chaining 전략 평가)",
+      "notes": "데이터 추출 예시 파일은 .maestro/data/finetuning/phase5c_chaining/ 에 존재."
     },
     "phase6": {
       "name": "시스템 리팩토링 - AST 기반 코드 생성 + 평가 통합",
       "status": "in_progress",
       "owner": "sub_agent_refactoring",
       "priority": 6,
-      "progress": 50,
+      "progress": 75,
       "started_at": "2026-01-29T09:00:00Z",
       "completed_at": null,
-      "current_sub_phase": "phase6b",
+      "current_sub_phase": "v2.1_stabilization",
       "depends_on": ["phase4", "phase5a", "phase5b", "phase5c"],
       "command_file": ".maestro/commands/pending/CMD_005_phase6_refactoring.json",
       "plan_document": ".maestro/PHASE6_PLAN.md",
       "sub_phases": ["phase6a", "phase6b", "phase6c", "phase6d"],
       "description": "Socratic → Spec 기반 코드 생성, AST Error Injection, 평가 통합, 파인튜닝 데이터 자동 생성"
     }
+  },
+
+  "v21_implementation": {
+    "description": "V2.1 노드별 구현 상태 (Step 01~06 + 추가 작업)",
+    "steps": {
+      "step01_problem_and_state": "completed",
+      "step02_intent_analyzer": "completed",
+      "step03_writer": "completed",
+      "step04_integrated_evaluator": "completed",
+      "step05_graph_and_scores": "completed",
+      "step06_finetuning_data": "partial"
+    },
+    "additional_implementations": {
+      "hybrid_likert_model": "completed",
+      "v211_strict_scoring": "completed",
+      "v22_previous_turns_summary": "completed",
+      "v22_5way_intent": "completed",
+      "v23_holistic_flow_strict_integer": "completed",
+      "synthetic_data_and_evol": "completed"
+    },
+    "pending": [
+      "Node4+Node6 통합 평가기 (현재 분리 실행)",
+      "파인튜닝 데이터 증강 (다른 AI 진행 예정)",
+      "데이터/스크립트 검증",
+      "JSONL 스키마 정리 및 문서화"
+    ]
   },
   
   "agents": {
@@ -112,45 +142,95 @@
     "sub_agent_features": {
       "role": "developer",
       "assigned_phases": ["phase4"],
-      "status": "ready",
-      "task": "YAML 프롬프트 파일 분리 작업"
+      "status": "completed",
+      "task": "YAML 프롬프트 파일 분리 작업 완료"
     },
     "sub_agent_response_tuning": {
       "role": "ml_engineer",
       "assigned_phases": ["phase5a"],
-      "status": "ready",
-      "task": "응답 파인튜닝 - 사용자-LLM 문답 데이터 추출 및 학습"
+      "status": "partial",
+      "task": "응답 파인튜닝 - 데이터 예시 준비 완료, 학습 파이프라인 미구축"
     },
     "sub_agent_evaluation_tuning": {
       "role": "ml_engineer",
       "assigned_phases": ["phase5b"],
-      "status": "ready",
-      "task": "평가 파인튜닝 - TURN_EVAL 평가 데이터 추출 및 학습"
+      "status": "partial",
+      "task": "평가 파인튜닝 - 데이터 예시 준비 완료"
     },
     "sub_agent_chaining_tuning": {
       "role": "ml_engineer",
       "assigned_phases": ["phase5c"],
-      "status": "ready",
-      "task": "Chaining 파인튜닝 - HOLISTIC_FLOW 전략 평가 데이터 추출 및 학습"
+      "status": "partial",
+      "task": "Chaining 파인튜닝 - 데이터 예시 준비 완료"
     },
     "sub_agent_refactoring": {
       "role": "architect",
       "assigned_phases": ["phase6"],
-      "status": "ready",
-      "task": "시스템 리팩토링 - AST 기반 코드 생성 + 평가 통합 + 파인튜닝 데이터 자동 생성"
+      "status": "in_progress",
+      "task": "V2.1 구현 완료, 안정화 및 통합 평가기 작업 중"
+    },
+    "project_maestro": {
+      "role": "project_manager",
+      "system_prompt": ".maestro/agents/project_maestro.md",
+      "status": "active",
+      "scope": ["프로젝트 전체", ".maestro/", "docs/", "파일 구조", "에이전트 조율"],
+      "task": "프로젝트 전체 총괄, .maestro 관리, 하위 6개 에이전트 최상위 조율"
+    },
+    "graph_orchestrator": {
+      "role": "graph_manager",
+      "system_prompt": ".maestro/agents/graph_orchestrator.md",
+      "status": "active",
+      "scope": ["states.py", "graph.py", ".maestro/"],
+      "task": "State/Graph 총괄, 하위 에이전트 조율"
+    },
+    "chat_loop_agent": {
+      "role": "chat_developer",
+      "system_prompt": ".maestro/agents/chat_loop_agent.md",
+      "status": "active",
+      "scope": ["handle_request", "intent_analyzer", "writer", "system_nodes"],
+      "task": "채팅 루프 (요청→의도→응답) 관리"
+    },
+    "eval_orchestrator": {
+      "role": "eval_manager",
+      "system_prompt": ".maestro/agents/eval_orchestrator.md",
+      "status": "active",
+      "scope": ["평가 전략", "점수 병합", "평가 Agent 조율"],
+      "task": "평가 파이프라인 전략, 하위 평가 Agent 조율"
+    },
+    "turn_eval_agent": {
+      "role": "eval_developer",
+      "system_prompt": ".maestro/agents/turn_eval_agent.md",
+      "status": "active",
+      "scope": ["eval_turn_guard", "turn_evaluator/", "subgraph_eval_turn"],
+      "task": "턴별 프롬프트 품질 평가 (서브그래프)"
+    },
+    "holistic_score_agent": {
+      "role": "eval_developer",
+      "system_prompt": ".maestro/agents/holistic_score_agent.md",
+      "status": "active",
+      "scope": ["integrated_evaluator", "holistic_evaluator/", "code_quality"],
+      "task": "통합 평가, 전략 평가, 최종 점수 산정"
     }
   },
   
   "metrics": {
-    "total_progress": 55,
+    "total_progress": 75,
     "commands_issued": 6,
-    "commands_completed": 1,
+    "commands_completed": 4,
     "blockers": [],
     "phase6_progress": {
       "phase6a": "completed",
-      "phase6b": "completed",
+      "phase6b": "completed (Node4+Node6 통합 미완)",
       "phase6c": "pending",
-      "phase6d": "partial"
+      "phase6d": "partial (6d-1 완료, 6d-2 미완)"
+    },
+    "v21_step_progress": {
+      "step01": "completed",
+      "step02": "completed",
+      "step03": "completed",
+      "step04": "completed",
+      "step05": "completed",
+      "step06": "partial"
     }
   },
   
@@ -164,7 +244,8 @@
         "app/domain/langgraph/nodes/holistic_evaluator/flow.py"
       ],
       "output_folder": "app/domain/langgraph/prompts/",
-      "format": "YAML"
+      "format": "YAML",
+      "status": "completed"
     },
     "phase5a": {
       "main_task": "응답 파인튜닝 (사용자-LLM 문답)",
@@ -193,20 +274,24 @@
       "sub_phases": {
         "phase6a": {
           "name": "AST 기반 코드 생성 시스템",
+          "status": "completed",
           "components": ["Spec Extractor", "AST Analyzer", "Spec-AST Mapper", "Error Injector"]
         },
         "phase6b": {
           "name": "평가 노드 통합",
+          "status": "completed (Node4+Node6 통합 미완)",
           "components": ["TurnAnalysis 모델", "Spec Extractor 확장", "Integrated Evaluator(규칙)", "Graph 연결", "scores 통합"],
           "gap": "Node4+Node6 통합 평가기(한번에 LLM as Judge) 미구현. 현재는 Node4→integrated_evaluator→Node6 분리 실행."
         },
         "phase6c": {
           "name": "파인튜닝 데이터 자동 생성",
+          "status": "pending",
           "components": ["User Simulator", "Simulation Controller", "데이터셋 생성", "검수 도구"]
         },
         "phase6d": {
           "name": "Graph 구조 변경",
-          "components": ["State 확장", "노드 연결 변경"]
+          "status": "partial",
+          "components": ["State 확장 (완료)", "노드 연결 변경 (미완)"]
         }
       },
       "target_dataset": "120-150 샘플 (bad/medium/good 각 40-50개)",
@@ -214,6 +299,14 @@
     }
   },
   
+  "reporting": {
+    "guide": ".maestro/REPORTING_GUIDE.md",
+    "docs_reference": ".maestro/DOCS_REFERENCE.md",
+    "daily_reports_path": ".maestro/reports/daily/{YYYY-MM-DD}/",
+    "report_types": ["code_changes.md", "plan_changes.md", "api_changes.md"],
+    "rule": "모든 수정 사항은 .maestro에 기록. 수정 후 반드시 사용자 컨펌."
+  },
+
   "notes": [
     {
       "timestamp": "2026-01-18T00:00:00Z",
@@ -233,11 +326,43 @@
     },
     {
       "timestamp": "2026-01-29T10:00:00Z",
-      "content": "Phase 6A 완료 (AST 기반 코드 생성). Phase 6B 시작 - Spec 중심 통합 평가 시스템 재설계. 6개 핵심 지표 (첫 프롬프트 55%, 후속 턴 25%, 효율성 20%)."
+      "content": "Phase 6A 완료 (AST 기반 코드 생성). Phase 6B 시작 - Spec 중심 통합 평가 시스템 재설계."
     },
     {
       "timestamp": "2026-01-29T14:00:00Z",
-      "content": "Phase 6B 구현 상태 정리: 6b-1~6b-6 완료. 단 Node4(eval_turn_guard)와 Node6(eval_holistic_flow)는 통합되지 않고 분리 실행. 목표였던 'Node4+Node6 통합해서 한번에 진행'은 미구현. .maestro에 현재 구현 상태·갭 반영 완료."
+      "content": "Phase 6B 6b-1~6b-6 완료. Node4+Node6 통합은 미구현."
+    },
+    {
+      "timestamp": "2026-03-27T04:45:00Z",
+      "content": "V2.1 전체 진행 점검. Step 01~05 완료, Step 06 부분 완료 확인. 추가 구현 사항(Hybrid Likert, V2.1.1 Strict, V2.2 이전 턴 요약/5-way 의도, V2.3 Holistic Flow, 합성 데이터/Evol-Instruct) 기록 반영. 기록 관리 체계 수립: 날짜별 폴더에 code_changes/plan_changes/api_changes 분리 저장. REPORTING_GUIDE.md 작성."
+    },
+    {
+      "timestamp": "2026-03-27T15:00:00Z",
+      "content": "프로젝트 파일 구조 정리. 루트 36개→13개로 축소. JSONL→data/, test py→test_scripts/, PS1→scripts/, test JSON→test_scripts/, MD→docs/ 이동. 중복 파일 2개(v21_finetuning_dataset.jsonl, test_cases.json) 삭제. 임시 파일 2개(solution.py, chat_diff.txt) 삭제. archive 디렉토리 2개(15파일) 삭제. 이동된 MD 파일에 날짜(2026-03-27) 기록."
+    },
+    {
+      "timestamp": "2026-03-27T16:00:00Z",
+      "content": "docs/ 문서 통합 정리. 38개→21개로 축소. 파일명 한국어로 변환. 9개 통합 문서 생성(API 변경이력, State 흐름, Node4 평가, DB 접근, DB 설정, DB 변경, 테스트, Judge0, 환경설정). 11개 기존 파일 한국어 rename. docs/README.md 삭제. 문서_인덱스.md 전면 갱신. 모든 MD에 날짜(2026-03-27) 기록."
+    },
+    {
+      "timestamp": "2026-03-27T18:00:00Z",
+      "content": "에이전트 시스템 프롬프트 작성. .maestro/agents/ 디렉토리 생성. 5개 에이전트 프롬프트(graph_orchestrator, chat_loop_agent, eval_orchestrator, turn_eval_agent, holistic_score_agent) + AGENT_OVERVIEW.md 작성. 계층 구조: 그래프 오케스트레이터 + 채팅 루프 Agent + 평가 오케스트레이터(턴 평가 Agent + Holistic/점수 Agent). maestro_state.json agents 섹션에 5개 신규 등록."
+    },
+    {
+      "timestamp": "2026-03-27T19:00:00Z",
+      "content": "프로젝트 마에스트로 에이전트 프롬프트 작성. .maestro/agents/project_maestro.md 생성 — 프로젝트 전체 총괄 관리자 역할. 에이전트 계층 구조의 최상위에 배치. AGENT_OVERVIEW.md 계층도 갱신. maestro_state.json에 project_maestro 등록."
+    },
+    {
+      "timestamp": "2026-03-27T20:00:00Z",
+      "content": "LangGraph 노드 디렉토리 구조 리팩토링. nodes/ 평면 구조 → 역할별 4폴더(chat/eval/eval_turn/system) + 노드번호(n1~n9). holistic_evaluator 해체(scores.py 분리→n7+n9, deprecated 삭제). turn_evaluator→eval_turn 이동. 25+파일 import 업데이트. 에이전트 프롬프트 7개 경로 갱신."
+    },
+    {
+      "timestamp": "2026-03-30T12:00:00Z",
+      "content": "평가 JSON 내보내기: scripts/export_evaluation_json.py (meta→턴별→홀리스틱→code_scores, --exam-id 등). DB role raw SQL·problem_specs 별도 lookup. data/15_5_평가.json 생성. 일일 기록 code_changes.md + 시험15·유저5 실패 요인 분석 exam15_participant5_failure_analysis.md. V2.1_Change_Log.md에 2026-03-30 항목 추가."
+    },
+    {
+      "timestamp": "2026-03-30T16:30:00Z",
+      "content": ".maestro 폴더 감사 및 변경 추적 저장: 상위 디렉터리 구성 요약, git status 기준 수정 6파일·미추적 목록 정리. reports/daily/2026-03-30/plan_changes.md 신규. last_updated 갱신."
     }
   ]
 }

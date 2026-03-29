@@ -308,22 +308,22 @@ class Judge0Client:
                     wait=True,
                 )
 
-                # 결과 분석
+                # 결과 분석 (Judge0가 stdout을 null로 줄 수 있음 → None 방지)
                 status_id = result.get("status", {}).get("id")
-                passed = status_id == 3 and result.get(  # Accepted
-                    "stdout", ""
-                ).strip() == (
-                    test_case.get("expected", "").strip()
+                actual_stdout = (result.get("stdout") or "").strip()
+                expected_stdout = (
+                    (test_case.get("expected") or "").strip()
                     if test_case.get("expected")
                     else ""
                 )
+                passed = status_id == 3 and actual_stdout == expected_stdout
 
                 results.append(
                     {
                         "test_case_index": i,
                         "input": test_case.get("input", ""),
                         "expected": test_case.get("expected", ""),
-                        "actual": result.get("stdout", "").strip(),
+                        "actual": actual_stdout,
                         "passed": passed,
                         "status_id": status_id,
                         "status_description": result.get("status", {}).get(

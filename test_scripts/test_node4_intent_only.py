@@ -22,9 +22,9 @@ from typing import Dict, Any
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from app.domain.langgraph.nodes.turn_evaluator.analysis import intent_analysis
-from app.domain.langgraph.nodes.turn_evaluator.routers import intent_router
-from app.domain.langgraph.nodes.turn_evaluator.evaluators import (
+from app.domain.langgraph.nodes.eval_turn.analysis import intent_analysis
+from app.domain.langgraph.nodes.eval_turn.routers import intent_router
+from app.domain.langgraph.nodes.eval_turn.evaluators import (
     eval_system_prompt,
     eval_rule_setting,
     eval_generation,
@@ -34,7 +34,7 @@ from app.domain.langgraph.nodes.turn_evaluator.evaluators import (
     eval_hint_query,
     eval_follow_up
 )
-from app.domain.langgraph.nodes.turn_evaluator.aggregation import aggregate_turn_log
+from app.domain.langgraph.nodes.eval_turn.aggregation import aggregate_turn_log
 from app.domain.langgraph.states import EvalTurnState
 from app.domain.langgraph.utils.problem_info import get_problem_info_sync
 
