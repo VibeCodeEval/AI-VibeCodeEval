@@ -575,6 +575,65 @@ LANGCHAIN_API_KEY=your_langsmith_api_key_here
 
 ---
 
+## BE ↔ AI 연동 흐름 (2026-03-30 최신화)
+
+### 제출 평가 요청 흐름 (DB Outbox 패턴)
+
+```
+FE → POST /api/exams/{examId}/submissions  (code, lang)
+  ↓ 202 Accepted + submissionId
+BE SubmitUseCase:
+  1. Submission DB 저장 (QUEUED 상태)
+  2. outbox_events 테이블에 AI_EVAL_REQUEST 이벤트 저장 (같은 트랜잭션)
+  ↓ 트랜잭션 커밋 완료
+BE OutboxPoller (5초 주기):
+  3. PENDING 이벤트 조회 → PROCESSING으로 선점
+  4. AIChatService.submitEvaluation() 호출
+     → POST http://localhost:8000/api/session/{sessionId}/submit
+  5. 성공: PROCESSED / 실패: attempts++ & 지수 백오프 → PENDING 복귀
+AI EvalService:
+  6. LangGraph 실행 (Judge0 + Turn/Holistic Evaluator)
+  7. BE Callback: POST http://localhost:8080/api/internal/submissions/{id}/result
+BE ReceiveScoringResultUseCase:
+  8. Submission 상태 → DONE/FAILED
+  9. SubmissionRun, Score DB 저장
+  10. ScoringResultSseEvent 발행 → @TransactionalEventListener(AFTER_COMMIT)
+  11. Admin SSE로 실시간 전달 (최대 5회 재시도)
+```
+
+### Outbox 이벤트 상태 전이
+
+```
+PENDING → PROCESSING → PROCESSED (성공)
+                     → PENDING   (실패 & attempts < 5, 지수 백오프)
+                     → FAILED    (attempts >= 5)
+
+PROCESSING 2분 고착 시 → PENDING 자동 복구 (서버 크래시 대비)
+```
+
+### BE Callback 명세 (AI → BE)
+
+**Endpoint**: `POST http://localhost:8080/api/internal/submissions/{submissionId}/result`
+
+```json
+{
+  "status": "DONE",
+  "testCases": [
+    { "caseIndex": 0, "group": "SAMPLE", "verdict": "AC", "timeMs": 150, "memKb": 8192, "stdoutBytes": 42, "stderrBytes": 0 }
+  ],
+  "score": {
+    "promptScore": 35.5,
+    "perfScore": 25.0,
+    "correctnessScore": 25.5,
+    "rubricJson": "{...}"
+  }
+}
+```
+
+**주의**: 내부 네트워크 전용. 프로덕션에서는 IP 화이트리스트 또는 내부 토큰 필요.
+
+---
+
 ## [DEPRECATED] 레거시 엔드포인트
 
 ### POST /api/chat/message
