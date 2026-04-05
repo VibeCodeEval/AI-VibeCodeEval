@@ -20,6 +20,7 @@ from app.domain.langgraph.states import GuardrailCheck, MainGraphState
 from app.domain.langgraph.utils.structured_output_parser import \
     parse_structured_output_async
 from app.domain.langgraph.utils.token_tracking import (accumulate_tokens,
+                                                       estimate_user_text_tokens,
                                                        extract_token_usage)
 from app.infrastructure.persistence.models.enums import IntentAnalyzerStatus
 
@@ -605,6 +606,7 @@ async def intent_analyzer(state: MainGraphState) -> Dict[str, Any]:
             "is_guardrail_failed": False,
             "guide_strategy": None,
             "keywords": [],
+            "intent_llm_ran": False,
         }
 
     try:
@@ -662,6 +664,7 @@ async def intent_analyzer(state: MainGraphState) -> Dict[str, Any]:
                 "guide_strategy": quick_result.get("guide_strategy"),
                 "keywords": quick_result.get("keywords", []),
                 "updated_at": datetime.utcnow().isoformat(),
+                "intent_llm_ran": False,
             }
 
         # Layer 2: LLM 기반 상세 분석
@@ -678,11 +681,20 @@ async def intent_analyzer(state: MainGraphState) -> Dict[str, Any]:
         raw_response = await llm.ainvoke(formatted_messages)
 
         # 토큰 사용량 추출 및 State에 누적
+        intent_recorded_user_prompt = False
         tokens = extract_token_usage(raw_response)
         if tokens:
-            accumulate_tokens(state, tokens, token_type="chat")
+            user_pt = estimate_user_text_tokens(human_message)
+            accumulate_tokens(
+                state,
+                tokens,
+                token_type="chat",
+                chat_prompt_token_override=user_pt,
+            )
+            intent_recorded_user_prompt = True
             logger.debug(
-                f"[Intent Analyzer] 토큰 사용량 추출 성공 - prompt: {tokens.get('prompt_tokens')}, completion: {tokens.get('completion_tokens')}, total: {tokens.get('total_tokens')}"
+                f"[Intent Analyzer] 토큰 사용량 추출 성공 - "
+                f"user_prompt(추정): {user_pt}, completion: {tokens.get('completion_tokens')}"
             )
         else:
             logger.warning(
@@ -710,6 +722,7 @@ async def intent_analyzer(state: MainGraphState) -> Dict[str, Any]:
 
         # 출력 처리 (State 형식으로 변환)
         result = process_output(structured_result)
+        result["intent_llm_ran"] = intent_recorded_user_prompt
 
         # State에 누적된 토큰 정보를 result에 포함 (LangGraph 병합을 위해)
         if "chat_tokens" in state:
@@ -735,6 +748,7 @@ async def intent_analyzer(state: MainGraphState) -> Dict[str, Any]:
                 "error_message": str(e),
                 "guide_strategy": None,
                 "keywords": [],
+                "intent_llm_ran": False,
             }
 
         # 다른 에러는 재발생

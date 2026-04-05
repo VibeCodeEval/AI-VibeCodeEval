@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "ai_vibe_coding_test"
 
+    # DB에 참가자 테이블이 `users` 인 경우(Core/구 스키마) `users` 로 설정.
+    # init-db.sql 기본은 `participants`.
+    VIBECODE_PARTICIPANT_TABLE: str = "participants"
+
+    # setup_submit_test_data 등 시드 시 exams.created_by (NOT NULL 스키마용).
+    # 비우면 DB에서 SELECT MIN(id) FROM admins 사용.
+    VIBECODE_SEED_EXAM_CREATED_BY: Optional[int] = None
+
     @property
     def POSTGRES_URL(self) -> str:
         return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
@@ -96,6 +104,10 @@ class Settings(BaseSettings):
 
     # LangGraph 체크포인트 설정
     CHECKPOINT_TTL_SECONDS: int = 86400  # 24시간 (제출 완료 후 Redis 세션 자동 삭제)
+
+    # N8 토론 로그를 Redis에 남길지. True면 N8 종료 시 debate_log:{session_id} 저장.
+    # 이후 scripts/dump_debate_redis.py 로 파일 덤프 가능. TTL은 CHECKPOINT_TTL_SECONDS와 동일.
+    DEBATE_LOG_TO_REDIS: bool = True
 
     # LangSmith 설정 (개발 환경에서 사용)
     # 공식 문서: https://docs.langchain.com/langsmith/create-account-api-key

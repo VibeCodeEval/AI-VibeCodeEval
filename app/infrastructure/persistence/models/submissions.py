@@ -15,6 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.infrastructure.persistence.models.enums import (SubmissionStatusEnum,
                                                          TestRunGrpEnum,
                                                          VerdictEnum)
+from app.infrastructure.persistence.models.participants import Participant
 from app.infrastructure.persistence.session import Base
 
 
@@ -28,7 +29,7 @@ class Submission(Base):
         BigInteger, ForeignKey("exams.id"), nullable=False
     )
     participant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("participants.id"), nullable=False
+        BigInteger, ForeignKey(Participant.id), nullable=False
     )
     spec_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("problem_specs.id"), nullable=False

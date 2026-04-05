@@ -4,9 +4,13 @@ V2.1 Hybrid 평가 모델 — 1~5점 Likert 척도 및 Backend 환산
 - LLM은 1~5 정수(likert_score)와 진단 태그(diagnosis_profile)를 출력.
 - Backend는 Map {5:100, 4:90, 3:80, 2:60, 1:0}으로 최종 점수(final_score) 환산.
 - 가중치 산식은 사용하지 않음 (직관적 4점=우수/90점, 5점=탁월/100점).
+
+V3.0 Rubric-Based 모델 (EvalTurnV30Output):
+- LLM은 turn_score(1~5), rubric_breakdown(R1~R4 개별 점수), applied_rubrics 출력.
+- turn_score는 의도별 게이트에 따른 가중 평균을 LLM이 직접 산출.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -63,6 +67,27 @@ def build_diagnosis_profile(
         "context_maintenance": context_maintenance,  # "Perfect" | "Good" | "Vague"
         "strategic_direction": strategic_direction,
     }
+
+
+# --- V3.0 YAML JSON 출력 파싱용 (R1~R4 루브릭 기반) ---
+class EvalTurnV30Output(BaseModel):
+    """
+    eval_turn.yaml V3.0에서 요구하는 JSON 출력 형식.
+    LLM은 turn_score(1~5), rubric_breakdown(적용 루브릭별 점수),
+    applied_rubrics(적용된 루브릭 목록), feedback_summary를 반환.
+    final_score는 Backend에서 likert_to_final(turn_score)로 환산.
+    """
+
+    turn_score: int = Field(..., ge=1, le=5, description="의도별 가중 평균 점수 (1~5)")
+    rubric_breakdown: Dict[str, int] = Field(
+        default_factory=dict,
+        description="적용된 루브릭별 1~5 점수 (예: {'R1_logic_efficiency': 4, 'R2_clarity_completeness': 2})",
+    )
+    applied_rubrics: List[str] = Field(
+        default_factory=list,
+        description="실제 적용된 루브릭 목록 (의도에 따라 가변, 예: ['R1', 'R2', 'R3'])",
+    )
+    feedback_summary: str = Field("", description="평가 요약 (강점/아쉬운 점)")
 
 
 # --- V2.1 YAML JSON 출력 파싱용 (LLM이 반환하는 필드만) ---

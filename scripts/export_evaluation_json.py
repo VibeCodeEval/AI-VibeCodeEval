@@ -3,7 +3,7 @@
 DB에서 참가자·문제(또는 spec) 조합으로 평가를 JSON으로 내보냅니다.
 
 저장 기본값: data/{exam_id}_{participant_id}_평가.json
-구조 순서: 단일 턴 평가 → 전체(홀리스틱) 턴 평가 → 코드 점수
+구조 순서: 단일 턴 평가 → 전체(홀리스틱) 턴 평가 → Redis N8 토론 덤프 → 코드 점수
 
 사용 예:
   uv run python scripts/export_evaluation_json.py --participant-id 1 --problem-id 5
@@ -128,6 +128,7 @@ def _build_ordered_export(
     evaluations: List[Any],
     sub: Any,
     score_row: Any,
+    debate_redis_section: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
     JSON 키 순서: 단일 턴 평가 → 전체 세션(홀리스틱) 평가 → 코드 점수.
@@ -173,6 +174,7 @@ def _build_ordered_export(
             "description": "세션 전체(HOLISTIC_FLOW) Chaining·전략 평가 — 노드 6a",
             "evaluations": holistic_evals,
         },
+        "debate_redis": debate_redis_section,
         "code_scores": {
             "description": "제출·Judge0 연동 최종 점수 — scores / submission",
             "submission": (
@@ -282,7 +284,23 @@ async def _export_session_bundle(session_id: int) -> Dict[str, Any]:
                 select(Score).where(Score.submission_id == sub.id)
             )
 
-        return _build_ordered_export(ps, problem_id, messages, evaluations, sub, score_row)
+        from app.infrastructure.cache.debate_redis_dump import (
+            async_debate_redis_section_for_prompt_session,
+        )
+
+        debate_redis_section = await async_debate_redis_section_for_prompt_session(
+            session_id
+        )
+
+        return _build_ordered_export(
+            ps,
+            problem_id,
+            messages,
+            evaluations,
+            sub,
+            score_row,
+            debate_redis_section,
+        )
 
 
 def _default_output_path(exam_id: int, participant_id: int, session_id: int) -> str:

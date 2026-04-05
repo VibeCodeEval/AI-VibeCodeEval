@@ -6,6 +6,7 @@ from langchain_core.runnables import RunnableLambda
 
 from app.domain.langgraph.nodes.eval_turn.grading import (
     EvalTurnV21Output,
+    EvalTurnV30Output,
     likert_to_final,
 )
 from app.domain.langgraph.nodes.eval_turn.utils import get_llm
@@ -270,40 +271,41 @@ async def _evaluate_turn(
                 f"[{eval_type} 평가] 토큰 사용량 추출 실패 - raw_response 타입: {type(raw_response)}"
             )
 
-        # V2.1: 원본 응답을 EvalTurnV21Output(likert_score, diagnosis_profile, feedback_summary)으로 파싱
+        # V3.0: 원본 응답을 EvalTurnV30Output(turn_score, rubric_breakdown, applied_rubrics, feedback_summary)으로 파싱
         try:
-            structured_llm = llm.with_structured_output(EvalTurnV21Output)
+            structured_llm = llm.with_structured_output(EvalTurnV30Output)
             structured_result = await parse_structured_output_async(
                 raw_response=raw_response,
-                model_class=EvalTurnV21Output,
+                model_class=EvalTurnV30Output,
                 fallback_llm=structured_llm,
                 formatted_messages=formatted_messages,
             )
         except Exception as parse_error:
             logger.error(
-                f"[{eval_type} 평가] V2.1 구조화된 출력 파싱 실패: {str(parse_error)}",
+                f"[{eval_type} 평가] V3.0 구조화된 출력 파싱 실패: {str(parse_error)}",
                 exc_info=True,
             )
             logger.info(f"[{eval_type} 평가] Fallback: 구조화된 출력 Chain 사용")
-            structured_llm = llm.with_structured_output(EvalTurnV21Output)
+            structured_llm = llm.with_structured_output(EvalTurnV30Output)
             structured_result = await structured_llm.ainvoke(formatted_messages)
 
-        # 1~5 Likert → final_score 환산 ({5:100, 4:90, 3:80, 2:60, 1:0})
-        final_score = likert_to_final(structured_result.likert_score)
-        diagnosis = structured_result.diagnosis_profile
-        if not isinstance(diagnosis, dict):
-            diagnosis = {}
+        # 1~5 turn_score → final_score 환산 ({5:100, 4:90, 3:80, 2:60, 1:0})
+        final_score = likert_to_final(structured_result.turn_score)
+        rubric_breakdown = structured_result.rubric_breakdown or {}
+        applied_rubrics = structured_result.applied_rubrics or []
+        feedback_summary = structured_result.feedback_summary or ""
 
         # 반환 객체: final_score 필수 포함 → aggregation에서 별도 계산 없이 평균
         chain_result = {
             "intent": eval_type,
-            "likert_score": structured_result.likert_score,
+            "turn_score": structured_result.turn_score,
             "final_score": final_score,
-            "diagnosis_profile": diagnosis,
-            "feedback_summary": structured_result.feedback_summary or "",
+            "rubric_breakdown": rubric_breakdown,
+            "applied_rubrics": applied_rubrics,
+            "feedback_summary": feedback_summary,
             "score": final_score,
             "average": final_score,
-            "final_reasoning": structured_result.feedback_summary or "",
+            "final_reasoning": feedback_summary,
             "rubrics": [],
         }
 
@@ -317,9 +319,10 @@ async def _evaluate_turn(
         logger.error(f"평가 중 오류 발생: {str(e)}")
         return {
             "intent": eval_type,
-            "likert_score": None,
+            "turn_score": None,
             "final_score": 0,
-            "diagnosis_profile": {},
+            "rubric_breakdown": {},
+            "applied_rubrics": [],
             "feedback_summary": f"평가 실패: {str(e)}",
             "score": 0,
             "average": 0,

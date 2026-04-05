@@ -3,6 +3,7 @@ LangGraph 상태 정의
 메인 그래프 및 서브그래프의 상태 타입
 """
 
+import operator
 from datetime import datetime
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
@@ -50,6 +51,8 @@ class MainGraphState(TypedDict):
     guardrail_message: Optional[str]
     guide_strategy: Optional[str]  # SYNTAX_GUIDE, LOGIC_HINT, ROADMAP, GENERATION
     keywords: Optional[List[str]]  # 사용자 질문의 핵심 키워드
+    # Intent 노드가 chat_tokens에 사용자 프롬프트(tiktoken)를 이미 누적했는지 (Writer 이중 카운트 방지)
+    intent_llm_ran: Optional[bool]
 
     # Writer LLM 결과
     writer_status: Optional[str]  # WriterResponseStatus
@@ -64,6 +67,8 @@ class MainGraphState(TypedDict):
     # 평가 점수
     turn_scores: Dict[str, Any]
     holistic_flow_score: Optional[float]
+    # N8 FinalVerdict: R4 대화 맥락 유지 (turn_scores 궤적 기반, N9 prompt_score에 반영)
+    r4_context_maintenance_score: Optional[float]
     holistic_flow_analysis: Optional[str]  # 체이닝 전략에 대한 상세 분석
     aggregate_turn_score: Optional[float]
     code_performance_score: Optional[float]
@@ -104,11 +109,63 @@ class MainGraphState(TypedDict):
     integrated_score: Optional[float]  # 통합 평가 점수 (제출 시)
     integrated_evaluation: Optional[Dict[str, Any]]  # 통합 평가 상세 결과
 
+    # Phase 6E: 평가 파이프라인 재설계 (N5~N8)
+    code_quality_metrics: Optional[Dict[str, Any]]  # N6: Radon CC 등 정적 분석
+    code_eval_report: Optional[Dict[str, Any]]      # N7: 코드 리뷰 에이전트 결과
+    debate_log: Optional[List[Dict[str, Any]]]      # N8: 다중 에이전트 토론 전체 기록
+    debate_initial_opinions: Optional[List[Dict[str, Any]]]  # N8 Round1
+    debate_rebuttals: Optional[List[Dict[str, Any]]]  # N8 Round2
+
     # v2.1 Snapshot: Phase 1 확정 / 최종 제출 코드 추적
     v1_code: Optional[str]  # Phase 1 SAVE로 확정된 Baseline 코드
     v2_code: Optional[str]  # 최종 제출 시점의 Final 코드
     v1_metrics: Optional[Dict[str, Any]]  # v1_code 분석 결과 (예: Radon CC 등)
     v2_metrics: Optional[Dict[str, Any]]  # v2_code 분석 결과 (예: Radon CC, AST 패턴 등)
+
+
+# ===== Debate SubGraph 상태 =====
+
+
+class DebateState(TypedDict):
+    """N8 다중 에이전트 토론 SubGraph 상태"""
+
+    # 입력 컨텍스트 (MainGraphState에서 전달)
+    session_id: str
+    problem_context: Optional[Dict[str, Any]]
+    code_content: Optional[str]
+
+    # N4 — 턴별 숫자 점수 (MainGraphState.turn_scores)
+    turn_scores: Optional[Dict[str, Any]]
+    aggregate_turn_score: Optional[float]
+
+    # N4 — 턴별 전체 평가 내용 (Redis에서 읽은 detailed_turn_log)
+    # 구조: {turn_key: {user_prompt_summary, llm_answer_summary, prompt_evaluation_details}}
+    turn_logs: Optional[Dict[str, Any]]
+
+    # N5 — Judge0 점수 + 실행 상세
+    code_correctness_score: Optional[float]
+    code_performance_score: Optional[float]
+    test_cases_passed: Optional[int]
+    test_cases_total: Optional[int]
+    execution_time: Optional[float]
+    memory_used_mb: Optional[float]
+    correctness_reasoning: Optional[str]
+
+    # N6 — Radon CC 정적 분석
+    code_quality_metrics: Optional[Dict[str, Any]]
+
+    # N7 — LLM 코드 리뷰 전문
+    code_eval_report: Optional[Dict[str, Any]]
+
+    # 토론 누적 (operator.add: 병렬 팬인 시 자동 병합)
+    initial_opinions: Annotated[List[Dict[str, Any]], operator.add]  # Round 1 병렬
+    rebuttals: Annotated[List[Dict[str, Any]], operator.add]          # Round 2 순차
+
+    # 최종 출력 (MainGraphState.holistic_flow_score / holistic_flow_analysis로 반환)
+    holistic_flow_score: Optional[float]
+    r4_context_maintenance_score: Optional[float]
+    holistic_flow_analysis: Optional[str]
+    debate_log: Optional[List[Dict[str, Any]]]
 
 
 # ===== Eval Turn SubGraph 상태 =====

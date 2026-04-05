@@ -23,6 +23,7 @@ from app.domain.langgraph.states import MainGraphState
 from app.domain.langgraph.utils.llm_factory import get_llm
 from app.domain.langgraph.utils.token_tracking import (
     accumulate_tokens,
+    estimate_user_text_tokens,
     extract_token_usage,
 )
 
@@ -322,7 +323,14 @@ async def spec_extractor(state: MainGraphState) -> Dict[str, Any]:
         if hasattr(response, "_llm_response"):
             tokens = extract_token_usage(response._llm_response)
             if tokens:
-                accumulate_tokens(state, tokens, token_type="chat")
+                accumulate_tokens(
+                    state,
+                    tokens,
+                    token_type="chat",
+                    chat_prompt_token_override=estimate_user_text_tokens(
+                        human_message
+                    ),
+                )
         
         # SpecResult를 딕셔너리로 변환
         spec_result = {

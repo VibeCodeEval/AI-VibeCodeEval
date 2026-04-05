@@ -180,11 +180,6 @@ async def send_messages(
         previous_chat_tokens_before = (
             state_before.get("chat_tokens", {}) if state_before else {}
         )
-        previous_total_before = (
-            previous_chat_tokens_before.get("total_tokens", 0)
-            if isinstance(previous_chat_tokens_before, dict)
-            else 0
-        )
 
         langgraph_task = asyncio.create_task(
             eval_service.process_message(
@@ -227,18 +222,20 @@ async def send_messages(
             )
 
         # [4] 토큰 계산
-        # chat_tokens는 누적된 값이므로, 현재 Turn의 토큰만 추출
         chat_tokens = result.get("chat_tokens", {})
-        total_tokens_after = (
-            chat_tokens.get("total_tokens", 0) if isinstance(chat_tokens, dict) else 0
-        )
 
-        # 현재 Turn의 AI 응답 토큰 = 실행 후 누적값 - 실행 전 누적값
-        ai_response_tokens = total_tokens_after - previous_total_before
+        # chat_tokens.prompt는 LangGraph에서 사용자 문장만(tiktoken) 누적하므로,
+        # 이중 카운트를 피하기 위해 completion_tokens 증분만 AI 쪽으로 사용
+        prev_comp = (previous_chat_tokens_before or {}).get("completion_tokens", 0) or 0
+        after_comp = (
+            chat_tokens.get("completion_tokens", 0)
+            if isinstance(chat_tokens, dict)
+            else 0
+        ) or 0
+        ai_completion_tokens = after_comp - prev_comp
 
-        # tokenCount = 현재 턴 대화 토큰 (사용자 메시지 + AI 응답)
-        # 현재 턴에서만 사용된 토큰 수
-        current_turn_tokens = user_message_tokens + ai_response_tokens
+        # tokenCount = 현재 턴: API와 동일한 사용자 토큰 + LLM 출력 토큰(누적 증분)
+        current_turn_tokens = user_message_tokens + ai_completion_tokens
 
         # 이전 턴들의 누적 토큰 조회 (Redis 우선, 없으면 PostgreSQL Fallback)
         # totalToken = 한 세션의 모든 대화 token_count의 합
@@ -262,12 +259,13 @@ async def send_messages(
                     from app.infrastructure.persistence.models.sessions import \
                         PromptMessage
 
+                    # prompt_messages.turn 은 저장 슬롯(USER=2t-1, AI=2t). 대화 턴 request.turnId 이전분만 합산
+                    cutoff = 2 * request.turnId - 1
                     previous_tokens_query = select(
                         func.coalesce(func.sum(PromptMessage.token_count), 0)
                     ).where(
                         PromptMessage.session_id == session.id,
-                        PromptMessage.turn
-                        < request.turnId,  # 현재 Turn보다 작은 턴들만
+                        PromptMessage.turn < cutoff,
                     )
                     previous_tokens_result = await db.execute(previous_tokens_query)
                     previous_tokens = previous_tokens_result.scalar() or 0
@@ -361,7 +359,7 @@ async def send_messages(
         logger.info(
             f"[SendMessages] 완료 - "
             f"session_id: {session.id}, turn: {ai_turn}, "
-            f"user_tokens: {user_message_tokens}, ai_tokens: {ai_response_tokens}, "
+            f"user_tokens: {user_message_tokens}, ai_completion_tokens: {ai_completion_tokens}, "
             f"tokenCount (현재 턴): {current_turn_tokens}, totalToken (전체 누적): {total_tokens}"
         )
 

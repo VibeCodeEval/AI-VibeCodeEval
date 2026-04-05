@@ -1,8 +1,8 @@
 {
   "project": "AI-VibeCodeEval",
   "maestro_version": "1.2.0",
-  "last_updated": "2026-03-30T16:30:00Z",
-  "current_focus": "v2.1_stabilization_and_reporting",
+  "last_updated": "2026-04-05T12:00:00Z",
+  "current_focus": "rubric_v3_phase_b_completed_validation_pending",
   
   "phases": {
     "phase1": {
@@ -94,15 +94,58 @@
       "status": "in_progress",
       "owner": "sub_agent_refactoring",
       "priority": 6,
-      "progress": 75,
+      "progress": 78,
       "started_at": "2026-01-29T09:00:00Z",
       "completed_at": null,
-      "current_sub_phase": "v2.1_stabilization",
+      "current_sub_phase": "eval_pipeline_redesign",
       "depends_on": ["phase4", "phase5a", "phase5b", "phase5c"],
       "command_file": ".maestro/commands/pending/CMD_005_phase6_refactoring.json",
       "plan_document": ".maestro/PHASE6_PLAN.md",
-      "sub_phases": ["phase6a", "phase6b", "phase6c", "phase6d"],
+      "sub_phases": ["phase6a", "phase6b", "phase6c", "phase6d", "phase6e"],
       "description": "Socratic → Spec 기반 코드 생성, AST Error Injection, 평가 통합, 파인튜닝 데이터 자동 생성"
+    },
+    "phase6e": {
+      "name": "평가 파이프라인 재설계 (N5~N8)",
+      "status": "completed",
+      "owner": "sub_agent_refactoring",
+      "priority": 6,
+      "progress": 100,
+      "started_at": "2026-04-04T21:51:00Z",
+      "completed_at": "2026-04-04T23:55:00Z",
+      "depends_on": ["phase6b"],
+      "description": "N5→Judge0, N6→Radon CC, N7→코드리뷰 LLM, N8→다중에이전트 토론(법정형 Courtroom 구현 완료). 아키텍처 변경 여부(P2P 합의형) 검토 중.",
+      "sub_tasks": {
+        "n5_eval_code_execution": "completed",
+        "n6_eval_static_analysis": "completed",
+        "n7_eval_code_agent": "completed",
+        "n8_holistic_debate_flow": "completed (법정형 Courtroom. P2P 합의형 대안 검토 중)",
+        "states_new_fields": "completed",
+        "graph_update": "completed",
+        "n9_turn_score_aggregate": "completed",
+        "debate_agents_yaml": "completed",
+        "architecture_review": "pending (Courtroom vs P2P 합의형 결정 필요)"
+      }
+    },
+    "phase7_rubric_v3": {
+      "name": "4대 루브릭 V3.0 도입 (N4 Intent-Rubric Gate)",
+      "status": "phase_b_completed",
+      "owner": "sub_agent_refactoring",
+      "priority": 7,
+      "progress": 80,
+      "started_at": "2026-04-05T00:00:00Z",
+      "completed_at": null,
+      "depends_on": ["phase6e"],
+      "plan_document": ".maestro/RUBRIC_V3_CHANGE_PLAN.md",
+      "description": "R1(논리·효율)/R2(명확성·완전성)/R3(구조·예시)/R4(맥락유지) 4대 루브릭을 의도별 게이트로 적용. N4 turn_score = 의도별 가중 평균. N8 R4 글로벌 채점 기준 강화.",
+      "sub_tasks": {
+        "phase_a_n8_context": "completed (2026-04-05, 이전 세션 완료)",
+        "phase_b1_eval_turn_yaml_v30": "completed (eval_turn.yaml V2.2→V3.0 전면 교체)",
+        "phase_b2_grading_py_model": "completed (EvalTurnV30Output Pydantic 모델 추가)",
+        "phase_b3_evaluators_py_parsing": "completed (_evaluate_turn 파싱 EvalTurnV30Output으로 교체)",
+        "phase_b4_n4_redis_structure": "completed (prompt_evaluation_details에 rubric_breakdown/applied_rubrics 저장)",
+        "phase_b5_debate_agents_r4": "completed (verdict 시스템 프롬프트 R4 글로벌 채점 기준 강화)",
+        "phase_c_validation": "pending (각 의도별 단일 턴 테스트, Redis 저장 구조 확인)"
+      }
     }
   },
 
@@ -122,7 +165,8 @@
       "v22_previous_turns_summary": "completed",
       "v22_5way_intent": "completed",
       "v23_holistic_flow_strict_integer": "completed",
-      "synthetic_data_and_evol": "completed"
+      "synthetic_data_and_evol": "completed",
+      "v30_rubric_based_scoring": "completed (R1~R4 Intent-Rubric Gate, EvalTurnV30Output, rubric_breakdown/applied_rubrics)"
     },
     "pending": [
       "Node4+Node6 통합 평가기 (현재 분리 실행)",
@@ -214,7 +258,7 @@
   },
   
   "metrics": {
-    "total_progress": 75,
+    "total_progress": 80,
     "commands_issued": 6,
     "commands_completed": 4,
     "blockers": [],
@@ -363,6 +407,26 @@
     {
       "timestamp": "2026-03-30T16:30:00Z",
       "content": ".maestro 폴더 감사 및 변경 추적 저장: 상위 디렉터리 구성 요약, git status 기준 수정 6파일·미추적 목록 정리. reports/daily/2026-03-30/plan_changes.md 신규. last_updated 갱신."
+    },
+    {
+      "timestamp": "2026-04-04T21:51:00Z",
+      "content": "평가 파이프라인 전면 재설계 결정 (Phase 6E). 기존 N5(integrated_evaluator)가 spec_extractor 미연결로 동작하지 않음을 확인. 신규 구조: N5→Judge0(eval_code_execution), N6→Radon CC(eval_static_analysis), N7→코드리뷰 LLM(eval_code_agent), N8→다중에이전트 토론(holistic_debate_flow, 추후). N8은 stub으로 우선 처리. 턴 점수(aggregate_turn_score)는 N9에서 단순 평균 계산, N8 토론 에이전트가 holistic prompt_score를 최종 도출하는 구조. .maestro/reports/daily/2026-04-04/plan_changes.md 신규 작성."
+    },
+    {
+      "timestamp": "2026-04-04T22:21:00Z",
+      "content": "Phase 6E 구현 완료. N5(Judge0), N6(Radon CC), N7(LLM 코드 리뷰), N8(Stub), N9(최종 점수 병합 및 DB 기록) 수정 및 재작성 완료. states.py 필드 추가 및 graph.py 노드·엣지 연결 업데이트. N7에 Actionable Improvements 등 5대 지침 프롬프트 반영. code_changes.md 리포트 기록 완료."
+    },
+    {
+      "timestamp": "2026-04-04T23:55:00Z",
+      "content": "N8 다중 에이전트 토론 SubGraph 구현 완료 (법정형 Courtroom 아키텍처). subgraph_debate.py 신규 작성 — 8노드, Round1 병렬(Send()), Round2 순차, final_verdict. debate_agents.yaml 신규 작성 — 4개 역할 시스템 프롬프트 노드명 명시 분리. DebateState TypedDict 추가, MainGraphState debate_log 추가. N8 stub → holistic_debate_flow() 실구현. 아키텍처 대안(P2P 합의형) 검토 중 — plan_changes.md 참조."
+    },
+    {
+      "timestamp": "2026-04-05T12:00:00Z",
+      "content": "N5 레거지 vs 현재 비교 문서 작성: .maestro/docs/N5_LEGACY_VS_CURRENT.md — 구 integrated_evaluator(turn_analysis·규칙 통합·선택 Radon/AST) vs 현재 eval_code_execution(Judge0 Correctness→Performance). 역할 분산 N4/N6/N7/N8/N9 표 정리. 패키지 __init__ integrated_evaluator 제거·eval_code_execution re-export 정리 사유 기록."
+    },
+    {
+      "timestamp": "2026-04-05T00:00:00Z",
+      "content": "4대 루브릭 V3.0 Phase B 전체 완료. 변경 파일 5개: (1) eval_turn.yaml V2.2→V3.0 — R1~R4 루브릭 정의, Intent-Rubric 게이트 매트릭스(CREATION/SETTING/REFINEMENT/DEBUGGING/EXPLORATION/FOLLOW_UP), DEBUGGING R2 가중치 2배, Context 보정 규칙 통합, 출력 형식 변경(likert_score+diagnosis_profile → turn_score+rubric_breakdown+applied_rubrics). (2) grading.py — EvalTurnV30Output Pydantic 모델 추가(레거시 EvalTurnV21Output 유지). (3) evaluators.py — _evaluate_turn 파싱 EvalTurnV30Output으로 교체, chain_result에 rubric_breakdown/applied_rubrics 반환. (4) n4_eval_turn_guard.py — detailed_turn_log.prompt_evaluation_details에서 rubrics(old list)+weights 제거, rubric_breakdown(dict)+applied_rubrics(list) 저장으로 변경. (5) debate_agents.yaml v1.1→v1.2 — verdict 시스템 프롬프트 R4 글로벌 채점 기준 강화(turn_logs 순서 읽기, rubric_breakdown 참조, 반복 실수 감점 명시). Phase C(검증) 미완료 — 각 의도별 단일 턴 테스트 필요."
     }
   ]
 }

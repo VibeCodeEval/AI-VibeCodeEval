@@ -384,6 +384,42 @@ async def _evaluate_turn_sync(
         detailed_feedback = turn_log_data.get("detailed_feedback", [])
         comprehensive_reasoning = turn_log_data.get("comprehensive_reasoning", "")
 
+        # V3.0: primary eval에서 rubric_breakdown / applied_rubrics / feedback_summary 추출
+        _v3_intent_to_eval_key = {
+            "SETTING": "rule_setting_eval",
+            "CREATION": "generation_eval",
+            "REFINEMENT": "optimization_eval",
+            "DEBUGGING": "debugging_eval",
+            "EXPLORATION": "exploration_eval",
+            "VALIDATION": "debugging_eval",
+            "FOLLOW_UP": "follow_up_eval",
+            "GENERATION": "generation_eval",
+            "OPTIMIZATION": "optimization_eval",
+            "TEST_CASE": "test_case_eval",
+            "HINT_OR_QUERY": "hint_query_eval",
+            "RULE_SETTING": "rule_setting_eval",
+            "SYSTEM_PROMPT": "eval_system_prompt",
+        }
+        _intent_upper_v3 = (intent_type or "").upper().replace("-", "_")
+        _primary_eval_key = _v3_intent_to_eval_key.get(_intent_upper_v3)
+        _primary_eval_data = (
+            evaluations.get(_primary_eval_key) if _primary_eval_key else None
+        )
+        if not _primary_eval_data and evaluations:
+            _primary_eval_data = next(iter(evaluations.values()), None)
+
+        rubric_breakdown: dict = {}
+        applied_rubrics: list = []
+        v3_feedback_summary: str = ""
+        if _primary_eval_data and isinstance(_primary_eval_data, dict):
+            rubric_breakdown = _primary_eval_data.get("rubric_breakdown") or {}
+            applied_rubrics = _primary_eval_data.get("applied_rubrics") or []
+            v3_feedback_summary = (
+                _primary_eval_data.get("feedback_summary")
+                or _primary_eval_data.get("final_reasoning")
+                or ""
+            )
+
         # intent_type이 "UNKNOWN"이면 intent_types[0] 사용
         if intent_type == "UNKNOWN" and intent_types:
             intent_type = intent_types[0]
@@ -755,15 +791,20 @@ async def _evaluate_turn_sync(
                 else human_message
             ),
             "prompt_evaluation_details": {
-                "intent": final_intent,  # UNKNOWN 대신 실제 intent 사용
+                "intent": final_intent,
                 "intent_types": intent_types,
-                "unified_intent": unified_intent,  # v2.1 4대 통합 의도
+                "unified_intent": unified_intent,
                 "intent_confidence": intent_confidence,
                 "score": turn_score,
-                "rubrics": detailed_rubrics,  # 상세 루브릭 정보 (중복 제거)
-                "weights": weights,  # 가중치 정보 (올바른 intent로 가져온 값)
-                "final_reasoning": comprehensive_reasoning
-                or result.get("answer_summary", "재평가 완료"),
+                # V3.0: rubric_breakdown(dict) + applied_rubrics(list) 사용
+                # weights/rubrics(old list) 제거
+                "rubric_breakdown": rubric_breakdown,
+                "applied_rubrics": applied_rubrics,
+                "final_reasoning": (
+                    v3_feedback_summary
+                    or comprehensive_reasoning
+                    or result.get("answer_summary", "재평가 완료")
+                ),
             },
             "llm_answer_summary": result.get("answer_summary", ""),
             "llm_answer_reasoning": comprehensive_reasoning
@@ -812,6 +853,15 @@ async def _evaluate_turn_sync(
                             "is_guardrail_failed", False
                         ),
                         "guardrail_message": turn_log_data.get("guardrail_message"),
+                        "user_prompt_summary": detailed_turn_log.get(
+                            "user_prompt_summary"
+                        ),
+                        "llm_answer_summary": detailed_turn_log.get(
+                            "llm_answer_summary"
+                        ),
+                        "llm_answer_reasoning": detailed_turn_log.get(
+                            "llm_answer_reasoning"
+                        ),
                     }
 
                     pg_evaluation = await storage_service.save_turn_evaluation(

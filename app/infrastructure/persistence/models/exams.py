@@ -12,6 +12,7 @@ from sqlalchemy import (BigInteger, Boolean, DateTime, Enum, ForeignKey,
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.persistence.models.enums import ExamStateEnum
+from app.infrastructure.persistence.models.participants import Participant
 from app.infrastructure.persistence.session import Base
 
 
@@ -67,7 +68,7 @@ class ExamParticipant(Base):
         BigInteger, ForeignKey("exams.id"), nullable=False
     )
     participant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("participants.id"), nullable=False
+        BigInteger, ForeignKey(Participant.id), nullable=False
     )
     state: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
     token_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -163,5 +164,3 @@ class EntryCode(Base):
     )
 
 
-# Import for type hints
-from app.infrastructure.persistence.models.participants import Participant

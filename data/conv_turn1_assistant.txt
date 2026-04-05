@@ -1,0 +1,130 @@
+흥미로운 알고리즘 문제네요! 대규모 격자($N \le 10^9$)와 많은 쿼리($Q \le 10^5$)를 고려할 때, 2차원 배열을 직접 만드는 방식은 절대 불가능하며 **좌표 압축**이나 **해시맵(Dictionary)** 기반의 시뮬레이션이 필요합니다.
+
+또한 유닛의 개수($M$)가 최대 10,000개로 유지되거나 분리 시 4배로 늘어날 수 있으나, 소멸 조건이 있어 관리 가능한 수준으로 보입니다. Python을 기준으로 효율적인 접근 방향과 핵심 로직을 정리해 드릴게요.
+
+---
+
+## 🚀 핵심 전략
+
+1.  **좌표 관리**: $N$이 매우 크므로 `dict`를 사용하여 `(r, c)`를 키로, 해당 위치의 유닛 리스트를 값으로 저장합니다.
+2.  **이동 처리**: 순환 구조이므로 위치 갱신 시 `(r + dr*s - 1) % N + 1` 공식을 사용합니다.
+3.  **벡터 합성 (조건 A)**: 방향 $d$를 각도로 변환하여 $\cos, \sin$ 합을 구한 뒤 `atan2`를 사용합니다.
+    * $0 \le d \le 7$ 이므로 $\theta = d \times \frac{\pi}{4}$.
+    * `atan2(Y, X)`의 결과($-\pi \sim \pi$)를 다시 $0 \sim 7$ 인덱스로 매핑해야 합니다.
+4.  **최대공약수 (조건 B)**: `math.gcd`를 활용하여 수치값을 결정합니다.
+
+---
+
+## 💻 핵심 로직 구현 (Python)
+
+```python
+import math
+
+# 방향 벡터 (0: 북, 1: 북동, 2: 동, 3: 남동, 4: 남, 5: 남서, 6: 서, 7: 북서)
+dr = [-1, -1, 0, 1, 1, 1, 0, -1]
+dc = [0, 1, 1, 1, 0, -1, -1, -1]
+
+def solve():
+    import sys
+    input = sys.stdin.read
+    data = input().split()
+    
+    N = int(data[0])
+    M = int(data[1])
+    Q = int(data[2])
+    
+    units = []
+    idx = 3
+    for _ in range(M):
+        r, c, v, s, d = map(int, data[idx:idx+5])
+        units.append({'r': r, 'c': c, 'v': v, 's': s, 'd': d})
+        idx += 5
+    
+    commands = data[idx:]
+    c_idx = 0
+    
+    while c_idx < len(commands):
+        cmd_type = int(commands[c_idx])
+        val = int(commands[c_idx+1])
+        c_idx += 2
+        
+        if cmd_type == 1: # K번 반복
+            for _ in range(val):
+                # 1. 이동
+                grid = {}
+                for u in units:
+                    u['r'] = (u['r'] + dr[u['d']] * u['s'] - 1) % N + 1
+                    u['c'] = (u['c'] + dc[u['d']] * u['s'] - 1) % N + 1
+                    pos = (u['r'], u['c'])
+                    if pos not in grid: grid[pos] = []
+                    grid[pos].append(u)
+                
+                # 2. 상호작용
+                new_units = []
+                for pos, cluster in grid.items():
+                    if len(cluster) == 1:
+                        if cluster[0]['v'] > 1:
+                            new_units.append(cluster[0])
+                        continue
+                    
+                    total_v = sum(u['v'] for u in cluster)
+                    total_s = sum(u['s'] for u in cluster)
+                    max_v = max(u['v'] for u in cluster)
+                    avg_v = total_v / len(cluster)
+                    new_s = total_s // len(cluster)
+                    
+                    # 조건 A: 단일 유지
+                    if max_v > avg_v * 2:
+                        X = sum(u['v'] * math.cos(u['d'] * math.pi / 4) for u in cluster)
+                        Y = sum(u['v'] * math.sin(u['d'] * math.pi / 4) for u in cluster)
+                        theta_avg = math.atan2(Y, X)
+                        # 각도를 0~7 인덱스로 변환 (반올림 처리)
+                        new_d = round(theta_avg / (math.pi / 4)) % 8
+                        
+                        if total_v > 1:
+                            new_units.append({'r': pos[0], 'c': pos[1], 'v': total_v, 's': new_s, 'd': new_d})
+                    
+                    # 조건 B: 분리
+                    else:
+                        new_v = math.gcd(total_v, len(cluster))
+                        if new_v <= 1: continue # 소멸 조건
+                        
+                        is_all_even_or_odd = True
+                        first_parity = cluster[0]['d'] % 2
+                        for u in cluster:
+                            if u['d'] % 2 != first_parity:
+                                is_all_even_or_odd = False
+                                break
+                        
+                        dirs = [0, 2, 4, 6] if is_all_even_or_odd else [1, 3, 5, 7]
+                        for d in dirs:
+                            new_units.append({'r': pos[0], 'c': pos[1], 'v': new_v, 's': new_s, 'd': d})
+                units = new_units
+
+        elif cmd_type == 2: # R행 처리
+            row_sum = 0
+            remaining_units = []
+            for u in units:
+                if u['r'] == val:
+                    row_sum += u['v']
+                    u['v'] //= 2
+                    if u['v'] > 0:
+                        remaining_units.append(u)
+                else:
+                    remaining_units.append(u)
+            units = remaining_units
+            print(row_sum)
+
+solve()
+```
+
+---
+
+## ⚠️ 주의할 점 및 팁
+
+1.  **atan2 변환**: `math.atan2(y, x)`는 $-\pi$에서 $\pi$ 사이의 값을 반환합니다. 이를 $45^\circ$($\pi/4$)로 나누고 `round`를 사용해 가장 가까운 정수 방향 인덱스를 찾아야 합니다. 음수 결과는 `% 8`을 통해 양수 인덱스($0 \sim 7$)로 보정됩니다.
+2.  **시간 복잡도**: $Q$가 100,000으로 매우 많으므로, 명령어 2번($R$행 조회)을 수행할 때 매번 모든 유닛을 전수 조사하면 $O(Q \times M)$이 되어 위험할 수 있습니다. 
+    * **최적화**: 유닛들을 행(row)별로 관리하는 `dict`를 하나 더 유지하면 명령어 2번을 $O(1)$ 혹은 해당 행의 유닛 수만큼의 시간으로 줄일 수 있습니다.
+3.  **소멸 조건**: 상호작용 직후 $v=1$인 유닛은 제거되지만, 명령어 2번에 의한 감쇠 시에는 $v=0$이 되어야 제거된다는 점을 명확히 구분해야 합니다.
+
+이 구조대로라면 대규모 인프라의 유닛 이동 시뮬레이션을 효율적으로 해결할 수 있을 거예요! 더 궁금한 로직이나 막히는 부분이 있으면 말씀해 주세요.
