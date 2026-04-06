@@ -197,11 +197,12 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     )
 
     # 제출 시 eval_turn_guard 통과 후 N5(eval_code_execution)로 진입
+    # "eval_holistic_flow" 키는 main_router가 반환하는 레거시 값으로, 실제 노드는 eval_code_execution(N5)으로 매핑
     builder.add_conditional_edges(
         "eval_turn_guard",
         main_router,
         {
-            "eval_holistic_flow": "eval_code_execution",  # main_router에서 제출시 eval_holistic_flow를 반환하므로 키 유지, N5로 매핑
+            "eval_holistic_flow": "eval_code_execution",
             "handle_request": "handle_request",
             "end": END,
         },

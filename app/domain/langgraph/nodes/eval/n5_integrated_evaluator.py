@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict
 
+from app.core.config import settings
 from app.domain.langgraph.nodes.eval.langsmith_utils import (
     should_enable_langsmith, wrap_node_with_tracing)
 from app.domain.langgraph.states import MainGraphState
@@ -112,10 +113,10 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
     timeout = constraints.get("time_limit_sec") or 1.0
     memory_limit = constraints.get("memory_limit_mb") or 128
 
-    # 스마트 게이트 2026(spec_id=20 또는 DB에서 11로 저장된 경우): v2_code + test_suite_code 합성 후 Judge0 실행
+    # 스마트 게이트: v2_code + test_suite_code 합성 후 Judge0 실행 (대상 spec_id는 settings.SMART_GATE_SPEC_IDS로 관리)
     spec_id = state.get("spec_id")
     test_suite_code = problem_context.get("test_suite_code") if problem_context else None
-    use_smart_gate_suite = bool(test_suite_code and (spec_id == 20 or spec_id == 11))
+    use_smart_gate_suite = bool(test_suite_code and spec_id in settings.SMART_GATE_SPEC_IDS)
     code_to_run = code_content
     correctness_reasoning = None
 

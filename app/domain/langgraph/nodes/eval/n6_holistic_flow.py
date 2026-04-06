@@ -1,5 +1,16 @@
 """
-N6: 정적 분석 에이전트 (Radon CC & AST Pattern 검사)
+N6: 정적 코드 분석 노드 (Radon CC & AST Pattern 검사)
+
+[역할]
+- Radon 순환 복잡도(Cyclomatic Complexity) 분석
+- v1/v2 코드 간 CC Delta 계산
+- AST 패턴 검사 (spec_id 기반 적용 여부 결정)
+- junior_grade 플래그 산출
+
+[주의]
+이 파일은 구 holistic_flow LLM 평가 노드를 대체한 정적 분석 전용 노드입니다.
+이전에 존재하던 eval_holistic_flow, create_holistic_system_prompt 함수는 제거됐습니다.
+LLM 기반 holistic 평가는 N8 다중 에이전트 토론 (subgraph_debate.py)에서 수행합니다.
 """
 
 import logging

@@ -18,6 +18,7 @@ final_verdict는 6개 의견(Round 1 × 3 + Round 2 × 3)을 모두 취합하여
 
 import json
 import logging
+import math
 from typing import Any, Dict, List, Tuple, Union
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -41,13 +42,16 @@ _AGENT_CONFIG: Dict[str, Dict[str, Any]] = {
     for role in ("strict", "advocate", "neutral", "verdict")
 }
 
+# 역할별 LLM 인스턴스를 모듈 로드 시 1회만 생성하여 재사용
+_LLM_REGISTRY: Dict[str, Any] = {
+    role: get_llm_for_model(cfg["model"], float(cfg["temperature"]))
+    for role, cfg in _AGENT_CONFIG.items()
+}
+
 
 def _make_llm(role: str):
-    """역할에 맞는 LLM 인스턴스 생성 (debate_agents.yaml 설정 기반)"""
-    cfg = _AGENT_CONFIG[role]
-    model_name = cfg["model"]
-    temperature = float(cfg["temperature"])
-    return get_llm_for_model(model_name, temperature)
+    """역할에 맞는 LLM 인스턴스 반환 (모듈 레벨 캐시 사용)"""
+    return _LLM_REGISTRY[role]
 
 
 # ============================================================
@@ -287,6 +291,22 @@ def _fallback_r4_from_turn_scores(turn_scores: Dict[str, Any]) -> float:
     return round(min(100.0, max(0.0, adjusted)), 2)
 
 
+_GRADE_THRESHOLDS: List[Tuple[float, str]] = [
+    (90.0, "A"),
+    (80.0, "B"),
+    (70.0, "C"),
+    (60.0, "D"),
+]
+
+
+def _derive_grade(score: float) -> str:
+    """holistic_flow_score 기준으로 등급을 결정론적으로 산출한다."""
+    for threshold, grade in _GRADE_THRESHOLDS:
+        if score >= threshold:
+            return grade
+    return "F"
+
+
 def _format_opinions(opinions: List[Dict[str, Any]], exclude_agent: str = "") -> str:
     """의견 목록을 읽기 쉬운 문자열로 변환 (자신 제외 가능)"""
     lines = []
@@ -362,10 +382,31 @@ async def r1_neutral(state: DebateState) -> Dict[str, Any]:
 
 async def sync_opinions(state: DebateState) -> Dict[str, Any]:
     opinions = state.get("initial_opinions", [])
-    logger.info(f"[Debate sync] Round 1 의견 {len(opinions)}개 수집 완료")
+    count = len(opinions)
+    logger.info(f"[Debate sync] Round 1 의견 {count}개 수집 완료")
+
+    if count < 3:
+        logger.warning(
+            f"[Debate sync] Round 1 에이전트 응답 부족 ({count}/3). "
+            "일부 에이전트가 실패했을 수 있습니다. Round 2는 수집된 의견만으로 진행합니다."
+        )
+
     scores = [op.get("suggested_score", 50) for op in opinions]
-    avg = sum(scores) / len(scores) if scores else 50
-    logger.info(f"[Debate sync] Round 1 평균 제안 점수: {avg:.1f}")
+    if scores:
+        avg = sum(scores) / len(scores)
+        if len(scores) > 1:
+            variance = sum((s - avg) ** 2 for s in scores) / len(scores)
+            std_dev = math.sqrt(variance)
+            logger.info(
+                f"[Debate sync] Round 1 평균 제안 점수: {avg:.1f}, 표준편차: {std_dev:.1f}"
+            )
+            if std_dev > 20:
+                logger.warning(
+                    f"[Debate sync] 평가관 간 점수 편차가 큽니다 (std_dev={std_dev:.1f}). "
+                    "Round 2에서 충분한 논거 교환이 필요합니다."
+                )
+        else:
+            logger.info(f"[Debate sync] Round 1 평균 제안 점수: {avg:.1f}")
     return {}
 
 
@@ -482,6 +523,17 @@ async def final_verdict(state: DebateState) -> Dict[str, Any]:
             SystemMessage(content=_sys("verdict")),
             HumanMessage(content=human_content),
         ])
+
+        # grade vs holistic_flow_score 일관성 검증 및 보정
+        derived_grade = _derive_grade(result.holistic_flow_score)
+        if result.grade != derived_grade:
+            logger.warning(
+                f"[Debate Verdict] grade 불일치 보정: "
+                f"LLM={result.grade} → {derived_grade} "
+                f"(holistic_flow_score={result.holistic_flow_score:.1f})"
+            )
+            result = result.model_copy(update={"grade": derived_grade})
+
         verdict_dict = result.model_dump()
         r4 = verdict_dict["r4_context_maintenance_score"]
         logger.info(

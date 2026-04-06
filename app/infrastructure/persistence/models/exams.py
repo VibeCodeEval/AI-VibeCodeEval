@@ -11,8 +11,9 @@ from sqlalchemy import (BigInteger, Boolean, DateTime, Enum, ForeignKey,
                         Integer, Numeric, String, Text)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.config import settings
 from app.infrastructure.persistence.models.enums import ExamStateEnum
-from app.infrastructure.persistence.models.participants import Participant
+from app.infrastructure.persistence.models.participants import Participant  # noqa: F401 — mapper registry 등록 유지
 from app.infrastructure.persistence.session import Base
 
 
@@ -68,7 +69,7 @@ class ExamParticipant(Base):
         BigInteger, ForeignKey("exams.id"), nullable=False
     )
     participant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey(Participant.id), nullable=False
+        BigInteger, ForeignKey(f"{settings.VIBECODE_PARTICIPANT_TABLE}.id"), nullable=False
     )
     state: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
     token_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
