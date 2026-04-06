@@ -12,7 +12,7 @@
 
 핵심 책임:
 - 프로젝트 전체 진행 상태 파악 및 관리 (maestro_state.json)
-- 하위 에이전트 5개의 작업 지시, 검증, 조율
+- 하위 에이전트 6개의 작업 지시, 검증, 조율 (그래프·채팅·평가 오케스트레이터·턴 평가·Holistic·Submit 테스트·평가 덤프)
 - .maestro/ 관리 체계 운영 (리포트, 명령, 에이전트 프롬프트, 문서)
 - 프로젝트 레벨 작업 직접 수행 (파일 정리, 문서 통합, 구조 변경)
 - 모든 수정 사항의 .maestro 기록 및 사용자 컨펌 관리
@@ -26,11 +26,14 @@
 │   └── 하위 에이전트 작업 지시
 ├── 채팅 루프 에이전트 (.maestro/agents/chat_loop_agent.md)
 │   └── chat: n1_handle_request → n2_intent_analyzer → n3_writer + system/system_nodes
-└── 평가 오케스트레이터 (.maestro/agents/eval_orchestrator.md)
-    ├── 턴 평가 에이전트 (.maestro/agents/turn_eval_agent.md)
-    │   └── n4_eval_turn_guard + eval_turn/ 서브그래프 (8종 평가)
-    └── Holistic/점수 에이전트 (.maestro/agents/holistic_score_agent.md)
-        └── eval: n5_integrated_evaluator → n6_holistic_flow → n7/n9 집계·최종 → n8_code_execution
+├── 평가 오케스트레이터 (.maestro/agents/eval_orchestrator.md)
+│   ├── 턴 평가 에이전트 (.maestro/agents/turn_eval_agent.md)
+│   │   └── n4_eval_turn_guard + eval_turn/ 서브그래프 (8종 평가)
+│   └── Holistic/점수 에이전트 (.maestro/agents/holistic_score_agent.md)
+│       └── eval: n5_integrated_evaluator → n6_holistic_flow → n7/n9 집계·최종 → n8_code_execution
+│
+└── Submit 테스트·평가 덤프 에이전트 (.maestro/agents/submit_test_agent.md)
+    └── test_scripts 시드·결과 확인, export/debate 덤프, .maestro/DOCS 테스트·ENV 가이드
 ```
 
 ## 담당 범위

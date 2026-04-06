@@ -37,6 +37,10 @@ app/domain/langgraph/nodes/eval/                            # Holistic·집계·
 app/domain/langgraph/prompts/eval_*.yaml               # 평가 프롬프트
 ```
 
+### 협업: Submit 테스트·평가 덤프 에이전트
+
+N8이 Redis에 남기는 **토론 페이로드 형식**, `DEBATE_LOG_TO_REDIS` 동작, `session_id` 문자열 규칙이 바뀌면 **`.maestro/agents/submit_test_agent.md`** 담당 영역(`debate_redis_dump`, `export_evaluation_json`, `dump_debate_redis`, `.maestro/DOCS`)과 동기화가 필요하다. 설계 변경 시 해당 에이전트(또는 마에스트로)에게 명령으로 넘긴다.
+
 ## 참조 문서 (세션 시작 시 반드시 읽기)
 
 | 우선순위 | 문서 | 용도 |

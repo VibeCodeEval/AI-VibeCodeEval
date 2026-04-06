@@ -12,7 +12,6 @@ from app.domain.langgraph.utils.problem_info import (
 )
 from app.domain.langgraph.nodes.chat.n2_intent_analyzer import create_intent_analysis_system_prompt
 from app.domain.langgraph.nodes.chat.n3_writer import create_normal_system_prompt
-from app.domain.langgraph.nodes.eval.n6_holistic_flow import create_holistic_system_prompt
 
 
 class TestProblemInfoStructure:
@@ -180,25 +179,25 @@ class TestPromptGeneration:
         assert "감독관" in prompt or "Proctor" in prompt
         assert "LOGIC_HINT" in prompt
     
+    @pytest.mark.skip(
+        reason=(
+            "N6 노드가 LLM 기반 holistic_flow에서 Radon CC 정적 분석으로 교체됨. "
+            "create_holistic_system_prompt는 더 이상 n6_holistic_flow에 존재하지 않습니다."
+        )
+    )
     def test_holistic_prompt_with_problem_context(self):
-        """Holistic Evaluator 프롬프트에 문제 정보 포함 확인"""
-        problem_context = get_problem_info_sync(10)
-        prompt = create_holistic_system_prompt(problem_context)
-        
-        # 문제 정보가 포함되어 있는지 확인
-        assert "외판원 순회" in prompt
-        assert "Dynamic Programming" in prompt or "Bitmasking" in prompt
-        
-        # 힌트 로드맵이 포함되어 있는지 확인
-        assert "힌트 로드맵" in prompt or "1단계" in prompt
-    
+        """[DEPRECATED] Holistic Evaluator 프롬프트 테스트 — N6 교체로 비활성화"""
+        pass
+
+    @pytest.mark.skip(
+        reason=(
+            "N6 노드가 LLM 기반 holistic_flow에서 Radon CC 정적 분석으로 교체됨. "
+            "create_holistic_system_prompt는 더 이상 n6_holistic_flow에 존재하지 않습니다."
+        )
+    )
     def test_holistic_prompt_without_problem_context(self):
-        """Holistic Evaluator 프롬프트 (문제 정보 없음)"""
-        prompt = create_holistic_system_prompt(None)
-        
-        # 기본 프롬프트 구조 확인
-        assert "Chaining 전략" in prompt
-        assert "문제 분해" in prompt
+        """[DEPRECATED] Holistic Evaluator 프롬프트 테스트 (문제 정보 없음) — N6 교체로 비활성화"""
+        pass
 
 
 class TestStateIntegration:

@@ -156,6 +156,17 @@ Judge0 설정·API 연동·테스트 케이스 플로우·빠른 실행·트러�
 
 ---
 
+## Maestro 전용 (`/.maestro/DOCS/`)
+
+루트 `docs/` 와 별도로, **Submit 테스트 절차·`.env`·평가 JSON·Redis 토론 덤프** 등을 정리한 문서입니다.
+
+| 문서 | 용도 |
+|------|------|
+| `.maestro/DOCS/README.md` | DOCS 폴더 목차 |
+| `.maestro/DOCS/Submit_테스트_ENV_평가덤프_가이드.md` | `setup_submit_test_data`, `check_submit_result`, `export_evaluation_json`, `debate_redis`, 관련 환경 변수 |
+
+---
+
 ## 작업 시나리오별 빠른 참조
 
 | 작업 | 참조 문서 |
@@ -166,6 +177,7 @@ Judge0 설정·API 연동·테스트 케이스 플로우·빠른 실행·트러�
 | **DB 스키마 변경** | `테이블명세서.md` → `DB_변경_이력.md` → `API_DB_매핑.md` |
 | **새 환경 구축** | `환경_설정_가이드.md` → `DB_설정_가이드.md` → `UV_설정_가이드.md` |
 | **테스트 실행** | `테스트_가이드.md` → `Judge0_가이드.md` |
+| **Submit 시드·평가 JSON·토론 Redis** | `.maestro/DOCS/Submit_테스트_ENV_평가덤프_가이드.md` |
 | **프롬프트 수정** | `프롬프트_명세.md` → `Node4_평가_가이드.md` |
 | **점수/학점 기준 변경** | `점수_계산_로직.md` → `루브릭_리팩토링_제안.md` |
 | **Docker 환경 수정** | `Docker_백엔드_가이드.md` → `환경_설정_가이드.md` |

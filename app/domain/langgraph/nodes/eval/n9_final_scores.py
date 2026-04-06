@@ -19,15 +19,30 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
 
     try:
         holistic_flow_score = state.get("holistic_flow_score")
+        r4_context_maintenance_score = state.get("r4_context_maintenance_score")
         aggregate_turn_score = state.get("aggregate_turn_score")
+        
+        # aggregate_turn_score가 없으면 turn_scores에서 턴 점수 평균 계산 (임시 N8 동작용)
+        if aggregate_turn_score is None:
+            turn_scores = state.get("turn_scores", {})
+            if turn_scores:
+                valid_scores = [s.get("turn_score", 0) for s in turn_scores.values() if isinstance(s, dict) and "turn_score" in s]
+                if valid_scores:
+                    aggregate_turn_score = sum(valid_scores) / len(valid_scores)
+                    
         code_performance_score = state.get("code_performance_score")
         code_correctness_score = state.get("code_correctness_score")
         
         integrated_score = state.get("integrated_score")
         integrated_evaluation = state.get("integrated_evaluation")
+        code_quality_metrics = state.get("code_quality_metrics")
+        code_eval_report = state.get("code_eval_report")
 
         logger.info(f"[N9. Final Scores] 입력 점수:")
         logger.info(f"[N9. Final Scores]   - Holistic Flow Score: {holistic_flow_score}")
+        logger.info(
+            f"[N9. Final Scores]   - R4 Context Maintenance: {r4_context_maintenance_score}"
+        )
         logger.info(f"[N9. Final Scores]   - Aggregate Turn Score: {aggregate_turn_score}")
         logger.info(f"[N9. Final Scores]   - Code Performance Score: {code_performance_score}")
         logger.info(f"[N9. Final Scores]   - Code Correctness Score: {code_correctness_score}")
@@ -53,6 +68,15 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             else:
                 prompt_score = integrated_score
 
+        # N8 R4(맥락 유지) — 루브릭 가중 20%를 프롬프트 축에 반영 (.maestro/RUBRIC_MIGRATION_PLAN.md)
+        if r4_context_maintenance_score is not None:
+            try:
+                r4 = float(r4_context_maintenance_score)
+            except (TypeError, ValueError):
+                r4 = None
+            if r4 is not None:
+                prompt_score = prompt_score * 0.8 + r4 * 0.2
+
         perf_score = code_performance_score if code_performance_score is not None else 0
 
         correctness_score = (
@@ -65,11 +89,14 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             + perf_score * weights["performance"]
         )
 
-        code_quality_metrics = (
-            (integrated_evaluation or {}).get("code_quality_metrics")
-            if isinstance(integrated_evaluation, dict)
-            else None
-        )
+        # legacy 호환성 (구조 변경 전 N5에서 올라온 데이터)
+        if not code_quality_metrics:
+            code_quality_metrics = (
+                (integrated_evaluation or {}).get("code_quality_metrics")
+                if isinstance(integrated_evaluation, dict)
+                else None
+            )
+            
         rubric_breakdown = (
             (integrated_evaluation or {}).get("rubric_breakdown")
             if isinstance(integrated_evaluation, dict)
@@ -269,6 +296,7 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                             "grade": grade,
                             "weights": weights,
                             "holistic_flow_score": holistic_flow_score,
+                            "r4_context_maintenance_score": r4_context_maintenance_score,
                             "aggregate_turn_score": aggregate_turn_score,
                             "code_performance_score": code_performance_score,
                             "code_correctness_score": code_correctness_score,
@@ -281,7 +309,16 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                             "holistic_flow_analysis": holistic_flow_analysis,
                             "integrated_score": integrated_score,
                             "integrated_evaluation": integrated_evaluation,
+                            "code_quality_metrics": code_quality_metrics,
+                            "code_eval_report": code_eval_report,
                             "session_id": postgres_session_id,
+                            # 토론·턴별 맥락 (Debate 결론 해석용 — DB 단일 조회로 추적 가능)
+                            "debate_log": state.get("debate_log"),
+                            "debate_initial_opinions": state.get(
+                                "debate_initial_opinions"
+                            ),
+                            "debate_rebuttals": state.get("debate_rebuttals"),
+                            "turn_scores": state.get("turn_scores"),
                         },
                     )
                     logger.info(

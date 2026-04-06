@@ -92,6 +92,11 @@ template: |
   # Output Format (JSON)
   **중요**: status가 "BLOCKED"인 경우, block_reason은 반드시 제공해야 합니다 (null 불가).
 
+  **violation_message** (BLOCKED일 때):
+  - 시험 규정 위반 유형을 1문장으로 중립적으로 설명합니다.
+  - 문제 제목·문제명을 인용하여 "○○와 무관한 질문은 불가"처럼 단정하지 마십시오. (모델이 과도하게 특정할 수 있음)
+  - OFF_TOPIC이면 "코딩·알고리즘·프로그래밍과 무관한 요청" 등 일반적 표현을 사용합니다.
+
   ```json
   {
     "status": "SAFE" | "BLOCKED",

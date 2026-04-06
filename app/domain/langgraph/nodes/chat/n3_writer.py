@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.domain.langgraph.middleware import wrap_chain_with_middleware
 from app.domain.langgraph.states import MainGraphState
 from app.domain.langgraph.utils.token_tracking import (accumulate_tokens,
+                                                       estimate_user_text_tokens,
                                                        extract_token_usage)
 from app.infrastructure.persistence.models.enums import WriterResponseStatus
 
@@ -573,9 +574,21 @@ async def writer_llm(state: MainGraphState) -> Dict[str, Any]:
         if llm_response:
             tokens = extract_token_usage(llm_response)
             if tokens:
-                accumulate_tokens(state, tokens, token_type="chat")
+                # Intent가 이번 턴에 사용자 프롬프트 토큰을 이미 누적했으면 Writer는 completion만 추가
+                user_pt = (
+                    0
+                    if state.get("intent_llm_ran")
+                    else estimate_user_text_tokens(human_message)
+                )
+                accumulate_tokens(
+                    state,
+                    tokens,
+                    token_type="chat",
+                    chat_prompt_token_override=user_pt,
+                )
                 logger.debug(
-                    f"[Writer LLM] 토큰 사용량 - prompt: {tokens.get('prompt_tokens')}, completion: {tokens.get('completion_tokens')}, total: {tokens.get('total_tokens')}"
+                    f"[Writer LLM] 토큰 사용량 - user_prompt(추정): {user_pt}, "
+                    f"completion: {tokens.get('completion_tokens')}"
                 )
 
         logger.info(f"[Writer LLM] 답변 생성 성공 - 길이: {len(ai_content)} 문자")

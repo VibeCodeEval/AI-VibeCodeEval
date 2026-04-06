@@ -1,0 +1,23 @@
+{
+  "coreJwtEnv": "VIBECODE_CORE_JWT",
+  "settings": {
+    "workerBaseUrl": "http://127.0.0.1:8000",
+    "coreBaseUrl": "http://localhost:8080"
+  },
+  "globalCorePrelude": [],
+  "scenarios": [
+    {
+      "name": "example-submit",
+      "corePrelude": [],
+      "submit": {
+        "examId": 1,
+        "participantId": 1,
+        "problemId": 1,
+        "specId": 1,
+        "language": "python3.11",
+        "submissionId": 999001,
+        "finalCode": "def solve():\n    return 0\n"
+      }
+    }
+  ]
+}

@@ -8,7 +8,6 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from datetime import datetime
 
 from app.core.config import settings
-from app.domain.langgraph.nodes.eval.n6_holistic_flow import eval_holistic_flow
 from app.domain.langgraph.nodes.eval.n8_code_execution import eval_code_execution
 from app.domain.langgraph.states import MainGraphState
 
@@ -75,48 +74,16 @@ def create_test_state(
     )
 
 
+@pytest.mark.skip(
+    reason=(
+        "N6 노드가 LLM 기반 holistic_flow에서 Radon CC 정적 분석(eval_static_analysis)으로 교체됨. "
+        "N8 다중 에이전트 토론(holistic_debate_flow)이 holistic_flow_score를 산출한다."
+    )
+)
 @pytest.mark.asyncio
 async def test_eval_holistic_flow_with_langsmith():
-    """6a 노드가 LangSmith 추적과 함께 정상 작동하는지 확인"""
-    state = create_test_state()
-    
-    # Redis Mock 설정 (함수 내부에서 import되므로 경로 수정)
-    with patch('app.infrastructure.cache.redis_client.redis_client') as mock_redis:
-        mock_redis.get_all_turn_logs = AsyncMock(return_value={
-            "1": {
-                "prompt_evaluation_details": {
-                    "intent": "HINT_OR_QUERY",
-                    "score": 85
-                },
-                "user_prompt_summary": "테스트 프롬프트",
-                "llm_answer_reasoning": "테스트 추론"
-            }
-        })
-        
-        # LLM Mock 설정
-        with patch('app.domain.langgraph.nodes.eval.n6_holistic_flow.get_llm') as mock_get_llm:
-            mock_llm = MagicMock()
-            mock_structured_llm = MagicMock()
-            mock_eval_result = MagicMock()
-            mock_eval_result.overall_flow_score = 90.0
-            mock_structured_llm.ainvoke = AsyncMock(return_value=mock_eval_result)
-            mock_llm.with_structured_output = MagicMock(return_value=mock_structured_llm)
-            mock_get_llm.return_value = mock_llm
-            
-            try:
-                result = await eval_holistic_flow(state)
-                
-                assert "holistic_flow_score" in result
-                print(f"\n[6a 노드 테스트] 성공 - score: {result.get('holistic_flow_score')}")
-                
-                # LangSmith 추적 활성화 여부 확인
-                if settings.LANGCHAIN_TRACING_V2:
-                    print("[LangSmith] 6a 노드 추적 활성화됨")
-                else:
-                    print("[LangSmith] 6a 노드 추적 비활성화 (정상)")
-                    
-            except Exception as e:
-                pytest.fail(f"6a 노드 실행 실패: {str(e)}")
+    """[DEPRECATED] N6 holistic_flow LLM 노드 추적 테스트 — N6가 정적 분석으로 교체되어 비활성화됨"""
+    pass
 
 
 @pytest.mark.asyncio

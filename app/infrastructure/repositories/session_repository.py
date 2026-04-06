@@ -45,6 +45,22 @@ from app.infrastructure.persistence.models.sessions import (PromptMessage,
 from app.infrastructure.repositories.exam_repository import ExamRepository
 
 
+def conversation_turn_to_storage_slot(conv_turn: int, role: PromptRoleEnum) -> int:
+    """
+    DB unique (session_id, turn): 대화 턴 N당 USER·AI 두 행을
+    storage turn 2N-1(USER), 2N(AI) 로 나란히 저장한다.
+    """
+    if conv_turn < 1:
+        conv_turn = 1
+    if role == PromptRoleEnum.USER:
+        return 2 * conv_turn - 1
+    return 2 * conv_turn
+
+
+def storage_slot_to_conversation_turn(storage_turn: int) -> int:
+    return max(1, (int(storage_turn) + 1) // 2)
+
+
 class SessionRepository:
     """
     프롬프트 세션 데이터 접근 계층
@@ -331,9 +347,8 @@ class SessionRepository:
         3. SYSTEM 프롬프트 기록 시: role=SYSTEM (선택)
 
         [turn과 role 관계]
-        - Turn 1: USER (사용자 질문), ASSISTANT (AI 답변)
-        - Turn 2: USER, ASSISTANT
-        - 같은 turn에 user/assistant 페어로 저장
+        - API/Redis 의 대화 턴 번호(conv_turn)는 그대로 받고, DB에는
+          USER→2*conv_turn-1, AI→2*conv_turn 슬롯으로 저장 (unique 제약 대응).
 
         [meta 필드 활용]
         meta 필드(JSONB)에 추가 정보 저장 가능:
@@ -349,8 +364,8 @@ class SessionRepository:
 
         Args:
             session_id: 세션 ID
-            turn: 턴 번호 (1, 2, 3...)
-            role: 메시지 역할 (USER/ASSISTANT/SYSTEM)
+            turn: 대화 턴 번호 (1, 2, 3…)
+            role: 메시지 역할 (USER/AI)
             content: 메시지 내용
             token_count: 토큰 수 (LLM 응답 시 필수)
             meta: 메타데이터 (JSON, 선택)
@@ -358,9 +373,10 @@ class SessionRepository:
         Returns:
             생성된 PromptMessage (id 포함)
         """
+        storage_turn = conversation_turn_to_storage_slot(turn, role)
         message = PromptMessage(
             session_id=session_id,
-            turn=turn,
+            turn=storage_turn,
             role=role,
             content=content,
             token_count=token_count,
@@ -402,7 +418,7 @@ class SessionRepository:
             {
                 "session_id": 123,
                 "turn": 1,
-                "role": PromptRoleEnum.ASSISTANT,
+                "role": PromptRoleEnum.AI,
                 "content": "...",
                 "token_count": 120
             }
@@ -420,10 +436,22 @@ class SessionRepository:
         """
         message_objects = []
         for msg_data in messages:
+            conv_turn = int(msg_data["turn"])
+            role_raw = msg_data["role"]
+            if isinstance(role_raw, PromptRoleEnum):
+                role_e = role_raw
+            else:
+                rs = str(role_raw).upper()
+                role_e = (
+                    PromptRoleEnum.USER
+                    if rs in ("USER", "HUMAN")
+                    else PromptRoleEnum.AI
+                )
+            st = conversation_turn_to_storage_slot(conv_turn, role_e)
             message = PromptMessage(
                 session_id=msg_data["session_id"],
-                turn=msg_data["turn"],
-                role=msg_data["role"],
+                turn=st,
+                role=role_e,
                 content=msg_data["content"],
                 token_count=msg_data.get("token_count", 0),
                 meta=msg_data.get("meta"),
@@ -531,10 +559,11 @@ class SessionRepository:
         """
         # 해당 메시지 조회 (role 비교: CAST로 타입 통일)
         role_str = "USER" if (role if isinstance(role, str) else getattr(role, "value", "USER")) == "USER" else "AI"
+        storage_turn = conversation_turn_to_storage_slot(turn, role)
         query = select(PromptMessage).where(
             and_(
                 PromptMessage.session_id == session_id,
-                PromptMessage.turn == turn,
+                PromptMessage.turn == storage_turn,
                 cast(PromptMessage.role, String) == role_str,
             )
         )
@@ -598,10 +627,9 @@ class SessionRepository:
         turn_analyses = []
         for msg in messages:
             if msg.meta and "turn_analysis" in msg.meta:
-                turn_analysis = msg.meta["turn_analysis"]
-                # turn 번호가 없으면 추가
+                turn_analysis = dict(msg.meta["turn_analysis"])
                 if "turn" not in turn_analysis:
-                    turn_analysis["turn"] = msg.turn
+                    turn_analysis["turn"] = storage_slot_to_conversation_turn(msg.turn)
                 turn_analyses.append(turn_analysis)
         
         return turn_analyses
@@ -676,12 +704,18 @@ class SessionRepository:
             대화 히스토리 dict 리스트 (턴 순서대로)
         """
         messages = await self.get_session_messages(session_id)
-        return [
-            {
-                "role": msg.role.value,
-                "content": msg.content,
-                "turn": msg.turn,
-                "token_count": msg.token_count,
-            }
-            for msg in messages
-        ]
+        out: List[dict] = []
+        for msg in messages:
+            conv_turn = storage_slot_to_conversation_turn(msg.turn)
+            rv = msg.role.value
+            out.append(
+                {
+                    "role": "user"
+                    if rv == "USER"
+                    else ("assistant" if rv == "AI" else rv.lower()),
+                    "content": msg.content,
+                    "turn": conv_turn,
+                    "token_count": msg.token_count,
+                }
+            )
+        return out

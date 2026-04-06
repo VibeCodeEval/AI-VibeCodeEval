@@ -12,6 +12,7 @@ from sqlalchemy import (CHAR, BigInteger, DateTime, Enum, ForeignKey, Integer,
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.config import settings
 from app.infrastructure.persistence.models.enums import (SubmissionStatusEnum,
                                                          TestRunGrpEnum,
                                                          VerdictEnum)
@@ -28,7 +29,7 @@ class Submission(Base):
         BigInteger, ForeignKey("exams.id"), nullable=False
     )
     participant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("participants.id"), nullable=False
+        BigInteger, ForeignKey(f"{settings.VIBECODE_PARTICIPANT_TABLE}.id"), nullable=False
     )
     spec_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("problem_specs.id"), nullable=False
