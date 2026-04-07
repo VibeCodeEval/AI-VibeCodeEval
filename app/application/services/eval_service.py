@@ -215,18 +215,14 @@ class EvalService:
             chat_tokens = token_summary.get("chat_tokens") or result.get("chat_tokens")
             eval_tokens = token_summary.get("eval_tokens") or result.get("eval_tokens")
 
-            # 빈 dict가 아닌 경우에만 포함
-            if (
-                chat_tokens
-                and isinstance(chat_tokens, dict)
-                and any(chat_tokens.values())
-            ):
+            # chat_tokens 유효성 확인 (빈 dict {} 또는 None이면 경고)
+            if chat_tokens and isinstance(chat_tokens, dict):
                 logger.info(f"[EvalService] ✅ chat_tokens 발견: {chat_tokens}")
             else:
                 logger.warning(
                     f"[EvalService] ⚠️ chat_tokens 없음 - token_summary: {token_summary.get('chat_tokens')}, result: {result.get('chat_tokens')}"
                 )
-                chat_tokens = chat_tokens or {}
+                chat_tokens = {}
 
             if (
                 eval_tokens

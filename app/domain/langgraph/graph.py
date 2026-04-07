@@ -315,6 +315,9 @@ def get_initial_state(
         created_at=now,
         updated_at=now,
         enable_langsmith_tracing=None,  # None이면 환경 변수 사용
+        # 토큰 사용량 초기화 (키가 없으면 노드에서 조건부 추가 안 됨)
+        chat_tokens={},
+        eval_tokens={},
         # Phase 6B: Spec 중심 통합 평가
         turn_analysis=None,
         integrated_score=None,

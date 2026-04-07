@@ -104,8 +104,43 @@ def extract_token_usage(response: Any) -> Optional[Dict[str, int]]:
                     "total_tokens": usage.get("total_tokens", 0),
                 }
 
+        # 방법 4: response_metadata 최상위 키 직접 탐색 (Gemini AI Studio 변형)
+        if hasattr(response, "response_metadata"):
+            metadata = response.response_metadata
+            if isinstance(metadata, dict):
+                # Gemini가 usage_metadata 대신 최상위에 token count 키를 두는 경우
+                prompt_tokens = (
+                    metadata.get("prompt_token_count")
+                    or metadata.get("input_tokens")
+                    or metadata.get("prompt_tokens")
+                    or 0
+                )
+                completion_tokens = (
+                    metadata.get("candidates_token_count")
+                    or metadata.get("output_tokens")
+                    or metadata.get("completion_tokens")
+                    or 0
+                )
+                total_tokens = (
+                    metadata.get("total_token_count")
+                    or metadata.get("total_tokens")
+                    or (prompt_tokens + completion_tokens)
+                )
+                if prompt_tokens or completion_tokens:
+                    logger.debug(
+                        f"[Token Tracking] 방법 4(response_metadata 직접 탐색)로 추출: "
+                        f"prompt={prompt_tokens}, completion={completion_tokens}"
+                    )
+                    return {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                    }
+
         logger.warning(
-            f"[Token Tracking] 토큰 사용량 추출 실패 - response 타입: {type(response)}"
+            f"[Token Tracking] 토큰 사용량 추출 실패 - response 타입: {type(response)}, "
+            f"usage_metadata: {getattr(response, 'usage_metadata', 'N/A')}, "
+            f"response_metadata keys: {list(getattr(response, 'response_metadata', {}).keys()) if hasattr(response, 'response_metadata') else 'N/A'}"
         )
         return None
 
