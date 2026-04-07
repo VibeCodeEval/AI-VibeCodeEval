@@ -231,6 +231,34 @@ class RedisClient:
 
         return logs
 
+    # ===== N8 토론 로그 (실행 시 관찰용, DB 미저장) =====
+
+    def _debate_log_key(self, session_id: str) -> str:
+        return f"debate_log:{session_id}"
+
+    async def save_debate_log(
+        self,
+        session_id: str,
+        payload: dict,
+        ttl_seconds: Optional[int] = None,
+    ) -> bool:
+        """
+        N8 다중 에이전트 토론 결과를 Redis에 JSON으로 저장 (PostgreSQL 비저장 대체).
+
+        키: debate_log:{session_id}
+        TTL: 기본 CHECKPOINT_TTL_SECONDS (턴 로그와 동일)
+
+        payload 예시:
+            holistic_flow_score, holistic_flow_analysis, debate_log (list), ...
+        """
+        ttl = ttl_seconds or settings.CHECKPOINT_TTL_SECONDS
+        key = self._debate_log_key(session_id)
+        return await self.set_json(key, payload, ttl)
+
+    async def get_debate_log(self, session_id: str) -> Optional[dict]:
+        """세션별 N8 토론 로그(JSON) 조회. 없으면 None."""
+        return await self.get_json(self._debate_log_key(session_id))
+
     # ===== 턴-메시지 매핑 관리 =====
 
     async def save_turn_mapping(

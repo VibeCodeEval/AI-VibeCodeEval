@@ -8,13 +8,12 @@
 Spring Boot 백엔드와 통합되어 동작하며, **LangGraph**를 사용하여 복잡한 AI 평가 플로우를 구현합니다.
 
 ### 핵심 기능
-- 🎯 **실시간 프롬프트 평가**: 사용자의 각 프롬프트를 실시간으로 평가 (Claude Prompt Engineering 기준)
-- 🔍 **의도 분석**: 8가지 코드 패턴(시스템 프롬프트, 규칙 설정, 생성, 최적화, 디버깅, 테스트 케이스, 힌트/질의, 후속 질문) 자동 분류
-- 🛡️ **가드레일**: 부적절한 요청 차단 및 교육적 피드백 제공
-- 📊 **종합 평가**: 프롬프트 활용(25%), 성능(25%), 정확성(50%)을 종합한 최종 점수 산출
-- 🔄 **비동기 처리**: 백그라운드 평가로 응답 지연 최소화
-- 🔗 **Chaining 분석**: 문제 분해, 피드백 수용성, 주도성, 전략적 탐색 평가
-- 🌐 **WebSocket 스트리밍**: 실시간 토큰 단위 응답 스트리밍 지원
+- 🎯 **턴 단위 프롬프트 평가 (제출 시 일괄)**: `eval_turn.yaml` 기준 **4대 루브릭(R1~R4)**·의도별 게이트(예: CREATION, DEBUGGING, FOLLOW_UP 등)
+- 🔍 **의도 분류**: 채팅·턴 평가에서 **다중 의도(5-way / 세부 의도)** 로 라우팅 (구현은 `intent_analyzer`·Eval Turn 서브그래프)
+- 🛡️ **가드레일**: 부적절한 요청 차단 및 교육적 피드백
+- ⚖️ **제출 후 평가 파이프라인**: Judge0 실행(N5) → Radon·AST 정적 분석(N6) → 단일 LLM 코드 리뷰(N7) → **다중 에이전트 토론(N8)** → 최종 집계(N9)
+- 📊 **종합 점수**: **Prompt 40% · Correctness 40% · Performance 20%** (Prompt는 턴 평균 + 토론 종합 점수 등 조합, `aggregate_final_scores` 참고)
+- 🌐 **WebSocket 스트리밍**: 토큰 단위 응답 스트리밍
 
 ---
 
@@ -34,18 +33,14 @@ Spring Boot 백엔드와 통합되어 동작하며, **LangGraph**를 사용하�
 │  │  1. Handle Request (상태 로드)                             │  │
 │  │  2. Intent Analyzer (의도 분석 + 가드레일)                 │  │
 │  │  3. Writer LLM (AI 답변 생성)                              │  │
-│  │  4. Eval Turn Guard (제출 시 평가 완료 대기)               │  │
-│  │  5. Main Router (제출 여부 확인)                           │  │
-│  │  6a-6d. 평가 노드들 (순차 실행: 6a→6b→6c→6d)              │  │
-│  │  7. Final Score Aggregation (최종 점수)                   │  │
+│  │  4. Eval Turn Guard (제출 시 모든 턴 Eval Turn 서브그래프)  │  │
+│  │  5. Main Router (제출 분기)                                │  │
+│  │  N5 Judge0 → N6 정적분석 → N7 코드리뷰 LLM → N8 토론 → N9 집계 │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                   │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │              Eval Turn SubGraph (실시간 평가)               │  │
-│  │  4.0 Intent Analysis (의도 분석)                           │  │
-│  │  4.R/G/O/D/T/H/F (의도별 평가 노드)                        │  │
-│  │  4.X Answer Summary (답변 요약)                            │  │
-│  │  4.4 Turn Log Aggregation (턴 로그 집계)                   │  │
+│  │  Intent Analysis → 의도별 Evaluator → Summarize → 로그 집계  │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └────────────────┬──────────────────────────┬─────────────────────┘
                  │                          │
@@ -137,34 +132,34 @@ START
   │
   ▼
 ┌────────────────────────────────────────┐
-│  6a. Eval Holistic Flow                │
-│  - Chaining 전략 평가                  │
-│  - 문제 분해, 피드백 수용성             │
-│  - 주도성, 전략적 탐색                  │
+│  N5. Eval Code Execution (Judge0)      │
+│  - 정확성(테스트 통과) → 통과 시 성능   │
 └────────────────────────────────────────┘
   │
   ▼
 ┌────────────────────────────────────────┐
-│  6b. Aggregate Turn Scores             │
-│  - 모든 턴 점수 집계 및 평균            │
+│  N6. Eval Static Analysis              │
+│  - Radon CC, ΔCC(v1 대비), AST 패턴     │
 └────────────────────────────────────────┘
   │
   ▼
 ┌────────────────────────────────────────┐
-│  6c. Eval Code Execution                │
-│  - Judge0로 코드 실행 및 평가           │
-│  - 성능 평가 (실행 시간, 메모리)        │
-│  - 정확성 평가 (테스트 케이스 통과율)    │
+│  N7. Eval Code Agent                   │
+│  - 제출 코드 정성 리뷰 (구조화 LLM)     │
 └────────────────────────────────────────┘
   │
   ▼
 ┌────────────────────────────────────────┐
-│  7. Aggregate Final Scores              │
-│  - 가중 평균 계산:                      │
-│    • 프롬프트 활용: 25%                 │
-│    • 성능: 25%                          │
-│    • 정확성: 50%                        │
-│  - 등급 산출 (A/B/C/D/F)               │
+│  N8. Holistic Debate                   │
+│  - 검사/변호인/중재자 + 최종 verdict    │
+│  - holistic_flow_score, R4 세션 맥락 등 │
+└────────────────────────────────────────┘
+  │
+  ▼
+┌────────────────────────────────────────┐
+│  N9. Aggregate Final Scores            │
+│  - Prompt 40% / Correctness 40% / Perf 20% │
+│  - 등급·DB 저장 (코드 품질 지표 반영)    │
 └────────────────────────────────────────┘
   │
   ▼
@@ -188,27 +183,19 @@ END
                              │
                              ▼
         ┌────────────────────────────────────────┐
-        │  4.0 Intent Analysis                   │
-        │  - 사용자 프롬프트 의도 분석            │
-        │  - 8가지 패턴 분류 (복수 선택 가능)     │
-        │  - 신뢰도 점수 산출                    │
+        │  Intent Analysis                       │
+        │  - 사용자 프롬프트 의도 분류            │
+        │  - 의도별로 R1~R4 중 일부만 채점 (게이트) │
         └────────────────────────────────────────┘
                              │
         ┌────────────────────┼──────────────────────────┐
         │                    │                          │
         ▼                    ▼                          ▼
-   ┌─────────┐        ┌──────────┐         ┌──────────────────┐
-   │  4.SP   │        │   4.R    │   ...   │      4.F         │
-   │시스템    │        │ 규칙설정  │         │   후속질문        │
-   │프롬프트  │        │          │         │                  │
-   └─────────┘        └──────────┘         └──────────────────┘
+   (의도별 단일 Evaluator 노드 — 예: CREATION, DEBUGGING, FOLLOW_UP …)
         │                    │                          │
-        │  각 노드는 Claude Prompt Engineering 기준으로   │
-        │  사용자 프롬프트의 품질을 평가 (0-100점)        │
-        │  - 명확성 (Clarity)                           │
-        │  - 예시 사용 (Examples)                       │
-        │  - 규칙 명시 (Rules)                          │
-        │  - 사고 연쇄 유도 (Chain of Thought)          │
+        │  루브릭: R1 논리·효율, R2 명확성·완전성,      │
+        │         R3 구조·예시, R4 맥락 유지 (Likert)   │
+        │  (세부 정의: app/domain/langgraph/prompts/eval_turn.yaml) │
         │                    │                          │
         └────────────────────┼──────────────────────────┘
                              ▼
@@ -237,25 +224,20 @@ END
 - **일반 채팅**: `EvalService.process_message()` → Writer LLM 완료 후 → END (Eval Turn SubGraph 실행하지 않음)
 - **제출**: `EvalService.submit_code()` → Eval Turn Guard → State의 messages에서 모든 턴 추출 → 각 턴에 대해 Eval Turn SubGraph 동기 실행 → 모든 턴 평가 완료 후 다음 노드로 진행
 
-### 8가지 코드 의도 패턴
+### 턴 평가: 의도 · 루브릭 (요약)
 
-**평가 대상**: 사용자가 작성한 프롬프트 (Claude Prompt Engineering 기준)
+**평가 대상**: 해당 턴의 **사용자 프롬프트** (AI 답변은 보조·요약용).
 
-| 노드 | 패턴 | 설명 | 평가 항목 (예시) |
-|------|------|------|-----------------|
-| **4.SP** | **SYSTEM_PROMPT** | 시스템 프롬프트 설정, 역할(Persona) 부여 | AI에게 구체적인 역할과 답변 스타일을 정의했는가? |
-| **4.R** | **RULE_SETTING** | 규칙/제약 조건 설정 | 제약 조건을 XML 태그나 리스트로 명시했는가? |
-| **4.G** | **GENERATION** | 코드 생성 요청 | 입출력 예시(I/O Examples)를 제공했는가? |
-| **4.O** | **OPTIMIZATION** | 성능 최적화 요청 | 목표 성능(O(n) 등)이나 최적화 전략을 제시했는가? |
-| **4.D** | **DEBUGGING** | 오류 수정, 디버깅 | 에러 메시지, 재현 단계를 구체적으로 설명했는가? |
-| **4.T** | **TEST_CASE** | 테스트 케이스 요청 | 엣지 케이스(Edge Cases)나 경계 조건을 명시했는가? |
-| **4.H** | **HINT_OR_QUERY** | 힌트 요청, 질문 | 자신의 사고 과정(Chain of Thought)을 공유했는가? |
-| **4.F** | **FOLLOW_UP** | 후속 질문, 추가 요청 | 이전 턴의 AI 답변을 기반으로 논리적으로 연결했는가? |
+| 루브릭 | 이름 (요지) |
+|--------|-------------|
+| **R1** | 논리·효율 (또는 탐구형 질문의 구체성) |
+| **R2** | 명확성·완전성 |
+| **R3** | 구조·예시 |
+| **R4** | 맥락 유지 (이전 대화와의 연속성·팩트 일치) |
 
-**특징**:
-- 복수 의도 가능 (한 프롬프트에 여러 패턴 동시 평가)
-- 병렬 실행 (LangGraph가 자동으로 관련 노드 동시 실행)
-- AI 답변은 참고용, 평가는 오직 사용자 프롬프트에 집중
+**의도별 게이트**: `CREATION`, `SETTING`, `REFINEMENT`, `DEBUGGING`, `EXPLORATION`, `FOLLOW_UP` 등에 따라 R1~R4 중 적용 항목과 `turn_score` 산식이 달라집니다. 상세는 `eval_turn.yaml` 및 `docs/Node4_평가_가이드.md` 참고.
+
+**특징**: 제출 직전까지는 일반 채팅만 하고, **제출 시 Eval Turn Guard**에서 턴마다 서브그래프를 **동기 실행**해 Redis `turn_logs` 등에 저장합니다.
 
 ---
 
@@ -265,74 +247,25 @@ END
 완전한 DDD보다는 실용적인 접근으로, 명확한 계층 분리와 협업을 위한 명명 규칙을 적용했습니다.
 
 ```
-ai_vibe_worker/
-├── app/                                    # 메인 애플리케이션
-│   ├── __init__.py
-│   ├── main.py                             # FastAPI 앱 진입점
-│   │
-│   ├── core/                               # 핵심 설정
-│   │   ├── config.py                       # 환경 변수 관리
-│   │   └── security.py                     # 보안 (향후 구현)
-│   │
-│   ├── domain/                             # 도메인 로직 (비즈니스 규칙)
-│   │   └── langgraph/                      # LangGraph 정의
-│   │       ├── graph.py                     # 메인 그래프
-│   │       ├── subgraph_eval_turn.py       # 턴 평가 서브그래프
-│   │       ├── states.py                    # 상태 타입 정의
-│   │       └── nodes/                       # 그래프 노드 구현
-│   │           ├── handle_request.py        # 1. 요청 처리
-│   │           ├── intent_analyzer.py       # 2. 의도 분석 (가드레일)
-│   │           ├── writer.py                # 3. AI 답변 생성 (Socratic)
-│   │           ├── writer_router.py          # 3.5 & 5. 라우터
-│   │           ├── eval_turn_guard.py       # 4. 제출 가드 (턴 평가 대기)
-│   │           ├── system_nodes.py          # 시스템 노드 (failure, summary)
-│   │           ├── turn_evaluator/          # 턴별 프롬프트 평가
-│   │           │   ├── analysis.py          # 4.0 의도 분석
-│   │           │   ├── evaluators.py        # 4.SP~4.F 평가 노드
-│   │           │   ├── routers.py           # Intent Router
-│   │           │   ├── summary.py           # Answer Summary
-│   │           │   ├── aggregation.py       # Turn Log 집계
-│   │           │   └── utils.py             # 공통 함수
-│   │           └── holistic_evaluator/      # 전체 평가 (제출 시)
-│   │               ├── flow.py              # 6a. Holistic Flow (Chaining)
-│   │               ├── scores.py             # 6b, 7. 점수 집계
-│   │               ├── performance.py        # 6c. 성능 평가
-│   │               ├── correctness.py       # 6d. 정확성 평가
-│   │               └── utils.py             # 공통 함수
-│   │
-│   ├── application/                        # 애플리케이션 서비스 (유스케이스)
-│   │   └── services/
-│   │       ├── eval_service.py             # 평가 서비스 (LangGraph 실행)
-│   │       └── callback_service.py         # Spring 콜백
-│   │
-│   ├── infrastructure/                     # 인프라스트럭처 (외부 시스템)
-│   │   ├── cache/                          # 캐시 계층
-│   │   │   └── redis_client.py             # Redis 클라이언트
-│   │   ├── persistence/                    # 영속성 계층
-│   │   │   ├── session.py                  # PostgreSQL 세션
-│   │   │   └── models/                     # SQLAlchemy 모델
-│   │   │       ├── enums.py                 # Enum 정의
-│   │   │       ├── exams.py                 # 시험 모델
-│   │   │       ├── participants.py          # 참가자 모델
-│   │   │       ├── problems.py              # 문제 모델
-│   │   │       ├── sessions.py              # 세션 모델
-│   │   │       └── submissions.py           # 제출 모델
-│   │   └── repositories/                   # 데이터 접근 계층
-│   │       ├── exam_repository.py
-│   │       ├── session_repository.py
-│   │       ├── state_repository.py         # Redis 상태 저장/로드
-│   │       └── submission_repository.py
-│   │
-│   └── presentation/                       # 프레젠테이션 계층 (API)
-│       ├── api/                            # API 라우터
-│       │   └── routes/
-│       │       ├── chat.py                  # 채팅/제출 API (REST + WebSocket)
-│       │       ├── session.py               # 세션 관리 API
-│       │       └── health.py                # 헬스 체크
-│       └── schemas/                        # Pydantic 스키마
-│           ├── chat.py                     # 채팅 요청/응답
-│           ├── session.py                  # 세션 요청/응답
-│           └── common.py                   # 공통 스키마
+app/
+├── main.py                          # FastAPI 진입점
+├── core/                            # 설정 등
+├── domain/langgraph/
+│   ├── graph.py                     # 메인 그래프 (채팅 + 제출 후 N5~N9)
+│   ├── subgraph_eval_turn.py        # 턴 평가 서브그래프 (N4에서 호출)
+│   ├── subgraph_debate.py         # N8 다중 에이전트 토론
+│   ├── states.py
+│   ├── prompts/                   # YAML 프롬프트 (eval_turn, debate_agents 등)
+│   └── nodes/
+│       ├── chat/                  # n1_handle_request, n2_intent_analyzer, n3_writer, routers
+│       ├── eval/                  # n4_eval_turn_guard, n5~n9 (파일명과 그래프 노드명은 코드 참고)
+│       ├── eval_turn/             # (레거시 경로명) 턴 서브그래프용 노드·집계
+│       ├── turn_evaluator/        # 의도 분석·루브릭 채점·가중치
+│       └── system/                # handle_failure, summarize_memory
+├── application/services/          # eval_service, callback_service 등
+├── infrastructure/                # persistence, repositories, cache, judge0 …
+├── presentation/api/routes/       # chat, session, health
+├── presentation/schemas/
 │
 ├── scripts/                                # 개발 스크립트
 │   ├── init-db.sql                         # DB 초기화 스크립트
@@ -348,17 +281,8 @@ ai_vibe_worker/
 │   ├── test_chat_flow.py                  # 전체 플로우 테스트
 │   └── test_gemini.py                     # Gemini API 연결 테스트
 │
-├── docs/                                   # 문서
-│   ├── API_Specification.md                # API 명세서
-│   ├── Endpoint_Change_History.md          # 엔드포인트 변경 이력
-│   ├── Quick_DB_Guide.md                  # DB 빠른 가이드
-│   ├── Database_Changes_Summary.md         # DB 변경사항 요약
-│   ├── Test_Execution_Guide.md            # 테스트 실행 가이드
-│   ├── State_Flow_and_DB_Storage.md       # LangGraph State 흐름 및 DB 저장
-│   ├── Backend_Docker_And_DB_Guide.md     # Backend Docker · DB 연동
-│   ├── Judge0_Complete_Guide.md           # Judge0 완전 가이드
-│   ├── Vertex_AI_Setup_Guide.md           # Vertex AI 설정 가이드
-│   └── archive/                            # 아카이브 문서
+├── docs/                                   # 기술 문서 (한글 파일명, 목차: 문서_인덱스.md)
+├── .maestro/                               # 운영·그래프 맵·변경 로그 (docs/, agents/, reports/)
 │
 ├── data/                                   # 테스트 데이터
 │   └── turn_sessions.json                  # 저장된 세션 ID
@@ -373,18 +297,18 @@ ai_vibe_worker/
 
 ### 계층 설명
 
-- **`domain/`**: 비즈니스 로직의 핵심. LangGraph 노드와 상태 정의
-- **`application/`**: 유스케이스 구현. 도메인 로직을 조합하여 비즈니스 기능 제공
-- **`infrastructure/`**: 외부 시스템 연동 (DB, Redis, 외부 API)
-- **`presentation/`**: API 엔드포인트와 요청/응답 스키마
-- **`core/`**: 공통 설정 및 유틸리티
+- **`app/domain/`**: LangGraph 그래프·노드·프롬프트·상태
+- **`app/application/`**: `eval_service` 등 유스케이스
+- **`app/infrastructure/`**: DB·Redis·Judge0 등
+- **`app/presentation/`**: FastAPI 라우트·스키마
+- **`app/core/`**: 설정·공통
 
 ---
 
 ## 🚀 시작하기
 
 ### 사전 요구사항
-- Python 3.10 이상 (`.python-version` 파일에 지정됨)
+- Python 3.12 (`.python-version` 참고)
 - Docker & Docker Compose
 - Gemini API 키
 - **uv** (권장) - 빠른 Python 패키지 관리자
@@ -394,7 +318,7 @@ ai_vibe_worker/
 ```bash
 # 저장소 클론
 git clone <repository-url>
-cd LangGraph_1
+cd AI-VibeCodeEval
 
 # 환경 변수 파일 생성
 cp env.example .env
@@ -431,8 +355,8 @@ uv --version
 uv sync
 
 # 또는 단계별로
-# 1. Python 3.10 설치 (.python-version 파일 기반)
-uv python install 3.10
+# 1. Python 3.12 설치 (.python-version 파일 기반)
+uv python install 3.12
 
 # 2. 의존성 설치 (pyproject.toml + uv.lock 기반)
 uv sync
@@ -475,9 +399,9 @@ uv sync --upgrade          # 모든 패키지 최신 버전으로 업그레이�
 uv sync --dev              # 개발 의존성 포함 설치
 
 # Python 버전 관리
-uv python install 3.10      # Python 3.10 설치
+uv python install 3.12      # Python 3.12 설치
 uv python list             # 설치된 Python 버전 목록
-uv python pin 3.10         # 프로젝트 Python 버전 고정
+uv python pin 3.12         # 프로젝트 Python 버전 고정
 
 # 스크립트 실행
 uv run <script>            # 가상 환경에서 스크립트 실행
@@ -491,7 +415,7 @@ uv pip freeze               # requirements.txt 형식으로 출력
 
 # 가상 환경 관리
 uv venv                     # 가상 환경 생성 (.venv)
-uv venv --python 3.10       # 특정 Python 버전으로 가상 환경 생성
+uv venv --python 3.12       # 특정 Python 버전으로 가상 환경 생성
 ```
 
 ### 4. pip 사용 (대안)
@@ -624,7 +548,7 @@ docker-compose down
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
 
-**상세 API 명세**: [API_Specification.md](./docs/API_Specification.md)
+**상세 API 명세**: [API_전체_명세.md](./docs/API_전체_명세.md)
 
 ---
 
@@ -649,58 +573,40 @@ docker-compose down
 | `JUDGE0_API_KEY` | Judge0 API 키 (RapidAPI) | - | ⚠️ (RapidAPI 사용 시) |
 | `JUDGE0_USE_RAPIDAPI` | RapidAPI 사용 여부 | `false` | ❌ |
 | `SPRING_CALLBACK_URL` | Spring 콜백 URL | `http://localhost:8080/api/ai/callback` | ✅ |
+| `DEBATE_LOG_TO_REDIS` | N8 토론 로그를 Redis에 저장 | `true` | ❌ |
 
 ---
 
 ## 🏆 평가 시스템
 
-### 최종 점수 구성
+### 최종 점수 구성 (`aggregate_final_scores`)
 
-| 항목 | 가중치 | 설명 | 평가 방법 |
+| 항목 | 가중치 | 설명 | 주요 근거 |
 |------|--------|------|-----------|
-| **프롬프트 활용** | 25% | 턴별 프롬프트 품질 + Chaining 전략 | LLM 평가 |
-| **성능** | 25% | 실행 시간 및 메모리 사용량 | Judge0 |
-| **정확성** | 50% | 테스트 케이스 통과율 | Judge0 |
+| **Prompt** | 40% | 턴 평균 + 세션 종합(토론) 등 | N4 턴 점수, N8 `holistic_flow_score`, (선택) `integrated_score`, N8 `r4_context_maintenance_score` 보정 |
+| **Correctness** | 40% | 테스트 통과 | N5 Judge0 |
+| **Performance** | 20% | 시간·메모리 | N5 Judge0 (N6 Radon CC에 따라 가산 배율 가능) |
 
-### 등급 기준
-- **A**: 90점 이상
-- **B**: 80-89점
-- **C**: 70-79점
-- **D**: 60-69점
-- **F**: 60점 미만
+Prompt 세부: 기본적으로 `holistic_flow_score×0.6 + aggregate_turn_score×0.4` 후, 레거시 `integrated_score`가 있으면 50:50 블렌딩, `r4_context_maintenance_score`가 있으면 Prompt에 20% 가중 반영. 상세 공식은 `docs/점수_계산_로직.md` 및 `app/domain/langgraph/nodes/eval/n9_final_scores.py` 참고.
 
-### 프롬프트 평가 기준 (Claude Prompt Engineering 기반)
+### 등급 (요약)
 
-**⚠️ 중요**: 평가 대상은 **사용자가 작성한 프롬프트**입니다 (AI 답변 X)
+정확성 미달 시 **D/F** 우선. 정확성 만점일 때는 **ΔCC·AST·종합점수** 등에 따라 **A~C** 분기 (`n9_final_scores.py`). 단순 임계(90/80/70)만 쓰지 않을 수 있습니다.
 
-#### 기본 평가 기준
+### 턴 평가 루브릭 (V3, `eval_turn.yaml`)
 
-각 턴의 사용자 프롬프트를 다음 4가지 기준으로 평가합니다:
+**평가 대상**: 사용자 프롬프트. **R1~R4** Likert(1~5) 및 의도별 게이트로 `turn_score` 산출.
 
-1. **명확성 (Clarity)**
-   - 요청이 모호하지 않고 구체적인가?
-   - 직접적이고 명확하게 의도를 전달하는가?
+| 코드 | 이름 (요지) |
+|------|----------------|
+| R1 | 논리·효율 |
+| R2 | 명확성·완전성 |
+| R3 | 구조·예시 |
+| R4 | 맥락 유지 (턴 단위) |
 
-2. **예시 사용 (Examples)**
-   - 원하는 입출력 예시나 상황을 제공했는가?
-   - Few-shot 또는 Multi-shot 방식을 활용했는가?
+### 세션 종합 (N8 Holistic Debate)
 
-3. **규칙 및 제약조건 (Rules)**
-   - 명확한 제약 조건이나 규칙을 제시했는가?
-   - XML 태그, 리스트 등으로 구조화했는가?
-
-4. **문맥 및 사고 연쇄 (Context & Chain of Thought)**
-   - 이전 대화나 배경 지식을 적절히 활용했는가?
-   - 단계적 접근을 요청하거나 자신의 사고 과정을 공유했는가?
-
-#### Chaining 평가 (Holistic Flow)
-
-제출 시 전체 대화를 종합하여 다음을 평가합니다:
-
-1. **문제 분해 (Problem Decomposition)**
-2. **피드백 수용성 (Feedback Integration)**
-3. **주도성 (Proactiveness)**
-4. **전략적 탐색 (Strategic Exploration)**
+제출 후 **검사(strict) / 변호인(advocate) / 중재자(neutral)** 가 라운드 토론하고 **수석 심사관(verdict)** 이 `holistic_flow_score`·분석·(세션) R4 점수 등을 확정합니다. 프롬프트는 `debate_agents.yaml`, 호출 맵은 `.maestro/docs/LangGraph_API_Call_Map.md` 참고.
 
 ---
 
@@ -764,7 +670,7 @@ uv run pytest tests/test_api.py -v
 
 ### 테스트 가이드
 - **`test_scripts/README.md`**: 테스트 스크립트 상세 가이드
-- **`docs/Test_Execution_Guide.md`**: 테스트 실행 가이드
+- **`docs/테스트_가이드.md`**: 테스트 실행 가이드
 
 ### 주요 테스트 스크립트
 - `test_submit_tsp_full_flow.py`: 외판원 문제 전체 플로우 테스트
@@ -796,7 +702,7 @@ uv run pytest tests/test_api.py -v
 - **`submission_runs`**: Judge0 실행 결과
 - **`scores`**: 최종 평가 점수
 
-**상세 가이드**: [Quick_DB_Guide.md](./docs/Quick_DB_Guide.md), [Database_Changes_Summary.md](./docs/Database_Changes_Summary.md)
+**상세 가이드**: [DB 설정 가이드](./docs/DB_설정_가이드.md), [테이블명세서](./docs/테이블명세서.md)
 
 ---
 
@@ -823,19 +729,16 @@ docker-compose logs -f ai_worker
 
 ## 📚 문서
 
-### 핵심 문서
-- [uv 환경 설정 가이드](./docs/UV_Setup_Guide.md) - uv 설치 및 사용법 (권장)
-- [API 명세서](./docs/API_Specification.md) - REST API 상세 명세
-- [DB 가이드](./docs/Quick_DB_Guide.md) - 데이터베이스 사용 가이드
-- [테스트 가이드](./docs/Test_Execution_Guide.md) - 테스트 실행 방법
-- [Judge0 가이드](./docs/Judge0_Complete_Guide.md) - Judge0 설정 및 사용
-- [Vertex AI 가이드](./docs/Vertex_AI_Setup_Guide.md) - Vertex AI 설정
+### 핵심 문서 (`docs/`)
+- [문서 인덱스](./docs/문서_인덱스.md) — 전체 목차
+- [API 전체 명세](./docs/API_전체_명세.md) · [API 현재 구현](./docs/API_현재_구현.md)
+- [State 흐름 및 DB 저장](./docs/State_흐름_및_DB_저장.md) · [점수 계산 로직](./docs/점수_계산_로직.md)
+- [Node4 평가 가이드](./docs/Node4_평가_가이드.md) · [Judge0 가이드](./docs/Judge0_가이드.md)
+- [UV 설정 가이드](./docs/UV_설정_가이드.md) · [테스트 가이드](./docs/테스트_가이드.md)
 
-### 추가 문서
-- [엔드포인트 변경 이력](./docs/Endpoint_Change_History.md)
-- [DB 변경사항](./docs/Database_Changes_Summary.md)
-- [LangGraph State 흐름](./docs/State_Flow_and_DB_Storage.md)
-- [Backend Docker · DB 연동](./docs/Backend_Docker_And_DB_Guide.md)
+### 운영·그래프 참고 (`.maestro/`)
+- [LangGraph API·호출 맵](./.maestro/docs/LangGraph_API_Call_Map.md)
+- [V2.1 변경 로그](./.maestro/docs/V2.1_Change_Log.md) · [DOCS_REFERENCE](./.maestro/DOCS_REFERENCE.md)
 
 ---
 
@@ -843,7 +746,7 @@ docker-compose logs -f ai_worker
 
 ### 백엔드
 - **FastAPI** (0.109+): 비동기 웹 프레임워크
-- **Python** (3.10+): 프로그래밍 언어
+- **Python** (3.12): 프로그래밍 언어
 - **uv**: 빠른 Python 패키지 관리자 (pip 대체)
 
 ### AI/LLM
@@ -873,20 +776,15 @@ docker-compose logs -f ai_worker
 ## 📈 현재 상태 및 수정 사항
 
 ### ✅ 완료된 기능
-- [x] LangGraph 메인 플로우 구현
-- [x] Eval Turn SubGraph (8가지 의도별 사용자 프롬프트 평가)
-- [x] Redis 세션 상태 관리 (graph_state, turn_logs, turn_mapping)
+- [x] LangGraph 메인 플로우 (채팅 루프 + 제출 후 N5→N9)
+- [x] Eval Turn SubGraph (제출 시 턴별 동기 평가, V3 루브릭 R1~R4·의도 게이트)
+- [x] 제출 파이프라인: Judge0(N5) → Radon/AST(N6) → 코드 리뷰 LLM(N7) → 다중 에이전트 토론(N8) → 집계(N9)
+- [x] Redis 세션 상태 관리 (graph_state, turn_logs, turn_mapping, 선택적 debate 로그)
 - [x] PostgreSQL 연동 (Spring Boot 공유 DB)
-- [x] Gemini LLM 통합 (Gemini 2.0 Flash)
-- [x] Vertex AI 지원 (GCP Vertex AI, ADC 인증)
-- [x] LLM Factory Pattern (중앙화된 LLM 관리)
-- [x] Judge0 연동 (코드 실행 및 테스트 케이스 평가)
-- [x] Judge0 Worker (비동기 코드 실행 처리)
-- [x] 가드레일 시스템 (직접 답 요청 차단, Jailbreak 방지)
-- [x] 실시간 프롬프트 평가 (Claude Prompt Engineering 기준)
-- [x] 제출 시 Eval Turn Guard (누락 턴 재평가 + 대기 메커니즘)
-- [x] Holistic Flow 평가 (Chaining 전략, 고급 프롬프트 기법)
-- [x] 최종 평가 시스템 (프롬프트 25%, 성능 25%, 정확성 50%)
+- [x] Gemini / Vertex AI (LLM Factory)
+- [x] Judge0 연동 및 Worker
+- [x] 가드레일 (직접 답·Jailbreak 등)
+- [x] 최종 평가 가중치 **Prompt 40% / Correctness 40% / Performance 20%**
 - [x] RESTful API 엔드포인트 (`/api/session/start`, `/api/session/{id}/messages`, `/api/session/{id}/submit`)
 - [x] WebSocket 스트리밍 (LangGraph 기반 토큰 단위 스트리밍)
 - [x] 메시지 저장 (PostgreSQL `prompt_messages`)
@@ -916,6 +814,12 @@ docker-compose logs -f ai_worker
 ---
 
 ## 📝 변경 이력
+
+### 2026-04 — 평가 파이프라인 개편 (현재 브랜치 기준)
+
+- 제출 후 **통합 평가 노드 선행 → Holistic 단일 플로우** 순서를 **Judge0 → 정적 분석 → 코드 에이전트 → 토론 → 최종 집계**로 재구성.
+- 턴 평가 **V3 루브릭(R1~R4)** 및 N8 **다중 에이전트 토론**(`subgraph_debate.py`, `debate_agents.yaml`) 도입.
+- 최종 가중치 **40 / 40 / 20** 및 Prompt 내부 블렌딩·R4 세션 보정은 `n9_final_scores.py` 기준.
 
 ### v0.6.0 (2025-12-06)
 - **RESTful API 리팩토링**: 

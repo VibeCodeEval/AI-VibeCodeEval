@@ -96,7 +96,7 @@ class MessageStorageService:
                 f"session_id: {session.id}, exam_id: {exam_id}, participant_id: {participant_id}"
             )
 
-            # 2. Role 변환 ('user' → PromptRoleEnum.USER, 'assistant' → PromptRoleEnum.ASSISTANT)
+            # 2. Role 변환 ('user' → USER, 'assistant'/'ai' → AI — DB enum 값)
             role_enum = self._convert_role(role)
 
             # 3. PostgreSQL에 메시지 저장 (먼저)
@@ -154,7 +154,7 @@ class MessageStorageService:
         if role_lower == "user":
             return PromptRoleEnum.USER
         elif role_lower == "assistant" or role_lower == "ai":
-            return PromptRoleEnum.ASSISTANT
+            return PromptRoleEnum.AI
         else:
             # 기본값은 USER
             logger.warning(f"[MessageStorage] 알 수 없는 role: {role}, USER로 처리")
@@ -205,6 +205,8 @@ class MessageStorageService:
 
         state["messages"].append(message_data)
         state["turn"] = max(state.get("turn", 0), turn)
+        # 제출 시 Eval Turn Guard는 current_turn 기준으로 1..(current_turn-1) 평가 → 메시지 turn과 맞춤
+        state["current_turn"] = max(state.get("current_turn", 0), turn)
 
         # 상태 저장
         await self.state_repo.save_state(redis_session_id, state)

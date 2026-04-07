@@ -97,6 +97,25 @@ class EvaluationStorageService:
                 or ""
             )
 
+            # V3.0: rubric_breakdown / applied_rubrics (리스트 rubrics와 병행 저장)
+            rubric_breakdown = prompt_eval_details.get("rubric_breakdown")
+            applied_rubrics = prompt_eval_details.get("applied_rubrics")
+            if not detailed_rubrics and isinstance(applied_rubrics, list):
+                for rubric in applied_rubrics:
+                    if isinstance(rubric, dict):
+                        detailed_rubrics.append(
+                            {
+                                "name": rubric.get("name", rubric.get("criterion", "")),
+                                "score": rubric.get("score", 0.0),
+                                "reasoning": rubric.get(
+                                    "reasoning", rubric.get("reason", "평가 없음")
+                                ),
+                                "criterion": rubric.get(
+                                    "criterion", rubric.get("name", "")
+                                ),
+                            }
+                        )
+
             # details에 모든 평가 데이터 포함 (상세 정보, 중복 최소화)
             details = {
                 "score": score,  # 점수
@@ -110,11 +129,16 @@ class EvaluationStorageService:
                     prompt_eval_details.get("intent_confidence", 0.0),
                 ),  # 의도 신뢰도
                 "rubrics": detailed_rubrics,  # 상세 루브릭 정보 (name, score, reasoning 포함) - 중복 제거
+                "rubric_breakdown": rubric_breakdown,
+                "applied_rubrics": applied_rubrics,
                 "weights": prompt_eval_details.get("weights", {}),  # 가중치 정보
                 "turn_score": turn_log.get("turn_score"),
                 "is_guardrail_failed": turn_log.get("is_guardrail_failed", False),
                 "guardrail_message": turn_log.get("guardrail_message"),
                 "ai_summary": ai_summary,  # AI 응답 요약 (6번 Node에서 Chaining 전략 평가에 사용)
+                "user_prompt_summary": turn_log.get("user_prompt_summary"),
+                "llm_answer_summary": turn_log.get("llm_answer_summary"),
+                "llm_answer_reasoning": turn_log.get("llm_answer_reasoning"),
                 # 참고용: 상세 정보는 필요시에만 포함 (중복 방지)
                 # "evaluations": turn_log.get("evaluations", {}),  # 주석 처리: rubrics와 중복
                 # "detailed_feedback": turn_log.get("detailed_feedback", []),  # 주석 처리: rubrics와 중복
@@ -147,9 +171,9 @@ class EvaluationStorageService:
                     )
                     return None
 
-                # Foreign Key 제약 조건을 위해 메시지가 존재하는지 확인
-                # (백엔드에서 메시지를 생성하므로, 평가 저장 시점에는 메시지가 이미 존재해야 함)
-                # role 필드는 필요 없으므로 id만 확인 (ENUM 변환 오류 방지)
+                # DB 스키마상 prompt_evaluations → prompt_messages FK는 없음.
+                # Core가 prompt_messages를 채우지 않는 환경에서도 턴 평가를 남기기 위해
+                # 메시지 존재 여부로 저장을 막지 않습니다. (export / 감사용 TURN_EVAL)
                 from sqlalchemy import text
 
                 message_query = text(
@@ -160,18 +184,14 @@ class EvaluationStorageService:
                     LIMIT 1
                 """
                 )
-                result = await self.db.execute(
+                chk = await self.db.execute(
                     message_query, {"session_id": session_id, "turn": turn}
                 )
-                message_exists = result.first() is not None
-
-                if not message_exists:
-                    logger.error(
-                        f"[EvaluationStorage] Foreign Key 제약 조건 위반 - "
-                        f"메시지가 존재하지 않습니다. session_id: {session_id}, turn: {turn}. "
-                        f"백엔드에서 먼저 메시지를 생성해야 합니다."
+                if chk.first() is None:
+                    logger.warning(
+                        f"[EvaluationStorage] prompt_messages에 해당 턴 행 없음 — "
+                        f"TURN_EVAL만 저장합니다. session_id: {session_id}, turn: {turn}"
                     )
-                    return None
 
                 # 새 평가 결과 생성
                 evaluation = PromptEvaluation(

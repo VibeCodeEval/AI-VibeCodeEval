@@ -455,7 +455,10 @@ class EvalService:
         existing_state = await self.state_repo.get_state(session_id)
 
         if existing_state:
-            # 기존 상태 업데이트
+            # 기존 상태 업데이트 (save-message 등으로 Redis만 채운 경우 spec_id 누락 방지)
+            existing_state["exam_id"] = exam_id
+            existing_state["participant_id"] = participant_id
+            existing_state["spec_id"] = spec_id
             existing_state["human_message"] = "코드를 제출합니다."
             existing_state["is_submitted"] = True
             existing_state["code_content"] = code_content
@@ -1013,6 +1016,15 @@ class EvalService:
                                 "is_guardrail_failed", False
                             ),
                             "guardrail_message": main_state.get("guardrail_message"),
+                            "user_prompt_summary": detailed_turn_log.get(
+                                "user_prompt_summary"
+                            ),
+                            "llm_answer_summary": detailed_turn_log.get(
+                                "llm_answer_summary"
+                            ),
+                            "llm_answer_reasoning": detailed_turn_log.get(
+                                "llm_answer_reasoning"
+                            ),
                         }
 
                         await storage_service.save_turn_evaluation(

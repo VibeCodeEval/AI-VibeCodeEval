@@ -14,6 +14,25 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+def estimate_user_text_tokens(text: str) -> int:
+    """
+    사용자 작성 텍스트만 대략적인 토큰 수 추정 (시스템 프롬프트 제외용).
+    API 라우트의 SendMessages와 동일하게 cl100k_base 사용.
+    """
+    if not text or not str(text).strip():
+        return 0
+    try:
+        import tiktoken
+
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(str(text)))
+    except Exception as e:
+        logger.warning(
+            f"[Token Tracking] tiktoken 추정 실패, 문자 길이 기반 대체: {e}"
+        )
+        return max(1, len(str(text)) // 3)
+
+
 def extract_token_usage(response: Any) -> Optional[Dict[str, int]]:
     """
     LLM 응답에서 토큰 사용량 추출
@@ -153,6 +172,8 @@ def accumulate_tokens(
     state: Dict[str, Any],
     new_tokens: Optional[Dict[str, int]],
     token_type: str = "chat",  # "chat" 또는 "eval"
+    *,
+    chat_prompt_token_override: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     State에 토큰 사용량 누적
@@ -161,12 +182,22 @@ def accumulate_tokens(
         state: MainGraphState 또는 EvalTurnState
         new_tokens: 새로 추출한 토큰 사용량
         token_type: "chat" (채팅 검사) 또는 "eval" (평가)
+        chat_prompt_token_override: chat일 때만 사용. 지정 시 API의 input(prompt) 대신
+            이 값을 이번 호출의 prompt_tokens로 누적 (시스템 프롬프트 제외·사용자 문장만 반영).
 
     Returns:
         업데이트된 State (토큰 누적)
     """
     if not new_tokens:
         return state
+
+    merged = dict(new_tokens)
+    if token_type == "chat" and chat_prompt_token_override is not None:
+        ct = int(new_tokens.get("completion_tokens", 0) or 0)
+        pt = int(chat_prompt_token_override)
+        merged["prompt_tokens"] = pt
+        merged["completion_tokens"] = ct
+        merged["total_tokens"] = pt + ct
 
     # 기존 토큰 사용량 가져오기
     if token_type == "chat":
@@ -177,11 +208,11 @@ def accumulate_tokens(
     # 누적
     accumulated = {
         "prompt_tokens": existing.get("prompt_tokens", 0)
-        + new_tokens.get("prompt_tokens", 0),
+        + merged.get("prompt_tokens", 0),
         "completion_tokens": existing.get("completion_tokens", 0)
-        + new_tokens.get("completion_tokens", 0),
+        + merged.get("completion_tokens", 0),
         "total_tokens": existing.get("total_tokens", 0)
-        + new_tokens.get("total_tokens", 0),
+        + merged.get("total_tokens", 0),
     }
 
     # State 업데이트

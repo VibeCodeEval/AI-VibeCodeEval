@@ -11,6 +11,7 @@ from sqlalchemy import (BigInteger, DateTime, Enum, ForeignKey, Integer,
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.config import settings
 from app.infrastructure.persistence.models.enums import (EvaluationTypeEnum,
                                                          PromptRoleEnum)
 from app.infrastructure.persistence.session import Base
@@ -26,7 +27,7 @@ class PromptSession(Base):
         BigInteger, ForeignKey("exams.id"), nullable=False
     )
     participant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("participants.id"), nullable=False
+        BigInteger, ForeignKey(f"{settings.VIBECODE_PARTICIPANT_TABLE}.id"), nullable=False
     )
     spec_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("problem_specs.id"), nullable=True

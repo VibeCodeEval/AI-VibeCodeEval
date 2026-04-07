@@ -23,12 +23,11 @@ START → 1. Handle Request → 2. Intent Analyzer → 3. Writer LLM → END
 3. Writer LLM: AI 답변 생성. v2.1: spec_id=20일 때 클린/스파게티 분기(구조적 용어 감지)
 4. Eval Turn Guard: 제출 시 State의 messages에서 모든 턴 추출하여 동기 평가 실행
 5. Main Router: 제출 여부에 따른 분기
-6a. Holistic Flow: Chaining 전략 평가
-6b. Integrated Evaluator: v2.1 통합 평가(turn_analysis, Radon CC, ΔCC, AST 패턴, 5대 루브릭)
-6c. Aggregate Scores: 턴별 점수 집계
-6d. Code Performance: 성능 평가
-6e. Code Correctness: 정확성 평가
-7. Final Scores: 최종 점수·등급. v2.1: integrated_score 블렌딩, ΔCC·AST 학점 보정, v21_summary 저장
+5. Eval Code Execution (N5): Judge0 코드 실행 평가
+6. Eval Static Analysis (N6): Radon CC 정적 분석
+7. Eval Code Agent (N7): 코드 리뷰 LLM (단일 에이전트)
+8. Holistic Debate (N8): 다중 에이전트 토론 (검사/변호인/중재자 × 2라운드)
+9. Final Scores (N9): 최종 점수·등급 집계 및 DB 저장
 
 [상태 관리]
 - MainGraphState: 모든 노드가 공유하는 상태 객체
@@ -52,12 +51,13 @@ from app.domain.langgraph.nodes.chat.routers import (intent_router,
 from app.domain.langgraph.nodes.eval.n4_eval_turn_guard import \
     eval_turn_submit_guard
 from app.domain.langgraph.nodes.eval.n5_integrated_evaluator import \
-    integrated_evaluator
-from app.domain.langgraph.nodes.eval.n6_holistic_flow import eval_holistic_flow
-from app.domain.langgraph.nodes.eval.n7_aggregate_turn_scores import \
-    aggregate_turn_scores
-from app.domain.langgraph.nodes.eval.n8_code_execution import \
     eval_code_execution
+from app.domain.langgraph.nodes.eval.n6_holistic_flow import eval_static_analysis
+from app.domain.langgraph.nodes.eval.n7_aggregate_turn_scores import \
+    eval_code_agent
+from app.domain.langgraph.nodes.eval.n8_code_execution import \
+    holistic_debate_flow
+import logging
 from app.domain.langgraph.nodes.eval.n9_final_scores import \
     aggregate_final_scores
 from app.domain.langgraph.nodes.system.system_nodes import (handle_failure,
@@ -154,15 +154,11 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
 
     # 5. Main Router (조건부 분기 함수로 처리)
 
-    # Phase 6B: Integrated Evaluator (Spec 중심 통합 평가)
-    builder.add_node("integrated_evaluator", integrated_evaluator)
-
-    # 6a-6c. 평가 노드들
-    builder.add_node("eval_holistic_flow", eval_holistic_flow)
-    builder.add_node("aggregate_turn_scores", aggregate_turn_scores)
-    builder.add_node(
-        "eval_code_execution", eval_code_execution
-    )  # 6c: Correctness + Performance 통합
+    # 신규 평가 파이프라인 (N5~N8)
+    builder.add_node("eval_code_execution", eval_code_execution)      # N5 Judge0
+    builder.add_node("eval_static_analysis", eval_static_analysis)    # N6 Radon CC
+    builder.add_node("eval_code_agent", eval_code_agent)              # N7 Code Review LLM
+    builder.add_node("holistic_debate", holistic_debate_flow)         # N8 다중 에이전트 토론
 
     # 7. Aggregate Final Scores
     builder.add_node("aggregate_final_scores", aggregate_final_scores)
@@ -200,14 +196,13 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
         },
     )
 
-    # Eval Turn Guard -> Main Router (조건부)
-    # 제출 시 모든 턴 평가 완료 후 Main Router로 진행
-    # Phase 6B: integrated_evaluator를 eval_holistic_flow 전에 실행
+    # 제출 시 eval_turn_guard 통과 후 N5(eval_code_execution)로 진입
+    # "eval_holistic_flow" 키는 main_router가 반환하는 레거시 값으로, 실제 노드는 eval_code_execution(N5)으로 매핑
     builder.add_conditional_edges(
         "eval_turn_guard",
         main_router,
         {
-            "eval_holistic_flow": "integrated_evaluator",  # 제출 시 integrated_evaluator 먼저
+            "eval_holistic_flow": "eval_code_execution",
             "handle_request": "handle_request",
             "end": END,
         },
@@ -218,7 +213,7 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
         "handle_failure",
         main_router,
         {
-            "eval_holistic_flow": "integrated_evaluator",  # Phase 6B: integrated_evaluator 먼저
+            "eval_holistic_flow": "eval_code_execution",
             "handle_request": "handle_request",
             "end": END,
         },
@@ -227,18 +222,11 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     # Summarize Memory -> Handle Request (재시도)
     builder.add_edge("summarize_memory", "handle_request")
 
-    # 평가 노드들 (순차 실행)
-    # Phase 6B: Integrated Evaluator -> Holistic Flow
-    builder.add_edge("integrated_evaluator", "eval_holistic_flow")
-
-    # 6a -> 6b
-    builder.add_edge("eval_holistic_flow", "aggregate_turn_scores")
-
-    # 6b -> 6c (Correctness 먼저 평가, 통과 시 Performance 평가)
-    builder.add_edge("aggregate_turn_scores", "eval_code_execution")
-
-    # 6c -> 7
-    builder.add_edge("eval_code_execution", "aggregate_final_scores")
+    # N5 -> N6 -> N7 -> N8 -> N9 순차 실행
+    builder.add_edge("eval_code_execution", "eval_static_analysis")   # N5 -> N6
+    builder.add_edge("eval_static_analysis", "eval_code_agent")       # N6 -> N7
+    builder.add_edge("eval_code_agent", "holistic_debate")            # N7 -> N8
+    builder.add_edge("holistic_debate", "aggregate_final_scores")     # N8 -> N9
 
     # 7 -> END
     builder.add_edge("aggregate_final_scores", END)
@@ -297,6 +285,7 @@ def get_initial_state(
         guardrail_message=None,
         guide_strategy=None,
         keywords=None,
+        intent_llm_ran=None,
         writer_status=None,
         writer_error=None,
         is_submitted=False,
@@ -304,6 +293,7 @@ def get_initial_state(
         code_content=None,
         turn_scores={},
         holistic_flow_score=None,
+        r4_context_maintenance_score=None,
         holistic_flow_analysis=None,
         aggregate_turn_score=None,
         code_performance_score=None,
@@ -322,6 +312,10 @@ def get_initial_state(
         turn_analysis=None,
         integrated_score=None,
         integrated_evaluation=None,
+        # Phase 6E: 다중 에이전트 토론 로그
+        debate_log=None,
+        debate_initial_opinions=None,
+        debate_rebuttals=None,
         # v2.1 Snapshot·평가 (제출 플로우에서 채워짐)
         v1_code=None,
         v2_code=None,

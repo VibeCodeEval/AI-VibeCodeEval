@@ -17,12 +17,15 @@
     ├── 채팅 루프 에이전트 (chat_loop_agent.md)
     │   └── chat: n1_handle_request → n2_intent_analyzer → n3_writer + system/system_nodes
     │
-    └── 평가 오케스트레이터 (eval_orchestrator.md)
-        ├── 평가 전략/점수 병합 규칙 관리
-        ├── 턴 평가 에이전트 (turn_eval_agent.md)
-        │   └── n4_eval_turn_guard + eval_turn/ 서브그래프 (8종 평가 노드)
-        └── Holistic/점수 에이전트 (holistic_score_agent.md)
-            └── eval: n5_integrated_evaluator → n6_holistic_flow → n7/n9 집계·최종 → n8_code_execution
+    ├── 평가 오케스트레이터 (eval_orchestrator.md)
+    │   ├── 평가 전략/점수 병합 규칙 관리
+    │   ├── 턴 평가 에이전트 (turn_eval_agent.md)
+    │   │   └── n4_eval_turn_guard + eval_turn/ 서브그래프 (8종 평가 노드)
+    │   └── Holistic/점수 에이전트 (holistic_score_agent.md)
+    │       └── eval: n5_integrated_evaluator → n6_holistic_flow → n7/n9 집계·최종 → n8_code_execution
+    │
+    └── Submit 테스트·평가 덤프 에이전트 (submit_test_agent.md)
+        └── 시드·check_submit_result·export_evaluation_json·debate_redis·.maestro/DOCS 테스트 가이드
 ```
 
 ## 2. 에이전트 요약
@@ -35,6 +38,7 @@
 | **평가 오케스트레이터** | `eval_orchestrator.md` | 평가 파이프라인 전략, Agent 간 조율, 새 평가 방식 설계 |
 | **턴 평가** | `turn_eval_agent.md` | 턴별 프롬프트 품질 평가, 의도별 루브릭, 서브그래프 |
 | **Holistic/점수** | `holistic_score_agent.md` | 통합 평가, 전략 평가, 점수 집계, 코드 실행 |
+| **Submit 테스트·평가 덤프** | `submit_test_agent.md` | `setup_submit_test_data`, `check_submit_result`, `export_evaluation_json`, `dump_debate_redis`, `debate_redis_dump`, `.maestro/DOCS` 테스트·ENV 가이드 |
 
 ## 3. 새 세션 시작 절차
 
@@ -83,7 +87,7 @@
 - 담당 범위 밖의 코드를 직접 수정하지 않는다
 - `states.py` State 필드 추가는 그래프 오케스트레이터만 한다
 - `graph.py` 노드/엣지 변경은 그래프 오케스트레이터만 한다
-- `.env`, 인증 정보, 시크릿은 절대 수정하지 않는다
+- `.env`, 인증 정보, 시크릿은 절대 수정하지 않는다 (값 변경·커밋 금지). **예외**: `submit_test_agent`는 문서·`.env.example`(존재 시)에 변수 **이름·의미**만 기술한다.
 - 수정 후 .maestro 기록 없이 작업을 끝내지 않는다
 - 사용자 컨펌 없이 대규모 변경을 실행하지 않는다
 
