@@ -123,12 +123,16 @@ class Settings(BaseSettings):
         "https://api.smith.langchain.com"  # LangSmith API 엔드포인트
     )
 
+    # LLM 추론/타임아웃 설정
+    LLM_THINKING_BUDGET: Optional[int] = 0   # 0=thinking 비활성화, None=모델 기본값
+    LLM_REQUEST_TIMEOUT: float = 60.0        # LLM API 요청 타임아웃 (초)
+
     # Middleware 설정
     MIDDLEWARE_RATE_LIMIT_MAX_CALLS: int = 15  # Rate limit 최대 호출 횟수
     MIDDLEWARE_RATE_LIMIT_PERIOD: float = 60.0  # Rate limit 기간 (초)
     MIDDLEWARE_RETRY_MAX_RETRIES: int = 3  # 최대 재시도 횟수
     MIDDLEWARE_RETRY_INITIAL_DELAY: float = 1.0  # 초기 대기 시간 (초)
-    MIDDLEWARE_RETRY_MAX_DELAY: float = 60.0  # 최대 대기 시간 (초)
+    MIDDLEWARE_RETRY_MAX_DELAY: float = 30.0  # 최대 대기 시간 (초) — thinking 비활성화로 60→30
     MIDDLEWARE_RETRY_BACKOFF_STRATEGY: str = (
         "exponential"  # 백오프 전략 (exponential, linear, fixed)
     )

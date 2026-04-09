@@ -34,11 +34,8 @@ def get_llm_for_model(model: str, temperature: float = 0.1):
             credentials=credentials,
             temperature=temperature,
         )
-    return ChatGoogleGenerativeAI(
-        model=model,
-        google_api_key=settings.GEMINI_API_KEY,
-        temperature=temperature,
-    )
+    from app.domain.langgraph.utils.llm_factory import create_gemini_llm
+    return create_gemini_llm(model=model, temperature=temperature)
 
 
 def get_llm(model: Optional[str] = None, temperature: Optional[float] = None):

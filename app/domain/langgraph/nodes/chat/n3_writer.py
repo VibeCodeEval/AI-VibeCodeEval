@@ -77,9 +77,8 @@ def get_llm():
         )
     else:
         # AI Studio 사용 (API Key 방식, Free Tier)
-        return ChatGoogleGenerativeAI(
-            model=settings.DEFAULT_LLM_MODEL,
-            google_api_key=settings.GEMINI_API_KEY,
+        from app.domain.langgraph.utils.llm_factory import create_gemini_llm
+        return create_gemini_llm(
             temperature=settings.LLM_TEMPERATURE,
             max_output_tokens=settings.LLM_MAX_TOKENS,
         )

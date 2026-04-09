@@ -35,10 +35,10 @@ PostgreSQL **스키마**는 테이블을 묶는 논리 공간입니다.
 └── ai_vibe_coding_test 스키마 (다수 테이블) ← Python/LangGraph·앱 코드 기준
 ```
 
-- **`ai_vibe_coding_test` 스키마**: Python/LangGraph 쪽에서 **단독 사용**하는 것을 전제로 함.
-- **`public`**: 이 프로젝트 흐름에서는 **사용하지 않음**으로 정리됨(연결/코드 기준).
+- **`ai_vibe_coding_test` 스키마**: **BE(Spring Boot)와 AI 서버(Python/LangGraph) 모두 이 스키마를 사용**. 두 서버가 동일한 데이터를 공유.
+- **`public`**: 이 프로젝트 흐름에서는 **사용하지 않음** (2026-04-09 이전에는 BE가 `public`에 썼으나 수정됨).
 
-`public`에 동명 테이블이 있을 수 있으나, Python 코드 경로에서는 `ai_vibe_coding_test` 스키마를 사용합니다. Spring 기본 스키마는 `public`이지만, 이 저장소에서는 `ai_vibe_coding_test` 스키마를 명시하는 설정이 함께 쓰입니다(§3 참고).
+BE는 `application-secret.yml`에 `hibernate.default_schema: ai_vibe_coding_test`를 설정해 Hibernate가 `ai_vibe_coding_test` 스키마를 사용하도록 강제합니다. AI 서버는 세션마다 `SET search_path TO ai_vibe_coding_test`를 실행합니다(§3 참고).
 
 ### 1.3 테이블·데이터 확인 (Docker PG vs 로컬 PG)
 
@@ -209,6 +209,7 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
+        default_schema: ai_vibe_coding_test   # AI 서버와 동일한 스키마 사용 (필수)
   redis:
     host: localhost
     port: 6379

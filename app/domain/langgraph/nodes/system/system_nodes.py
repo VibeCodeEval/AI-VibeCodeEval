@@ -40,11 +40,8 @@ def get_llm():
         )
     else:
         # AI Studio 사용 (API Key 방식, Free Tier)
-        return ChatGoogleGenerativeAI(
-            model=settings.DEFAULT_LLM_MODEL,
-            google_api_key=settings.GEMINI_API_KEY,
-            temperature=0.3,
-        )
+        from app.domain.langgraph.utils.llm_factory import create_gemini_llm
+        return create_gemini_llm(temperature=0.3)
 
 
 async def handle_failure(state: MainGraphState) -> Dict[str, Any]:
