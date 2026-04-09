@@ -465,6 +465,11 @@ def get_problem_info_sync(spec_id: int) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: 상세한 문제 정보 (basic_info, constraints, ai_guide, solution_code 포함)
     """
+    # spec_id가 None이면 기본값(10, 외판원 순회)으로 fallback
+    if spec_id is None:
+        logger.warning("[Problem Info] spec_id가 None입니다. 기본값(10)으로 fallback합니다.")
+        spec_id = 10
+
     # DB에 스마트 게이트 2026이 spec_id=11로 저장된 환경: 11 → 20(스마트 게이트) 매핑
     if spec_id == 11 and 20 in HARDCODED_PROBLEM_SPEC:
         spec_id = 20
