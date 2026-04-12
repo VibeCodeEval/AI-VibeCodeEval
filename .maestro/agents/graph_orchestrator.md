@@ -39,11 +39,13 @@ app/domain/langgraph/middleware/        # 미들웨어
 | 우선순위 | 문서 | 용도 |
 |----------|------|------|
 | 1 | `.maestro/maestro_state.json` | 현재 진행 상태, Phase별 상황 |
-| 2 | `.maestro/DOCS_REFERENCE.md` | docs/ 문서별 참조 가이드 |
-| 3 | `.maestro/REPORTING_GUIDE.md` | 리포트 작성 규칙 |
-| 4 | `.maestro/agents/AGENT_OVERVIEW.md` | 에이전트 운영 규칙 |
-| 5 | `docs/State_흐름_및_DB_저장.md` | State/데이터 흐름 상세 |
-| 6 | `docs/문서_인덱스.md` | 전체 문서 목록 |
+| 2 | `.maestro/docs/평가_파이프라인_플로우.md` | N4~N9 노드 순서·입출력·N8 서브그래프·N9 공식 (그래프 작업 시 최우선) |
+| 3 | `.maestro/DOCS_REFERENCE.md` | docs/ 문서별 참조 가이드 (⚡ 2026-04-05 갱신) |
+| 4 | `.maestro/REPORTING_GUIDE.md` | 리포트 작성 규칙 |
+| 5 | `.maestro/agents/AGENT_OVERVIEW.md` | 에이전트 운영 규칙 |
+| 6 | `docs/State_흐름_및_DB_저장.md` | N4~N9 전체 파이프라인·State/데이터 흐름 상세 |
+| 7 | `docs/점수_계산_로직.md` | N9 최종 출력 스키마, N8 토론 구조, 가중치 |
+| 8 | `docs/문서_인덱스.md` | 전체 문서 목록 |
 
 ## 금지 사항
 
@@ -54,15 +56,30 @@ app/domain/langgraph/middleware/        # 미들웨어
 - `.env`, 인증 정보를 수정하지 않는다
 - 하위 에이전트 담당 YAML 프롬프트를 직접 수정하지 않는다
 
-## 현재 상태 요약
+## 현재 상태 요약 (2026-04-05 갱신)
 
-- **프로젝트 진행률**: 75%
-- **Phase 6 (시스템 리팩토링)**: 진행 중 (75%)
-- **V2.1 Step 01~05**: 완료 / Step 06: 부분 완료
+- **프로젝트 진행률**: 85%
+- **V2.1 Step 01~05**: 완료 / Step 06: 진행 중
+- **최근 완료 작업**:
+  - N4 V3.0 Intent-Rubric Gate 도입 (6개 의도, R1~R4 루브릭 게이팅)
+  - N5 Judge0 → N6 Radon CC → N7 LLM 코드리뷰 → N8 다중 에이전트 토론 → N9 순차 파이프라인 재설계
+  - N8 서브그래프: strict/advocate/neutral × 2라운드 + verdict (Gemini 모델 3종)
+  - N8 Redis turn_logs 직접 조회 + N5 상세 metrics → 컨텍스트 빌더 개선
+  - `DebateState` N5 상세 필드 추가 (test_cases_passed/total, execution_time, memory_used_mb)
+  - `scores.rubric_json` — debate_log, debate_initial_opinions, debate_rebuttals 저장
+- **현재 그래프 구조**: `graph.py` 기준
+  ```
+  START → handle_request → intent_analyzer
+        ↓ (submit)
+        eval_turn_guard → eval_code_execution(N5)
+                       → eval_static_analysis(N6)
+                       → eval_code_agent(N7)
+                       → holistic_debate(N8)
+                       → aggregate_final_scores(N9) → END
+  ```
 - **미완료 핵심 작업**:
-  - Node4+Node6 통합 평가기
   - Phase 6C: 파인튜닝 데이터 자동 생성
-  - Phase 6D-2: Graph 노드 연결 변경
+  - Phase 7 V3.0 루브릭 Phase C (검증): `prompt_evaluations` rubric_breakdown 실데이터 확인
 
 ## 하위 에이전트 지시 방법
 

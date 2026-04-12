@@ -33,7 +33,7 @@
 │       └── eval: n5_integrated_evaluator → n6_holistic_flow → n7/n9 집계·최종 → n8_code_execution
 │
 └── Submit 테스트·평가 덤프 에이전트 (.maestro/agents/submit_test_agent.md)
-    └── test_scripts 시드·결과 확인, export/debate 덤프, .maestro/DOCS 테스트·ENV 가이드
+    └── test_scripts 시드·결과 확인, export/debate 덤프, .maestro/docs 테스트·ENV 가이드
 ```
 
 ## 담당 범위
@@ -78,9 +78,10 @@ app/presentation/                  # API 레이어
 | 1 | `.maestro/maestro_state.json` | **최우선** — 전체 진행 상태, Phase별 진행률, 미완료 작업 |
 | 2 | `.maestro/agents/AGENT_OVERVIEW.md` | 에이전트 구조, 운영 규칙, 소통 방식 |
 | 3 | `.maestro/REPORTING_GUIDE.md` | 리포트 작성 규칙, 기록 프로세스 |
-| 4 | `.maestro/DOCS_REFERENCE.md` | docs/ 21개 파일 각각의 용도/참조 시점 |
-| 5 | `.maestro/reports/daily/` (최신 날짜) | 최근 작업 내역 확인 |
-| 6 | `.maestro/docs/V2.1_Change_Log.md` | V2.1 전체 변경 이력 |
+| 4 | `.maestro/docs/평가_파이프라인_플로우.md` | **제출 평가 N4~N9** 노드 순서·입출력·N8·N9 공식 한 장 (그래프 이해) |
+| 5 | `.maestro/DOCS_REFERENCE.md` | docs/ 22개 파일 각각의 용도/참조 시점 |
+| 6 | `.maestro/reports/daily/` (최신 날짜) | 최근 작업 내역 확인 |
+| 7 | `.maestro/docs/V2.1_Change_Log.md` | V2.1 전체 변경 이력 |
 
 ## 프로젝트 구조 요약
 
@@ -95,7 +96,7 @@ AI-VibeCodeEval/
 │   │   └── queue/         # 큐 어댑터
 │   ├── infrastructure/    # DB, Redis, Judge0
 │   └── presentation/      # API 라우트, 스키마
-├── docs/                  # 문서 21개 (한국어 파일명)
+├── docs/                  # 문서 22개+ (한국어 파일명, 평가_파이프라인_플로우.md 포함)
 ├── scripts/               # 실행/유틸 스크립트
 ├── tests/                 # pytest 단위 테스트
 ├── test_scripts/          # 수동 테스트 스크립트

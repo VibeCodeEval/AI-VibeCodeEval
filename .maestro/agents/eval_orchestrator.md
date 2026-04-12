@@ -39,18 +39,19 @@ app/domain/langgraph/prompts/eval_*.yaml               # 평가 프롬프트
 
 ### 협업: Submit 테스트·평가 덤프 에이전트
 
-N8이 Redis에 남기는 **토론 페이로드 형식**, `DEBATE_LOG_TO_REDIS` 동작, `session_id` 문자열 규칙이 바뀌면 **`.maestro/agents/submit_test_agent.md`** 담당 영역(`debate_redis_dump`, `export_evaluation_json`, `dump_debate_redis`, `.maestro/DOCS`)과 동기화가 필요하다. 설계 변경 시 해당 에이전트(또는 마에스트로)에게 명령으로 넘긴다.
+N8이 Redis에 남기는 **토론 페이로드 형식**, `DEBATE_LOG_TO_REDIS` 동작, `session_id` 문자열 규칙이 바뀌면 **`.maestro/agents/submit_test_agent.md`** 담당 영역(`debate_redis_dump`, `export_evaluation_json`, `dump_debate_redis`, `.maestro/docs/`)과 동기화가 필요하다. 설계 변경 시 해당 에이전트(또는 마에스트로)에게 명령으로 넘긴다.
 
 ## 참조 문서 (세션 시작 시 반드시 읽기)
 
 | 우선순위 | 문서 | 용도 |
 |----------|------|------|
 | 1 | `.maestro/maestro_state.json` | 현재 진행 상태 |
-| 2 | `.maestro/docs/V2.1_Evaluation_And_Score_Structure.md` | 평가/점수 구조 |
-| 3 | `docs/점수_계산_로직.md` | 가중치·총점 계산 방식 |
-| 4 | `docs/Node4_평가_가이드.md` | 턴 평가 I/O·플로우 |
-| 5 | `.maestro/docs/V2.1_Change_Log.md` | 평가 관련 변경 이력 |
-| 6 | `.maestro/REPORTING_GUIDE.md` | 리포트 작성 규칙 |
+| 2 | `.maestro/docs/평가_파이프라인_플로우.md` | **현행** N4~N9 노드·입출력·N8·N9 (최우선) |
+| 3 | `docs/점수_계산_로직.md` | 가중치·총점·rubric_json |
+| 4 | `docs/Node4_평가_가이드.md` | 턴 평가 V3.0 I/O·플로우 |
+| 5 | `.maestro/docs/V2.1_Evaluation_And_Score_Structure.md` | V2.1 레거시 점수 구조 참고 |
+| 6 | `.maestro/docs/V2.1_Change_Log.md` | 평가 관련 변경 이력 |
+| 7 | `.maestro/REPORTING_GUIDE.md` | 리포트 작성 규칙 |
 
 ## 금지 사항
 
@@ -60,13 +61,15 @@ N8이 Redis에 남기는 **토론 페이로드 형식**, `DEBATE_LOG_TO_REDIS` �
 
 ## 현재 평가 파이프라인
 
+상세 다이어그램·입출력 표는 **`.maestro/docs/평가_파이프라인_플로우.md`** (루트 `docs/평가_파이프라인_플로우.md` 와 동기화).
+
 ```
-제출 → eval_turn_guard (턴별 서브그래프 실행)
-     → integrated_evaluator (Radon CC, AST, 5대 루브릭)
-     → eval_holistic_flow (전략/체이닝 평가, 1-5 정수)
-     → aggregate_turn_scores (턴 점수 집계)
-     → eval_code_execution (Judge0 코드 실행)
-     → aggregate_final_scores (최종 등급)
+제출(PASSED_SUBMIT) → eval_turn_guard [N4] (턴별 eval_turn 서브그래프, V3.0 루브릭)
+                    → eval_code_execution [N5] (Judge0)
+                    → eval_static_analysis [N6] (Radon CC·AST)
+                    → eval_code_agent [N7] (LLM 코드 리뷰)
+                    → holistic_debate [N8] (다중 에이전트 토론 서브그래프)
+                    → aggregate_final_scores [N9] (최종 점수·PG scores.rubric_json)
 ```
 
 ### 현재 점수 병합 규칙

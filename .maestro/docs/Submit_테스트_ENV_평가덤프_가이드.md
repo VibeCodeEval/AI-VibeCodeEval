@@ -1,6 +1,6 @@
 # Submit 테스트·환경(.env)·평가 JSON·토론 덤프 가이드
 
-> **위치**: `.maestro/DOCS/`  
+> **위치**: `.maestro/docs/`  
 > **작성 기준일**: 2026-04-05  
 > **대상**: 로컬에서 Submit 평가 파이프라인을 돌리고, DB·Redis 결과를 파일로 남기려는 경우
 
@@ -102,4 +102,4 @@ LangGraph 쪽 Redis 세션 id는 API에서 **`session_{prompt_sessions.id}`** �
 - `scripts/export_evaluation_json.py`, `scripts/dump_debate_redis.py` (각 파일 상단 사용 예)  
 - 저장소 루트 `test_scripts/README.md` (다른 통합 테스트 목록; 경로·이름은 프로젝트 진행에 따라 상이할 수 있음)
 
-이 가이드는 **`.maestro/DOCS/`** 에만 두고, 상위 Maestro 인덱스는 `.maestro/README.md` 폴더 구조 설명을 참고하면 됩니다.
+이 가이드는 **`.maestro/docs/`** 에 두며, 상위 Maestro 인덱스는 `.maestro/README.md` 및 `.maestro/docs/README.md` 를 참고하면 됩니다.
