@@ -45,9 +45,7 @@ services:
   # AI Worker (FastAPI + LangGraph)
   # 배포 환경의 PostgreSQL에 연결
   ai_worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${DOCKERHUB_USERNAME}/vibecode-ai:latest
     container_name: ai_vibe_worker
     environment:
       - DEBUG=false
@@ -75,13 +73,12 @@ services:
         condition: service_healthy
     networks:
       - ai_vibe_network
+      - vibecode-net
     restart: unless-stopped
 
   # Judge0 Worker (코드 실행 Worker)
   judge_worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${DOCKERHUB_USERNAME}/vibecode-ai:latest
     container_name: ai_vibe_judge_worker
     environment:
       - REDIS_HOST=redis
@@ -96,6 +93,7 @@ services:
         condition: service_healthy
     networks:
       - ai_vibe_network
+      - vibecode-net
     restart: unless-stopped
     command: python -m app.application.workers.judge_worker
 
@@ -105,5 +103,7 @@ volumes:
 networks:
   ai_vibe_network:
     driver: bridge
+  vibecode-net:
+    external: true
 
 
