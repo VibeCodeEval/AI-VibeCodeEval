@@ -57,7 +57,7 @@ jobs:
 
             cat > .env <<EOF
             DOCKERHUB_USERNAME=$DOCKERHUB_USERNAME
-            POSTGRES_HOST=${POSTGRES_HOST:-vibecode_postgres}
+            POSTGRES_HOST=vibecode_postgres
             POSTGRES_PORT=${POSTGRES_PORT:-5432}
             POSTGRES_USER=$POSTGRES_USER
             POSTGRES_PASSWORD=$POSTGRES_PASSWORD
@@ -75,6 +75,11 @@ jobs:
 
             echo ">>> Ensuring shared Docker network exists..."
             docker network inspect vibecode-net >/dev/null 2>&1 || docker network create vibecode-net
+            for container in vibecode-redis vibecode_postgres vibecode-app; do
+              if docker container inspect "$container" >/dev/null 2>&1; then
+                docker network connect vibecode-net "$container" 2>/dev/null || true
+              fi
+            done
 
             echo ">>> Pulling latest AI images..."
             docker compose --env-file .env -f docker-compose.prod.yml pull ai_worker judge_worker

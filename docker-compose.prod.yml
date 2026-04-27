@@ -27,6 +27,7 @@ services:
       - JUDGE0_USE_RAPIDAPI=${JUDGE0_USE_RAPIDAPI:-false}
       - JUDGE0_RAPIDAPI_HOST=${JUDGE0_RAPIDAPI_HOST}
       - USE_REDIS_QUEUE=${USE_REDIS_QUEUE:-true}
+      - ENABLE_JUDGE_WORKER=false
     ports:
       - "8001:8000"
     networks:
@@ -49,6 +50,8 @@ services:
       - vibecode-net
     restart: unless-stopped
     command: python -m app.application.workers.judge_worker
+    healthcheck:
+      disable: true
 
 networks:
   vibecode-net:
