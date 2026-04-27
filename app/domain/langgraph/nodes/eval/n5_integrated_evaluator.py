@@ -204,6 +204,7 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         )
 
         # 결과 대기 (폴링)
+        # 상태 키 업데이트 지연/누락이 있어도 결과 키가 생성되면 완료로 간주한다.
         max_wait = 30  # 최대 30초 대기
         start_time = time.time()
         poll_interval = 0.5
@@ -215,8 +216,13 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
                 f"[N5] 상태 조회 - task_id: {correctness_task_id}, status: {status}, 경과: {elapsed:.2f}초"
             )
 
+            # 상태 기반 완료 체크가 정상 경로
             if status == "completed":
                 correctness_result = await queue.get_result(correctness_task_id)
+                if correctness_result is None:
+                    # 간헐적으로 status만 먼저 올라오는 케이스 방어
+                    await asyncio.sleep(0.2)
+                    correctness_result = await queue.get_result(correctness_task_id)
 
                 if correctness_result:
                     # 스마트 게이트 2026: stdout에 ALL_TESTS_PASSED 포함 시 100점, 아니면 0점 + reasoning
@@ -342,6 +348,55 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
                     )
                 break
 
+            # 상태 키가 지연되거나 누락되어 "pending/processing/unknown"으로 남아도
+            # 결과 키가 이미 존재하면 해당 결과를 우선 사용한다.
+            if status in {"pending", "processing", "unknown"}:
+                maybe_result = await queue.get_result(correctness_task_id)
+                if maybe_result is not None:
+                    correctness_result = maybe_result
+                    if correctness_result.status == "success":
+                        if use_smart_gate_suite:
+                            stdout = (correctness_result.output or "").strip()
+                            if "ALL_TESTS_PASSED" in stdout:
+                                correctness_score = 100.0
+                                test_cases_passed = 1
+                                correctness_reasoning = None
+                            else:
+                                correctness_score = 0.0
+                                test_cases_passed = 0
+                                if "ASSERTION_FAILED:" in stdout:
+                                    correctness_reasoning = stdout
+                                elif correctness_result.error:
+                                    correctness_reasoning = "인터페이스 미준수: " + (
+                                        correctness_result.error[:500]
+                                        if len(correctness_result.error or "") > 500
+                                        else (correctness_result.error or "")
+                                    )
+                                else:
+                                    correctness_reasoning = "인터페이스 미준수"
+                        else:
+                            correctness_score = 100.0 if test_cases else 50.0
+                            test_cases_passed = len(test_cases) if test_cases else 0
+
+                        if correctness_result.execution_time is not None:
+                            correctness_execution_time = correctness_result.execution_time
+                        if correctness_result.memory_used is not None:
+                            correctness_memory_used_mb = (
+                                correctness_result.memory_used / (1024 * 1024)
+                            )
+                    else:
+                        correctness_score = 0.0
+                        test_cases_passed = 0
+                        logger.warning(
+                            f"[N5] 결과 키 확인: 실패 상태 - task_id: {correctness_task_id}, "
+                            f"status: {correctness_result.status}, error: {correctness_result.error}"
+                        )
+                    logger.info(
+                        f"[N5] 결과 키 기반 완료 감지 - task_id: {correctness_task_id}, "
+                        f"status_key={status}, result_status={correctness_result.status}"
+                    )
+                    break
+
             # 아직 처리 중이면 대기
             await asyncio.sleep(poll_interval)
 
@@ -374,6 +429,8 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
             "test_cases_total": test_cases_total,
             "execution_time": None,
             "memory_used_mb": None,
+            "time_limit_sec": float(timeout) if timeout is not None else None,
+            "memory_limit_mb": float(memory_limit) if memory_limit is not None else None,
             "skip_performance": True,
             "skip_reason": "Correctness 평가 실패",
             "correctness_reasoning": correctness_reasoning,
@@ -463,6 +520,8 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         "memory_used_mb": (
             round(final_memory_used_mb, 2) if final_memory_used_mb is not None else None
         ),
+        "time_limit_sec": float(timeout) if timeout is not None else None,
+        "memory_limit_mb": float(memory_limit) if memory_limit is not None else None,
         "correctness_reasoning": correctness_reasoning,
         "updated_at": datetime.utcnow().isoformat(),
     }

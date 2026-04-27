@@ -40,6 +40,14 @@ async def eval_code_agent(state: MainGraphState) -> Dict[str, Any]:
     if not code_content:
         logger.warning(f"[N7] 코드 내용이 없습니다. 평가 스킵.")
         return {"code_eval_report": None}
+
+    # N5 -> N7 전달값 검증 로그 (Judge0 지표 누락 원인 추적용)
+    logger.info(
+        f"[N7] 입력 메트릭 - session_id: {session_id}, "
+        f"code_correctness_score={code_correctness_score}, "
+        f"code_performance_score={code_performance_score}, "
+        f"execution_time={execution_time}, memory_used_mb={memory_used_mb}"
+    )
         
     system_prompt = render_prompt("eval_code_agent", section="system")
     human_msg_content = render_prompt(
@@ -55,6 +63,10 @@ async def eval_code_agent(state: MainGraphState) -> Dict[str, Any]:
         max_cc=code_quality_metrics.get("radon_cc", {}).get("max_cc", "N/A"),
         delta_cc_pct=code_quality_metrics.get("delta_cc", {}).get("delta_cc_pct", "N/A"),
         junior_grade=code_quality_metrics.get("junior_grade", False),
+    )
+    logger.info(
+        f"[N7] 렌더 프롬프트 요약 - "
+        f"Execution Time: {execution_time}초, Memory Used: {memory_used_mb}MB"
     )
     
     try:

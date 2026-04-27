@@ -1,0 +1,50 @@
+{
+  "recent_submissions": [
+    {
+      "submission_id": 6,
+      "status": "QUEUED",
+      "score_created_at": null,
+      "execution_time": null,
+      "memory_used_mb": null,
+      "test_cases_passed": null,
+      "test_cases_total": null
+    },
+    {
+      "submission_id": 5,
+      "status": "QUEUED",
+      "score_created_at": null,
+      "execution_time": null,
+      "memory_used_mb": null,
+      "test_cases_passed": null,
+      "test_cases_total": null
+    },
+    {
+      "submission_id": 4,
+      "status": "DONE",
+      "score_created_at": "2026-04-27 02:33:26.465071",
+      "execution_time": null,
+      "memory_used_mb": null,
+      "test_cases_passed": null,
+      "test_cases_total": null
+    },
+    {
+      "submission_id": 3,
+      "status": "QUEUED",
+      "score_created_at": null,
+      "execution_time": null,
+      "memory_used_mb": null,
+      "test_cases_passed": null,
+      "test_cases_total": null
+    },
+    {
+      "submission_id": 2,
+      "status": "DONE",
+      "score_created_at": "2026-04-26 23:11:30.426821",
+      "execution_time": null,
+      "memory_used_mb": null,
+      "test_cases_passed": null,
+      "test_cases_total": null
+    }
+  ],
+  "recent_submission_runs": []
+}

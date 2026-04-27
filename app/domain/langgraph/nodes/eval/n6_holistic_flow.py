@@ -34,10 +34,24 @@ async def eval_static_analysis(state: MainGraphState) -> Dict[str, Any]:
     logger.info(f"[N6. Eval Static Analysis] 진입 - session_id: {session_id}")
 
     code_quality_metrics = {}
+    # N5 -> N6 -> N7 전달 보장을 위해 N5 산출값을 명시적으로 패스스루한다.
+    n5_passthrough = {
+        "code_correctness_score": state.get("code_correctness_score"),
+        "code_performance_score": state.get("code_performance_score"),
+        "test_cases_passed": state.get("test_cases_passed"),
+        "test_cases_total": state.get("test_cases_total"),
+        "execution_time": state.get("execution_time"),
+        "memory_used_mb": state.get("memory_used_mb"),
+        "time_limit_sec": state.get("time_limit_sec"),
+        "memory_limit_mb": state.get("memory_limit_mb"),
+        "skip_performance": state.get("skip_performance"),
+        "skip_reason": state.get("skip_reason"),
+        "correctness_reasoning": state.get("correctness_reasoning"),
+    }
 
     if not code_content:
         logger.warning(f"[N6] 코드 없음. 분석 스킵.")
-        return {"code_quality_metrics": code_quality_metrics}
+        return {"code_quality_metrics": code_quality_metrics, **n5_passthrough}
 
     try:
         from app.domain.langgraph.utils.code_quality import (
@@ -74,4 +88,4 @@ async def eval_static_analysis(state: MainGraphState) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"[N6. Eval Static Analysis] 에러 발생: {e}", exc_info=True)
 
-    return {"code_quality_metrics": code_quality_metrics}
+    return {"code_quality_metrics": code_quality_metrics, **n5_passthrough}
