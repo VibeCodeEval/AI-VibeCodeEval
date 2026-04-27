@@ -71,13 +71,35 @@ def _create_cache_key(node_name: str, llm_type: str, **kwargs) -> str:
     return f"{node_name}_{llm_type}_{config_str}"
 
 
+def create_gemini_llm(
+    model: Optional[str] = None,
+    temperature: float = 0.3,
+    max_output_tokens: Optional[int] = None,
+    api_key: Optional[str] = None,
+) -> ChatGoogleGenerativeAI:
+    """
+    Gemini LLM 생성 공통 헬퍼 (AI Studio - API Key 방식)
+
+    - thinking_budget=0 : gemini-2.5-* 모델의 thinking 비활성화 → 응답 속도 개선
+    - timeout : LLM API 요청 타임아웃 설정 (기본 60초)
+    """
+    return ChatGoogleGenerativeAI(
+        model=model or settings.DEFAULT_LLM_MODEL,
+        google_api_key=api_key or settings.GEMINI_API_KEY,
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+        thinking_budget=settings.LLM_THINKING_BUDGET,
+        timeout=settings.LLM_REQUEST_TIMEOUT,
+    )
+
+
 def _create_gemini_llm(**kwargs) -> ChatGoogleGenerativeAI:
     """Gemini LLM 생성 (AI Studio - API Key 방식)"""
-    return ChatGoogleGenerativeAI(
-        model=kwargs.get("model", settings.DEFAULT_LLM_MODEL),
-        google_api_key=kwargs.get("api_key", settings.GEMINI_API_KEY),
+    return create_gemini_llm(
+        model=kwargs.get("model"),
         temperature=kwargs.get("temperature", 0.3),
         max_output_tokens=kwargs.get("max_tokens"),
+        api_key=kwargs.get("api_key"),
     )
 
 

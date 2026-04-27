@@ -1,6 +1,7 @@
 # State 흐름 및 DB 저장
 
-> **최종 통합일**: 2026-03-27 | **원본**: Current_Data_Flow.md, LangGraph_State_Flow.md, State_Flow_and_DB_Storage.md
+> **최종 통합일**: 2026-03-27 | **최종 갱신**: 2026-04-05 (N5~N9 평가 파이프라인 재설계, N8 다중 에이전트 토론, V3.0 루브릭 반영)  
+> **원본**: Current_Data_Flow.md, LangGraph_State_Flow.md, State_Flow_and_DB_Storage.md
 
 ---
 
@@ -18,6 +19,8 @@
 ### 1.1 개요
 
 API 요청부터 LangGraph 실행, Redis·PostgreSQL 반영까지의 흐름을 정리한다. 평가는 **제출(Submit)** 경로에서 수행된다.
+
+**노드 순서·입출력 표·N8 서브그래프·N9 공식을 한 문서로 보려면** → [`평가_파이프라인_플로우.md`](./평가_파이프라인_플로우.md).
 
 ### 1.2 일반 채팅 (Chat)
 
@@ -76,34 +79,58 @@ POST /api/session/submit
    - Redis에서 State 로드 후 `is_submitted`, `code_content`, `lang` 등 설정.
    - `ainvoke` 후 `save_state`로 Redis 동기화 (실행 중은 메모리 State).
 
-3. **노드 4 — Eval Turn Guard (턴별 평가)**  
+3. **노드 N4 — Eval Turn Guard (턴별 프롬프트 평가)**  
    - **데이터 소스**: 메모리 State의 `messages` (Redis `turn_mapping`은 사용하지 않음; 턴은 messages에서 추출).  
-   - 턴 1 ~ `current_turn-1`에 대해 Eval Turn SubGraph (4.0 Intent → 4.R/G/O/D/T/H/F → 4.X Answer Summary → 4.4 Turn Log Aggregation).  
-   - **저장**: Redis `turn_logs:{session_id}:{turn}`, PostgreSQL `prompt_evaluations` (`evaluation_type: 'TURN_EVAL'`, `turn`별, `details` JSONB).
+   - 턴 1 ~ `current_turn-1`에 대해 Eval Turn SubGraph 실행.  
+     - `eval_intent_disambiguation` → 의도 분류 (CREATION / SETTING / REFINEMENT / DEBUGGING / EXPLORATION / FOLLOW_UP)  
+     - `_evaluate_turn()` → **V3.0 Intent-Rubric Gate** 기반 채점  
+       - R1 논리·효율(Logic & Efficiency) / R2 명확성·완전성(Clarity & Completeness) / R3 구조·예시(Structure & Examples) / R4 맥락 유지 로컬(Context Maintenance)  
+       - 의도별로 적용 루브릭 결정 (FOLLOW_UP → R4만, EXPLORATION → R1+R2만 등)  
+       - 출력: `turn_score` (1~5) + `rubric_breakdown` (dict) + `applied_rubrics` (list)  
+   - **저장**: Redis `turn_logs:{session_id}:{turn}` — `prompt_evaluation_details.rubric_breakdown` 포함, PostgreSQL `prompt_evaluations` (`evaluation_type: 'TURN_EVAL'`).
 
-4. **노드 6a — Holistic Flow Evaluation**  
-   - **데이터 소스**: State `messages` + Redis `turn_logs:{session_id}:*`.  
-   - LLM으로 전체 플로우 평가(문제 분해, 피드백 수용, 주도성·오류 수정, 전략적 탐색, 고급 프롬프트 기법 등).  
-   - **저장**: State의 `holistic_flow_score`, `holistic_flow_analysis`; PostgreSQL `prompt_evaluations` (`evaluation_type: 'HOLISTIC_FLOW'`, `turn: NULL`).
+4. **노드 N5 — Eval Code Execution (Judge0)**  
+   - **데이터 소스**: State의 `code_content`, `problem_context` (테스트 케이스, 제한 시간·메모리 등).  
+   - Judge0로 Correctness(통과율) → 통과 시 Performance(시간·메모리) 평가.  
+   - State 갱신: `code_correctness_score`, `code_performance_score`, `execution_time`, `memory_used_mb`, `test_cases_passed`, `test_cases_total`, `correctness_reasoning`.
 
-5. **노드 6b — Aggregate Turn Scores**  
-   - State `turn_scores` 또는 Redis Turn Logs에서 점수 수집 → `aggregate_turn_score` 갱신.
+5. **노드 N6 — Eval Static Analysis (Radon CC)**  
+   - **데이터 소스**: State의 `code_content`.  
+   - Radon 순환 복잡도(CC) 정적 분석.  
+   - State 갱신: `code_quality_metrics` (`radon_cc.avg_cc`, `radon_cc.max_cc`, `junior_grade` 등).
 
-6. **노드 6c — Eval Code Execution**  
-   - `code_content`, `problem_context`(테스트·제한시간 등).  
-   - Judge0로 Correctness / Performance 평가, `execution_time`, `memory_used` 추출.  
-   - State: `code_correctness_score`, `code_performance_score`, `execution_time`, `memory_used_mb`.
+6. **노드 N7 — Eval Code Agent (LLM 코드 리뷰)**  
+   - **데이터 소스**: State의 `code_content`, `code_correctness_score`, `code_performance_score`, `execution_time`, `memory_used_mb`, `code_quality_metrics`, `problem_context`.  
+   - 단일 LLM 호출로 효율성·가독성·예외처리·종합 정성 리뷰 생성.  
+   - State 갱신: `code_eval_report` (`efficiency_review`, `readability_review`, `error_handling_review`, `overall_summary`, `score_adjustment_note`).
 
-7. **노드 7 — Aggregate Final Scores**  
-   - 가중치: Prompt 40%(턴+플로우), Correctness 30%, Performance 30%.  
-   - **PostgreSQL** `scores`: `submission_id`, `prompt_score`, `perf_score`, `correctness_score`, `total_score`, `rubric_json`(실행시간·메모리·`performance_details`, `correctness_details` 등).  
+7. **노드 N8 — Holistic Debate (다중 에이전트 토론)**  
+   - **데이터 소스**:  
+     - N4 Redis `turn_logs` (대화 원문 요약, rubric_breakdown, final_reasoning) — 직접 Redis 조회  
+     - N5 Judge0 상세 (execution_time, memory_used_mb, test_cases_passed/total)  
+     - N6 Radon CC 지표  
+     - N7 코드 리뷰 전문  
+   - **SubGraph 구조 (subgraph_debate.py)**:  
+     ```
+     START → [Round 1 병렬: r1_strict | r1_advocate | r1_neutral]
+          → sync_opinions (팬인)
+          → r2_strict → r2_advocate → r2_neutral (순차)
+          → final_verdict → END
+     ```
+   - 에이전트 모델: strict=Gemini 2.5 Pro(temp 0.1) / advocate=Gemini 2.0 Flash(temp 0.3) / neutral=Gemini 1.5 Pro(temp 0.2) / verdict=Gemini 2.5 Pro(temp 0.0)  
+   - State 갱신: `holistic_flow_score`, `holistic_flow_analysis`, `r4_context_maintenance_score` (세션 전체 맥락 궤적 분석), `debate_log`.
+   - **저장**: Redis `debate_log:{session_id}`.
+
+8. **노드 N9 — Aggregate Final Scores**  
+   - 가중치: Prompt 40% (holistic_flow × 0.60 + aggregate_turn × 0.40), Correctness 40%, Performance 20%.  
+   - **PostgreSQL** `scores`: `submission_id`, `prompt_score`, `perf_score`, `correctness_score`, `total_score`, `rubric_json` (holistic 분석, code_eval_report, debate_log 등 포함).  
    - `submissions.status = 'DONE'`, `prompt_sessions.ended_at` 설정.
 
 #### Judge0·점수 메모
 
-- Correctness / Performance 결과에서 `execution_time`, `memory_used` 사용.  
-- Performance 실패 시 Correctness에서 가져온 값을 쓸 수 있음.  
-- `scores.rubric_json`에 `performance_details` 등으로 반영.
+- Correctness 평가 결과에서 `execution_time`, `memory_used` 추출 (별도 Performance 실행 없이 재사용).  
+- Correctness 실패(0점) 시 Performance도 0점 처리.  
+- `scores.rubric_json`에 `holistic_flow_analysis`, `r4_context_maintenance_score`, `code_eval_report`, `debate_log` 등 전체 평가 근거 저장.
 
 ### 1.4 Redis / PostgreSQL 한눈에 보기
 
@@ -113,8 +140,9 @@ POST /api/session/submit
 |---------|------|
 | `graph_state:{session_id}` | State 전체(messages, current_turn, problem_context 등) |
 | `turn_mapping:{session_id}` | 턴–메시지 인덱스 매핑 |
-| `turn_logs:{session_id}:{turn}` | 턴별 평가 로그 |
+| `turn_logs:{session_id}:{turn}` | 턴별 평가 로그 (V3.0: `rubric_breakdown`, `applied_rubrics` 포함) |
 | `session_token:{session_id}` | 토큰 누적 |
+| `debate_log:{session_id}` | N8 다중 에이전트 토론 전체 기록 (TTL 3600초) |
 
 **PostgreSQL**
 
@@ -122,9 +150,9 @@ POST /api/session/submit
 |--------|------|------|
 | `prompt_sessions` | 세션 | 생성·종료 시 |
 | `prompt_messages` | 대화 행 저장 | **현재 문서 기준**: 대화 본문은 Redis 위주; 별도 백엔드 정책이 없으면 여기에 채팅 메시지를 쌓지 않음 |
-| `prompt_evaluations` | 턴·플로우 평가 | 제출 시(노드 4, 6a) |
+| `prompt_evaluations` | 턴 평가 | 제출 시 (N4, `evaluation_type='TURN_EVAL'`) |
 | `submissions` | 제출 | 제출 플로우 |
-| `scores` | 최종 점수 | 노드 7 |
+| `scores` | 최종 점수 (`rubric_json`에 holistic 분석·debate_log 포함) | N9 |
 
 ### 1.5 운영 시 확인 방법
 
@@ -258,20 +286,26 @@ messages = state.get("messages", [])  # 이미 역직렬화된 BaseMessage 리�
 4. Writer에서 `messages` append  
 5. `save_state` — 직렬화 후 Redis
 
-### 3.5 제출 시 노드 4·6 데이터 소스
+### 3.5 제출 시 노드별 데이터 소스
 
-| 노드 | messages 소스 | 기타 |
-|------|----------------|------|
-| **4 Eval Turn Guard** | 메모리 State `messages`만 | `turn_mapping` Redis 조회 **안 함** |
-| **6a Holistic Flow** | 메모리 `messages` + Redis `turn_logs:*` | 4번에서 적재한 turn 로그 사용 |
+| 노드 | 주요 소스 | 비고 |
+|------|-----------|------|
+| **N4 Eval Turn Guard** | 메모리 State `messages` | `turn_mapping` Redis 조회 안 함 |
+| **N5 Eval Code Execution** | State `code_content`, `problem_context` | Judge0 호출 |
+| **N6 Eval Static Analysis** | State `code_content` | Radon CC 정적 분석 |
+| **N7 Eval Code Agent** | State `code_content` + N5·N6 결과 | 단일 LLM 리뷰 |
+| **N8 Holistic Debate** | Redis `turn_logs:*` (직접 조회) + N5 상세 metrics + N6 지표 + N7 리뷰 | 서브그래프 토론 (2라운드×3 에이전트 + 판결) |
+| **N9 Aggregate Final Scores** | N4 `aggregate_turn_score` + N8 `holistic_flow_score` + N5 점수 | 최종 집계·DB 저장 |
 
-제출 시 4번 노드 이후 흐름(개념):
+제출 시 N4 이후 흐름(개념):
 
 1. `submit_code()` → `get_state` (Redis → 메모리)  
 2. `ainvoke`  
-3. 노드 4: `state.get("messages")` — 메모리  
-4. 턴별 SubGraph → Redis `turn_logs`, PG `prompt_evaluations`  
-5. 그래프 종료 후 `save_state` → Redis `graph_state`
+3. N4: `state.get("messages")` — 메모리, 턴별 V3.0 루브릭 평가 → Redis `turn_logs`, PG `prompt_evaluations`  
+4. N5 → N6 → N7 → N8 순차 실행  
+5. N8: Redis `turn_logs` 직접 재조회 → 서브그래프 토론 → `holistic_flow_score`, `r4_context_maintenance_score`  
+6. N9: 최종 점수 집계 → PG `scores`  
+7. 그래프 종료 후 `save_state` → Redis `graph_state`
 
 ---
 
@@ -363,9 +397,14 @@ def deserialize_redis_message(msg_dict: dict):
 
 ---
 
-## 부록: 평가 시 데이터 소스 재확인
+## 부록: 평가 시 데이터 소스 재확인 (현행)
 
-- **노드 4**: 메모리 `messages`만 — Redis에서 messages를 직접 읽지 않음.  
-- **노드 6a**: 메모리 `messages` + Redis `turn_logs`.  
-- **노드 6c**: State의 `code_content`, `problem_context`.  
-- **일반 채팅**: 평가 없음; 메시지·토큰·매핑은 Redis 위주.
+| 노드 | 데이터 소스 | 저장 위치 |
+|------|------------|----------|
+| **N4** | 메모리 `messages`만 (Redis 직접 읽기 없음) | Redis `turn_logs`, PG `prompt_evaluations` |
+| **N5** | State `code_content`, `problem_context` | State 필드 (`code_correctness_score` 등) |
+| **N6** | State `code_content` | State `code_quality_metrics` |
+| **N7** | State `code_content` + N5·N6 결과 | State `code_eval_report` |
+| **N8** | Redis `turn_logs:*` (직접 재조회) + N5~N7 State 필드 | State `holistic_flow_score`, `r4_context_maintenance_score`, `debate_log` |
+| **N9** | 모든 평가 State 필드 | PG `scores` |
+| **일반 채팅** | 없음 (평가 없음) | Redis `graph_state`, `turn_mapping`, `session_token` |

@@ -7,8 +7,10 @@
 ```
 .maestro/
 ├── README.md              # 이 파일
-├── DOCS/                  # Maestro 전용 운영·테스트 가이드 (루트 docs/ 와 별도)
-│   └── README.md          # DOCS 목차
+├── docs/                  # Maestro 전용 운영·테스트·평가 플로우 (루트 docs/ 와 별도)
+│   ├── README.md          # 목차 및 「먼저 볼 문서」 순서
+│   ├── 평가_파이프라인_플로우.md
+│   └── Submit_테스트_ENV_평가덤프_가이드.md
 ├── maestro_state.json     # Maestro 전체 상태 (읽기 전용 - Maestro만 수정)
 ├── tasks/                 # Phase별 작업 정의 및 상태
 │   ├── phase1_upgrade.json

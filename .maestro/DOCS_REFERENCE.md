@@ -1,8 +1,8 @@
 # docs/ 문서 참조 가이드
 
-> **작성일**: 2026-03-27  
+> **작성일**: 2026-03-27 | **최종 갱신**: 2026-04-05 (N5~N9 파이프라인 재설계, N8 다중 에이전트 토론, V3.0 루브릭 반영)  
 > **목적**: 작업 시 어떤 `docs/` 파일을 참조해야 하는지 빠르게 찾기 위한 가이드  
-> **총 문서 수**: 21개
+> **총 문서 수**: 22개
 
 ---
 
@@ -60,50 +60,61 @@ DB 스키마 변경 요약 + init-db.sql 대비 상세 변경 이력 (제약조�
 
 ### `State_흐름_및_DB_저장.md`
 LangGraph 데이터 흐름, MainGraphState 구조, Redis vs Memory 차이, DB 저장 전략.  
+**⚡ 2026-04-05 갱신**: N4~N9 전체 파이프라인 노드별 소스·저장 위치, Redis `debate_log` 키, V3.0 turn_logs 형식 반영.  
 **참조 시점**: State 필드 추가/변경 시, Redis↔PG 저장 로직 수정 시, 노드 간 데이터 흐름 파악 시.  
 **관련 코드**: `app/domain/langgraph/states.py`, `app/domain/langgraph/graph.py`  
-**함께 보면 좋은 문서**: `노드별_DB_접근_가이드.md`, `Node4_평가_가이드.md`
+**함께 보면 좋은 문서**: `평가_파이프라인_플로우.md`, `노드별_DB_접근_가이드.md`, `Node4_평가_가이드.md`, `점수_계산_로직.md`
+
+### `평가_파이프라인_플로우.md`
+제출 평가 **노드 순서** 텍스트 다이어그램, **노드별 입·출력 표**, **N8 서브그래프** 단계 표, **N9 집계 공식** 요약 (PPT·Canva 복사용).  
+**⚡ 2026-04-13 신규**: 기존에는 `State_흐름_및_DB_저장.md`에 단계 서술만 있었고, 통합 다이어그램·I/O 표는 별도 문서 없음.  
+**참조 시점**: 평가 플로우를 한 장으로 설명할 때, 온보딩·발표 자료 작성 시, 노드 ID(`eval_turn_guard` 등)와 산출물 매핑 확인 시.  
+**관련 코드**: `app/domain/langgraph/graph.py`, `subgraph_debate.py`, `n4_eval_turn_guard.py` ~ `n9_final_scores.py`  
+**함께 보면 좋은 문서**: `State_흐름_및_DB_저장.md`, `점수_계산_로직.md`
 
 ### `Node4_평가_가이드.md`
-턴 평가(Node4) 의도 분석 vs 평가 역할, 평가 플로우 시나리오, I/O 스키마 (prompt_evaluations).  
-**참조 시점**: 턴 평가 로직 수정 시, 의도 분석/평가 디버깅 시, prompt_evaluations JSONB 구조 확인 시.  
-**관련 코드**: `app/domain/langgraph/nodes/turn_evaluator/`, `app/domain/langgraph/nodes/eval_turn_guard.py`  
+턴 평가(N4) 의도 분석 vs 평가 역할, V3.0 Intent-Rubric Gate, 의도별 루브릭 매트릭스, I/O 스키마.  
+**⚡ 2026-04-05 갱신**: 의도 체계 8→6개 통합, V3.0 루브릭(R1~R4) 전면 반영, `EvalTurnV30Output` 모델, `rubric_breakdown` Redis 스키마.  
+**참조 시점**: 턴 평가 로직 수정 시, 의도 분석/평가 디버깅 시, `rubric_breakdown` JSONB 구조 확인 시, N4→N8 데이터 흐름 추적 시.  
+**관련 코드**: `app/domain/langgraph/nodes/eval_turn/evaluators.py`, `grading.py`, `app/domain/langgraph/prompts/eval_turn.yaml`  
 **함께 보면 좋은 문서**: `노드별_DB_접근_가이드.md`, `프롬프트_명세.md`, `점수_계산_로직.md`
 
 ### `노드별_DB_접근_가이드.md`
-각 노드(4번·6번)의 Redis/PG 접근 위치, 저장 시점, 호출 스택 정리.  
+각 노드(N4·N5~N9)의 Redis/PG 접근 위치, 저장 시점, 호출 스택 정리.  
 **참조 시점**: 노드에서 데이터 저장/조회 방식 확인 시, 새 노드 추가 시, 저장 버그 추적 시.  
 **관련 코드**: `app/application/services/evaluation_storage_service.py`, `app/infrastructure/repositories/`  
 **함께 보면 좋은 문서**: `State_흐름_및_DB_저장.md`, `Node4_평가_가이드.md`
 
 ### `프롬프트_명세.md`
-노드별 프롬프트 상세 (Intent Analyzer, Writer, Guard, Holistic 등 각 프롬프트 구조/변수).  
-**참조 시점**: 프롬프트 수정·추가 시, YAML 변수 확인 시, 새 평가 기준 추가 시.  
-**관련 코드**: `app/domain/langgraph/prompts/*.yaml`  
-**함께 보면 좋은 문서**: `Node4_평가_가이드.md`, `.maestro/docs/V2.1_Change_Log.md`
+노드별 프롬프트 상세 (Intent Analyzer, Writer, Guard, eval_turn V3.0, debate_agents 등 각 프롬프트 구조/변수).  
+**참조 시점**: 프롬프트 수정·추가 시, YAML 변수 확인 시, N8 에이전트 시스템 프롬프트 수정 시.  
+**관련 코드**: `app/domain/langgraph/prompts/*.yaml` (`eval_turn.yaml` V3.0, `debate_agents.yaml` V1.2)  
+**함께 보면 좋은 문서**: `Node4_평가_가이드.md`, `.maestro/RUBRIC_V3_CHANGE_PLAN.md`
 
 ### `점수_계산_로직.md`
-scores.py의 가중치·총점 계산 방식, 학점 환산, prompt_score 산정.  
-**참조 시점**: 점수 가중치 변경 시, 총점 계산 로직 수정 시, 학점 기준 변경 시, 새 평가 항목 추가 시.  
-**관련 코드**: `app/domain/langgraph/nodes/holistic_evaluator/scores.py`  
-**함께 보면 좋은 문서**: `Node4_평가_가이드.md`, `.maestro/docs/V2.1_Evaluation_And_Score_Structure.md`
+N4~N9 전체 점수 계산 파이프라인, N8 다중 에이전트 토론 구조, N9 최종 집계 및 `scores.rubric_json` 스키마.  
+**⚡ 2026-04-05 갱신**: 파이프라인 전면 재작성, N8 서브그래프 흐름도, 가중치 변경(Correctness 30%→40%, Performance 30%→20%), `rubric_json` 전체 스키마, `debate_log` 필드 추가.  
+**참조 시점**: 점수 가중치 변경 시, 최종 출력(`scores.rubric_json`) 구조 확인 시, N8 토론 결과 해석 시, 등급 산정 기준 확인 시.  
+**관련 코드**: `app/domain/langgraph/nodes/eval/n9_final_scores.py`, `app/domain/langgraph/subgraph_debate.py`  
+**함께 보면 좋은 문서**: `Node4_평가_가이드.md`, `State_흐름_및_DB_저장.md`, `.maestro/RUBRIC_V3_CHANGE_PLAN.md`
 
 ### `턴_로그_추출.md`
-Holistic 평가에서 Redis turn_logs 추출 필드, structured_logs 구조.  
-**참조 시점**: Holistic 평가 수정 시, turn_logs 필드 추가·변경 시, 파인튜닝 데이터 추출 시.  
-**관련 코드**: `app/domain/langgraph/nodes/holistic_evaluator/flow.py`, `execution.py`  
+N8 Holistic Debate에서 Redis `turn_logs` 추출 필드, `structured_logs` 구조, `rubric_breakdown` 파싱.  
+**참조 시점**: N8 컨텍스트 빌더(`_build_base_context`) 수정 시, `turn_logs` 필드 추가·변경 시, 파인튜닝 데이터 추출 시.  
+**관련 코드**: `app/domain/langgraph/subgraph_debate.py`, `app/domain/langgraph/nodes/eval/n8_code_execution.py`  
 **함께 보면 좋은 문서**: `노드별_DB_접근_가이드.md`, `점수_계산_로직.md`
 
 ### `루브릭_리팩토링_제안.md`
 루브릭 하드코딩 문제점 분석, YAML/DB 기반 리팩토링 설계 제안.  
-**참조 시점**: 루브릭 구조 변경 계획 시, 평가 기준 리팩토링 착수 시, 하드코딩 제거 방안 검토 시.  
-**관련 코드**: `app/domain/langgraph/nodes/turn_evaluator/weights.py`, `grading.py`  
-**함께 보면 좋은 문서**: `프롬프트_명세.md`, `점수_계산_로직.md`
+**⚠️ 참고**: V3.0 루브릭 마이그레이션 계획은 `.maestro/RUBRIC_V3_CHANGE_PLAN.md`가 최신 문서.  
+**참조 시점**: 루브릭 구조 변경 계획 시 (V1 참고용).  
+**관련 코드**: `app/domain/langgraph/nodes/eval_turn/grading.py`  
+**함께 보면 좋은 문서**: `.maestro/RUBRIC_V3_CHANGE_PLAN.md`, `점수_계산_로직.md`
 
 ### `LLM_성능_최적화.md`
 Turn Evaluator LLM 이중 호출 등 성능 이슈 분석, 개선안 (캐싱·배치·병렬화).  
 **참조 시점**: LLM 호출 비용/지연 최적화 시, 이중 호출 제거 시, 새 LLM 연동 검토 시.  
-**관련 코드**: `app/domain/langgraph/nodes/turn_evaluator/evaluators.py`, `utils/llm_factory.py`  
+**관련 코드**: `app/domain/langgraph/nodes/eval_turn/evaluators.py`, `utils/llm_factory.py`  
 **함께 보면 좋은 문서**: `Node4_평가_가이드.md`
 
 ---
@@ -156,14 +167,15 @@ Judge0 설정·API 연동·테스트 케이스 플로우·빠른 실행·트러�
 
 ---
 
-## Maestro 전용 (`/.maestro/DOCS/`)
+## Maestro 전용 (`.maestro/docs/`)
 
-루트 `docs/` 와 별도로, **Submit 테스트 절차·`.env`·평가 JSON·Redis 토론 덤프** 등을 정리한 문서입니다.
+루트 `docs/` 와 별도로, **평가 파이프라인 요약·Submit 테스트·`.env`·평가 덤프** 등을 정리한 문서입니다. **먼저 볼 문서** 순서는 `.maestro/docs/README.md` 를 본다.
 
 | 문서 | 용도 |
 |------|------|
-| `.maestro/DOCS/README.md` | DOCS 폴더 목차 |
-| `.maestro/DOCS/Submit_테스트_ENV_평가덤프_가이드.md` | `setup_submit_test_data`, `check_submit_result`, `export_evaluation_json`, `debate_redis`, 관련 환경 변수 |
+| `.maestro/docs/README.md` | `.maestro/docs/` 목차 및 **먼저 볼 문서** 순서 |
+| `.maestro/docs/평가_파이프라인_플로우.md` | N4~N9 노드·입출력·N8·N9 공식 (루트 `docs/평가_파이프라인_플로우.md` 와 동기화) |
+| `.maestro/docs/Submit_테스트_ENV_평가덤프_가이드.md` | `setup_submit_test_data`, `check_submit_result`, `export_evaluation_json`, `debate_redis`, 관련 환경 변수 |
 
 ---
 
@@ -172,14 +184,21 @@ Judge0 설정·API 연동·테스트 케이스 플로우·빠른 실행·트러�
 | 작업 | 참조 문서 |
 |------|-----------|
 | **새 API 엔드포인트 추가** | `API_전체_명세.md` → `API_DB_매핑.md` → `테이블명세서.md` |
-| **평가 로직 수정** | `Node4_평가_가이드.md` → `프롬프트_명세.md` → `점수_계산_로직.md` |
+| **N4 턴 평가 로직 수정** | `Node4_평가_가이드.md` → `프롬프트_명세.md` → `점수_계산_로직.md` |
+| **N4 루브릭(R1~R4) 수정** | `Node4_평가_가이드.md` (2절) → `프롬프트_명세.md` → `.maestro/RUBRIC_V3_CHANGE_PLAN.md` |
+| **N8 다중 에이전트 토론 수정** | `점수_계산_로직.md` (3절) → `프롬프트_명세.md` (debate_agents.yaml) → `app/domain/langgraph/subgraph_debate.py` |
+| **최종 결과 출력 확인** | `점수_계산_로직.md` (4절) → `app/domain/langgraph/nodes/eval/n9_final_scores.py` |
+| **`scores.rubric_json` 스키마** | `점수_계산_로직.md` (4.3절) → `app/domain/langgraph/nodes/eval/n9_final_scores.py` (291~322줄) |
+| **API Submit 응답 확인** | `API_현재_구현.md` (2절) — ⚠️ 응답은 `{submissionId, status}`만. 평가 결과는 DB `scores.rubric_json` |
 | **State 필드 추가** | `State_흐름_및_DB_저장.md` → `노드별_DB_접근_가이드.md` |
 | **DB 스키마 변경** | `테이블명세서.md` → `DB_변경_이력.md` → `API_DB_매핑.md` |
 | **새 환경 구축** | `환경_설정_가이드.md` → `DB_설정_가이드.md` → `UV_설정_가이드.md` |
 | **테스트 실행** | `테스트_가이드.md` → `Judge0_가이드.md` |
-| **Submit 시드·평가 JSON·토론 Redis** | `.maestro/DOCS/Submit_테스트_ENV_평가덤프_가이드.md` |
-| **프롬프트 수정** | `프롬프트_명세.md` → `Node4_평가_가이드.md` |
-| **점수/학점 기준 변경** | `점수_계산_로직.md` → `루브릭_리팩토링_제안.md` |
+| **Submit 시드·평가 JSON·토론 Redis 덤프** | `.maestro/docs/Submit_테스트_ENV_평가덤프_가이드.md` |
+| **프롬프트 수정 (YAML)** | `프롬프트_명세.md` → `Node4_평가_가이드.md` |
+| **점수/등급 기준 변경** | `점수_계산_로직.md` → `Node4_평가_가이드.md` |
 | **Docker 환경 수정** | `Docker_백엔드_가이드.md` → `환경_설정_가이드.md` |
 | **파인튜닝 데이터 작업** | `턴_로그_추출.md` → `Node4_평가_가이드.md` |
 | **LLM 비용/성능 개선** | `LLM_성능_최적화.md` → `Node4_평가_가이드.md` |
+| **평가 플로우 다이어그램·노드 I/O 한 장** | `평가_파이프라인_플로우.md` |
+| **전체 그래프 흐름 파악** | `평가_파이프라인_플로우.md` → `State_흐름_및_DB_저장.md` (1.3절) → `app/domain/langgraph/graph.py` |

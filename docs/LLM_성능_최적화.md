@@ -355,6 +355,52 @@ async def _evaluate_turn_optimized_v3(state: EvalTurnState, eval_type: str, crit
 2. **높음**: 6.a 노드 최적화 (긴 프롬프트로 인한 긴 응답 시간)
 3. **중간**: 다른 노드들도 동일한 패턴 확인 및 최적화
 
+---
+
+## ⚡ Gemini 2.5 Flash Thinking 비활성화 (2026-04-09 적용)
+
+### 문제
+
+`gemini-2.5-flash` 모델은 기본적으로 **Thinking 모드**(내부 추론 단계)를 수행합니다. 복잡한 요청에서 30~120초 이상 지연이 발생하여 HTTP 504 Timeout을 유발했습니다.
+
+### 해결책
+
+`thinking_budget=0`으로 thinking을 비활성화하고 `timeout=60.0`(초)을 명시합니다.
+
+**적용 파일**: `app/domain/langgraph/utils/llm_factory.py`
+
+```python
+def create_gemini_llm(model=None, temperature=0.3, max_output_tokens=None, api_key=None):
+    return ChatGoogleGenerativeAI(
+        model=model or settings.DEFAULT_LLM_MODEL,
+        google_api_key=api_key or settings.GEMINI_API_KEY,
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+        thinking_budget=settings.LLM_THINKING_BUDGET,  # 0 = thinking 비활성화
+        timeout=settings.LLM_REQUEST_TIMEOUT,           # 60초
+    )
+```
+
+모든 노드(`n2_intent_analyzer`, `n3_writer`, `eval/utils`, `eval_turn/utils`, `system_nodes`)의 `get_llm()` 함수가 이 공통 헬퍼를 사용합니다.
+
+**`.env` 설정값**
+
+```env
+LLM_THINKING_BUDGET=0      # 0=비활성화, None=모델 기본값(느림)
+LLM_REQUEST_TIMEOUT=60.0   # LLM API 타임아웃 (초)
+MIDDLEWARE_RETRY_MAX_DELAY=30.0  # retry 최대 대기 (초, 기존 60→30)
+```
+
+### 효과
+
+| 항목 | 수정 전 | 수정 후 |
+|------|---------|---------|
+| 복잡한 요청 응답 시간 | 120초+ (timeout) | **5~6초** |
+| HTTP 504 발생 여부 | 빈번 | 없음 |
+| thinking 사용 | 활성화 (기본) | 비활성화 |
+
+> **참고**: `thinking_budget=0`은 `langchain-google-genai >= 2.x` (이 프로젝트: 3.2.0)에서 직접 파라미터로 지원됩니다.
+
 
 
 

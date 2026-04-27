@@ -79,7 +79,7 @@ class EvalService:
         session_id: str,
         exam_id: int,
         participant_id: int,
-        spec_id: int,
+        spec_id: Optional[int],
         human_message: str,
         is_submission: bool = False,
         code_content: Optional[str] = None,
