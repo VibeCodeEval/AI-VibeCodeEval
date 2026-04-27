@@ -7,6 +7,8 @@ user, ai message를 입력받아 Turn별 평가를 수행합니다.
 import pytest
 from typing import Dict, Any
 
+pytestmark = pytest.mark.llm
+
 from app.domain.langgraph.nodes.eval_turn.evaluators import (
     eval_debugging,
     eval_exploration,

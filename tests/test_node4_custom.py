@@ -6,6 +6,8 @@ import pytest
 import asyncio
 from typing import Dict, Any
 
+pytestmark = pytest.mark.llm
+
 from app.domain.langgraph.nodes.eval_turn.evaluators import eval_generation
 from app.domain.langgraph.nodes.eval_turn.analysis import intent_analysis
 from app.domain.langgraph.states import EvalTurnState
