@@ -59,6 +59,7 @@ class MainGraphState(TypedDict):
     writer_error: Optional[str]
 
     # 제출 상태
+    request_type: Optional[str]  # API 입력 기준 분기 소스 (CHAT/SUBMISSION)
     is_submitted: bool
     submission_id: Optional[int]
     code_content: Optional[str]
@@ -253,6 +254,19 @@ class IntentClassification(BaseModel):
     )
     confidence: float = Field(..., ge=0.0, le=1.0, description="분류 신뢰도 (0-1)")
     reasoning: Optional[str] = Field(None, description="분류 이유")
+
+
+class IntentTurnLLMOutput(BaseModel):
+    """턴별 의도 단일 LLM JSON (eval_intent_disambiguation classify_intent 노드)."""
+
+    predicted_intent: str = Field(
+        ...,
+        description="6대 라벨 중 정확히 하나: SETTING, CREATION, REFINEMENT, DEBUGGING, EXPLORATION, FOLLOW_UP (대문자)",
+    )
+    intent_cot: str = Field(
+        ...,
+        description="한국어 1~4문장, 왜 이 라벨인지 근거",
+    )
 
 
 class GuardrailCheck(BaseModel):

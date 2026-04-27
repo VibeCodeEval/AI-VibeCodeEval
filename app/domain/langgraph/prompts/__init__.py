@@ -11,7 +11,7 @@
 from app.domain.langgraph.prompts import load_prompt, render_prompt
 
 # 단순 로드
-prompt = load_prompt("intent_analyzer")
+prompt = load_prompt("eval_intent_analysis")
 
 # 변수 치환과 함께 로드
 prompt = render_prompt("writer_normal", status="SAFE", guide_strategy="LOGIC_HINT")
@@ -77,7 +77,7 @@ def load_prompt(name: str, section: Optional[str] = None) -> Dict[str, Any]:
     프롬프트 YAML 파일을 로드합니다.
 
     Args:
-        name: 프롬프트 이름 (확장자 제외, 예: "intent_analyzer")
+        name: 프롬프트 이름 (확장자 제외, 예: "eval_intent_analysis")
         section: 특정 섹션만 로드할 경우 섹션 이름
 
     Returns:
@@ -87,7 +87,7 @@ def load_prompt(name: str, section: Optional[str] = None) -> Dict[str, Any]:
         PromptNotFoundError: 프롬프트 파일을 찾을 수 없는 경우
 
     Examples:
-        >>> data = load_prompt("intent_analyzer")
+        >>> data = load_prompt("eval_intent_analysis")
         >>> print(data["template"])
     """
     # 하위 디렉토리 지원 (예: "eval_criteria/generation")
@@ -122,7 +122,7 @@ def render_prompt(name: str, section: Optional[str] = None, **variables) -> str:
 
     Examples:
         >>> prompt = render_prompt(
-        ...     "intent_analyzer",
+        ...     "eval_intent_analysis",
         ...     problem_title="외판원 순회",
         ...     algorithms="DP, 비트마스킹"
         ... )
