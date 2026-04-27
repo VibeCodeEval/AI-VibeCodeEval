@@ -57,12 +57,12 @@ jobs:
 
             cat > .env <<EOF
             DOCKERHUB_USERNAME=$DOCKERHUB_USERNAME
-            POSTGRES_HOST=$POSTGRES_HOST
+            POSTGRES_HOST=${POSTGRES_HOST:-vibecode_postgres}
             POSTGRES_PORT=${POSTGRES_PORT:-5432}
             POSTGRES_USER=$POSTGRES_USER
             POSTGRES_PASSWORD=$POSTGRES_PASSWORD
             POSTGRES_DB=${POSTGRES_DB:-ai_vibe_coding_test}
-            REDIS_HOST=redis
+            REDIS_HOST=vibecode-redis
             REDIS_PORT=6379
             GEMINI_API_KEY=$GEMINI_API_KEY
             JUDGE0_API_KEY=$JUDGE0_API_KEY
