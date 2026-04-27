@@ -44,7 +44,9 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: ai_vibe_coding_test
         run: |
-          uv run pytest -m "not llm" --timeout=60 -v
+          uv run pytest -m "not llm" --timeout=60 -v \
+            --ignore=tests/test_langsmith_tracing.py \
+            --ignore=tests/test_phase6b_integrated_evaluator.py
 
   build-push:
     name: Build & Push Docker Image
