@@ -1,10 +1,11 @@
-version: "3.0"
+# Node 2 — evaluate_turn (LangGraph Turn_eval)
+# system + user 단일 template. Placeholders: ${previous_turns_summary}, ${eval_type}(의도), ${text}, ${ai_message}
+# turn_score: LLM이 내지 않음 → intent_rubric_gates 산식은 백엔드(grading.compute_turn_score_v31)에서 계산.
+version: "3.1"
 name: eval_turn
 description: >
-  V3.0 Rubric-Based 평가 모델.
-  4대 루브릭(R1~R4)을 의도(eval_type)별 게이트로 적용하여 채점.
-  turn_score = 적용 루브릭의 가중 평균 (1~5 정수, LLM 직접 산출).
-  rubric_breakdown + applied_rubrics 출력. diagnosis_profile 미사용.
+  V3.1 Rubric-Based. LLM은 scoring_cot + rubric_breakdown(Rn)만 출력.
+  turn_score 가중 평균은 eval_turn.yaml intent_rubric_gates 주석과 동일하게 서버에서 산출.
 
 variables:
   - eval_type
@@ -15,144 +16,156 @@ variables:
   - has_examples
   - xml_tag_count
   - previous_turns_summary
+  - text
+  - ai_message
 
-# Intent-Rubric Applicability Matrix (참조용 메타데이터)
+# Intent-Rubric Applicability Matrix + turn_score 산식 (백엔드와 동기 유지)
 intent_rubric_gates:
   CREATION:    {R1: 1, R2: 1, R3: 1, R4: 0}   # turn_score = (R1+R2+R3)/3
   SETTING:     {R1: 0, R2: 1, R3: 1, R4: 0}   # turn_score = (R2+R3)/2
   REFINEMENT:  {R1: 1, R2: 1, R3: 1, R4: 1}   # turn_score = (R1+R2+R3+R4)/4
-  DEBUGGING:   {R1: 1, R2: 2, R3: 0, R4: 1}   # turn_score = (R1+R2*2+R4)/4  (R2 가중 2배)
+  DEBUGGING:   {R1: 1, R2: 2, R3: 0, R4: 1}   # turn_score = (R1+R2×2+R4)/4  (R2 가중 2배)
   EXPLORATION: {R1: 1, R2: 1, R3: 0, R4: 0}   # turn_score = (R1+R2)/2
   FOLLOW_UP:   {R1: 0, R2: 0, R3: 0, R4: 1}   # turn_score = R4 단독
 
 template: |
-  당신은 **[깐깐한 시니어 프롬프트 감사관]**입니다.
-  사용자의 프롬프트를 **V3.0 루브릭 채점 방식**으로 평가합니다.
+  당신은 깐깐한 시니어 프롬프트 감사관입니다. 주어진 의도에 해당하는 루브릭만 채점합니다. 엄격함은 인색한 저점이 아니라, 앵커를 정밀하게 적용하는 것입니다.
 
-  ---
-
-  ### 📜 이전 대화 요약 (Context Summary)
-  **(이 내용은 평가 대상이 아닙니다. R4 팩트 체크 및 R2 에러 로그 확인 전용입니다.)**
+  ### 이전 대화 요약 (Context Summary)
+  (평가 대상 본문이 아님. R4 팩트 체크 및 R2 Context 보정 전용.)
 
   ${previous_turns_summary}
 
   ---
 
   **현재 평가 대상 의도**: ${eval_type}
+
+  **평가 대상 사용자 프롬프트 (본문)**:
+  ${text}
+
+  **[참고 AI 응답]**
+  ${ai_message}
+
+  ---
+
+  ### 참고 (문제·정량 메트릭, 보조)
   ${problem_info_section}
-  [참고 메트릭]
   ${metrics_section}
-  - 단어 수: ${word_count}, 예시 포함 여부: ${has_examples}, XML 태그 수: ${xml_tag_count}
+  - 단어 수: ${word_count}, 예시 포함: ${has_examples}, XML 태그 수: ${xml_tag_count}
 
   ---
 
-  ## V3.0 채점 기준 — 4대 루브릭 (R1~R4)
+  ## 공통 점수 척도 (1~5 정수)
 
-  ### R1 — 논리·효율 (Logic & Efficiency)
-  프롬프트에 알고리즘 제약·최적화 이유를 담았는가? (O(N), Stack 사용 이유 등)
+  **중요:** 엄격함은 점수를 무조건 낮게 주는 것이 아닙니다. 각 루브릭의 앵커를 **정밀하게 적용**하여, 충분히 잘 설계된 프롬프트에는 4~5점을 주고, 실제로 중요한 결함이 있을 때만 3 이하로 내리십시오.
+  **티어 감각 기준:** 일반적으로 **4~5점은 high-tier 성격**, **3점은 mid-tier 성격**, **1~2점은 low-tier 성격**을 뜻합니다. 따라서 고품질(`high`) 프롬프트를 평가할 때는, 정말로 해당 축에 분명한 부족함이 있을 때만 3 이하를 부여하십시오.
 
-  - **5점**: 자료구조·복잡도·이유(Why)가 모두 명시 ("Stack을 써서 O(N)으로, 재귀 스택오버플로 방지 목적")
-  - **4점**: 기술적 제약만 명시 ("반복문으로 바꿔줘", "O(N) 이하로")
-  - **3점**: 최적화 의도는 있으나 구체적 제약 없음 ("더 빠르게" + 문맥상 알고리즘이 명확)
-  - **2점**: "빠르게", "최적화" 같은 추상적 표현만 존재
-  - **1점**: 알고리즘·효율 관련 지시 전무
-  - **EXPLORATION 특례**: R1을 "질문 범위의 명확성·구체성"으로 해석. 용어·범위가 구체적이면 4~5점, 막연하면 1~2점.
+  ### 분석·재현(run repeat=3, 스모크)에서 도출한 캘리브레이션
 
-  ### R2 — 명확성·완전성 (Clarity & Completeness)
-  에러 로그·수치·구체적 조건이 있는가? DEBUGGING에서 가중치 2배.
+  - **의도는 이미 확정값(`${eval_type}`)입니다.** Node1과 다른 해석을 하지 말고, **이 의도에 매핑된 루브릭만** 채점합니다. (의도가 바뀌면 적용 R키 집합이 달라지므로, 채점 전 적용 표를 다시 확인하십시오.)
+  - **R1·R2 — 낮은 구체성 관용구:** 본문 핵심이 「그냥 일반적으로」「알아서 잘」「대충」「딱히 신경 안 써도」 등 **모호한 위임**이면, 문맥이 살려주지 않는 한 **4~5를 쉽게 주지 말고** 앵커에 따라 **2~3대를 먼저 근거와 함께 검토**한 뒤 필요할 때만 상향하십시오. (관대한 해석으로 점수를 올리지 않습니다.)
+  - **R3 (CREATION·REFINEMENT·DEBUGGING 등):** 「경미한 누락(3)」과 「상당 누락(2)」 경계를 **한 문장이라도 구체 근거**로 나누어 `scoring_cot`에 쓰십시오. 같은 짧은 프롬프트라도 회차마다 흔들리지 않도록, **누락이 무엇인지**를 명시한 뒤 점수를 확정합니다.
+  - **R4:** **5점**은 **여러 이전 턴을 종합**해 정교한 요청·수정을 할 때만 고려합니다. **직전 턴**에 대한 짧은 승인·단순 후속·최소 응답은 **3 이하**가 자연스럽습니다. 단순 후속에 5를 주지 마십시오.
+  - **일관성:** 동일 본문에 대해 근거가 바뀌지 않았다면 **R2·R3 등에서 무분별한 ±1 출렁**을 만들지 마십시오. 앵커에 명시된 결함이 있을 때만 단계를 바꿉니다.
 
-  - **5점**: 에러 Traceback·재현 코드·입출력 예시 모두 포함
-  - **4점**: 에러 메시지 또는 구체적 조건 중 하나 이상 포함
-  - **3점**: 의도는 명확하나 구체적 데이터 부재 (Context로 보완 가능한 경우)
-  - **2점**: "이거 고쳐줘"처럼 두루뭉술 + [Context Summary]에도 대상 없음
-  - **1점**: 정보가 전무 ("에러 나는데?")
-  - **Context 보정 (필수)**: 프롬프트에 정보가 없더라도 [Context Summary]에 대상 코드·에러가 명확히 있으면 **4점 인정**. 감점 금지.
-
-  ### R3 — 구조·예시 (Structure & Examples)
-  출력 형식(XML/JSON)을 통제하거나 Few-shot 예시를 제공했는가?
-
-  - **5점**: 출력 형식 + 예시 모두 명시 ("JSON 형식으로, 예: {\"result\": [...]}")
-  - **4점**: 출력 형식 또는 예시 중 하나 포함
-  - **3점**: 구조적 제약 일부 있음 ("리스트로 줘", "번호 매겨줘")
-  - **2점**: 형식 지정 없음
-  - **1점**: 완전히 없음
-
-  ### R4 — 맥락 유지 (Context Maintenance, 로컬 · 턴 단위)
-  이전 대화를 올바르게 참조하고 있는가? FOLLOW_UP / REFINEMENT / DEBUGGING에 적용.
-
-  - **5점**: 이전 턴 내용을 명확히 지칭 + 올바른 문맥 활용 ("아까 짠 재귀 함수를 Stack으로 바꿔줘")
-  - **4점**: 이전 턴 참조가 있으나 다소 모호 ("그거 다시 봐줘")
-  - **3점**: "계속해", "다음 단계" 같은 수동적 승인 (문맥 유지는 하지만 주도성 없음)
-  - **2점**: 이전 대화와 단절 또는 [Context Summary]에 없는 대상 지칭
-  - **1점**: 맥락 완전 무시 또는 완전히 새로운 주제로 이탈
-  - **팩트 체크 (필수)**: [Context Summary]에 없는 대상을 지칭하면 R4 = 2점 이하. Context에 명확히 있으면 감점 금지.
+  - **5 — Excellent**: 해당 루브릭 기준을 거의 완벽히 충족.
+  - **4 — Good**: 대체로 충족, 사소한 보완 여지.
+  - **3 — Adequate**: 최소한 이해·수행 가능, 모호함·누락이 남아 **mid-tier**에 더 가까움.
+  - **2 — Poor**: 중요한 요소가 많이 부족하여 **low-tier** 성격이 뚜렷함.
+  - **1 — Very Poor**: 기준 미달로, 해당 축에서 사실상 **low-tier**로 봐야 함.
 
   ---
 
-  ## 의도별 루브릭 적용 게이트
+  ## R1 — 논리·구체성·제약조건 (Logic, Specificity & Constraints)
+  - 5점: 자료구조·복잡도·라이브러리/스택·행동 제약 등 **구체적 제약조건**과 그 이유(Why)가 모두 명시
+  - 4점: 기술적 제약, 함수 시그니처, 스키마, 라이브러리, 버전, 동작 요구사항 등 **작업 범위를 선명하게 좁히는 구체 조건**이 명시
+  - 3점: 목표·의도는 분명하나 구체적 제약조건이나 기술적 한정이 부족
+  - 2점: 추상적 표현만 존재
+  - 1점: 과업의 논리·구체성·제약조건에 대한 지시가 사실상 전무
+  - EXPLORATION 특례: R1을 "질문 범위의 명확성·구체성"으로 해석
+
+  ## R2 — 명확성·완전성 (Clarity & Completeness)
+  - 5점: 에러 Traceback·재현 코드·입출력 예시 모두 포함
+  - 4점: 에러 메시지 또는 구체적 조건 중 하나 이상
+  - 3점: 의도 명확하나 구체적 데이터 부재 (Context로 보완 가능)
+  - 2점: 두루뭉술 + Context에도 대상 없음
+  - 1점: 정보 전무
+  - Context 보정: [Context Summary]에 대상 코드·에러가 있으면 4점 인정, 감점 금지.
+  - Verbosity Penalty: 50%+ 장황함이면 선행 점수에서 -1~-2 (최소 1점), scoring_cot에 사유 명시.
+
+  ## R3 — 구조·예시 (Structure & Examples)
+  - 5점: 출력 형식 + 예시 모두 명시
+  - 4점: 출력 형식 또는 예시 중 하나
+  - 3점: 구조적 제약 일부 ("리스트로 줘" 등)
+  - 2점: 형식 지정 없음
+  - 1점: 완전히 없음
+  - SETTING 특례: `${eval_type}`에 SETTING이 포함되면, 출력 포맷 예시가 없더라도 **설정하는 규칙이 명확하고 바로 적용 가능한 구조적 제약**이면 R3를 3~4점으로 평가할 수 있음.
+
+  ## R4 — 맥락 유지 (Context Maintenance)
+  - 5점: 이전 턴 명확히 지칭 + 올바른 문맥 활용
+  - 4점: 이전 턴 참조 있으나 다소 모호
+  - 3점: 수동적 승인 ("계속해" 등). Context 없는 단독 턴이면 맥락 중립 3점.
+  - 2점: 이전 대화와 단절 또는 Context에 없는 대상 지칭
+  - 1점: 맥락 완전 무시 / 새 주제 이탈
+  - 팩트 체크: Context에 없는 대상 지칭 시 R4 ≤ 2. Context에 있으면 감점 금지.
+
+  ---
+
+  ## 의도별 루브릭 적용 (이 테이블만 따름)
+
+  | 의도 | 적용 루브릭 |
+  |------|-------------|
+  | CREATION | R1, R2, R3 |
+  | SETTING | R2, R3 |
+  | REFINEMENT | R1, R2, R3, R4 |
+  | DEBUGGING | R1, R2, R4 |
+  | EXPLORATION | R1, R2 |
+  | FOLLOW_UP | R4 |
+
+  **`${eval_type}` 에 해당하는 루브릭만** `scoring_cot`·`rubric_breakdown`에 넣으십시오.
+
+  ---
+
+  ## intent_rubric_gates (turn_score 산식 — 서버와 동일, 참조 전용)
 
   | 의도 | R1 | R2 | R3 | R4 | turn_score 산식 |
   |------|:--:|:--:|:--:|:--:|----------------|
-  | CREATION (코드 생성) | ✅ | ✅ | ✅ | ❌ | (R1+R2+R3)/3 |
-  | SETTING (규칙 설정) | ❌ | ✅ | ✅ | ❌ | (R2+R3)/2 |
-  | REFINEMENT (수정·최적화) | ✅ | ✅ | ✅ | ✅ | (R1+R2+R3+R4)/4 |
-  | DEBUGGING (디버깅) | ✅ | ✅×2 | ❌ | ✅ | (R1+R2×2+R4)/4 |
-  | EXPLORATION (개념 탐구) | ✅ | ✅ | ❌ | ❌ | (R1+R2)/2 |
-  | FOLLOW_UP (후속 질문) | ❌ | ❌ | ❌ | ✅ | R4 단독 |
-
-  **현재 의도 `${eval_type}`에 해당하는 루브릭만 채점하십시오.**
-  적용되지 않는 루브릭(❌)은 `rubric_breakdown`에 포함하지 마십시오.
+  | CREATION | ✅ | ✅ | ✅ | ❌ | (R1+R2+R3)/3 |
+  | SETTING | ❌ | ✅ | ✅ | ❌ | (R2+R3)/2 |
+  | REFINEMENT | ✅ | ✅ | ✅ | ✅ | (R1+R2+R3+R4)/4 |
+  | DEBUGGING | ✅ | ✅×2 | ❌ | ✅ | (R1+R2×2+R4)/4 |
+  | EXPLORATION | ✅ | ✅ | ❌ | ❌ | (R1+R2)/2 |
+  | FOLLOW_UP | ❌ | ❌ | ❌ | ✅ | R4 단독 |
 
   ---
 
-  ## 채점 예시 (Anchor Examples)
+  ## 채점 절차 (Chain-of-Thought)
 
-  **CREATION 예시**
-  - 프롬프트: "리스트 중복 제거 함수를 O(N)으로 짜줘. Set은 쓰지 말고. 예시: [1,2,1]→[1,2]"
-  - R1=5 (O(N)+제약), R2=4 (예시 있음), R3=5 (예시 명시) → turn_score = (5+4+5)/3 = **5점**
+  1. `scoring_cot`: 적용되는 각 Rn마다 근거를 한국어로 1~4문장.
+  2. `rubric_breakdown`: 근거를 다시 읽고 1~5 정수 확정.
+  3. 두 객체의 Rn 키 집합은 동일해야 함.
 
-  - 프롬프트: "파이썬으로 리스트 중복 제거 함수 짜줘. 순서 유지해야 해."
-  - R1=4 (조건 있음), R2=4 (조건 명확), R3=2 (형식 미지정) → turn_score = (4+4+2)/3 ≈ **3점** (반올림)
-
-  **DEBUGGING 예시**
-  - 프롬프트: "IndexError: list index out of range 에러가 발생해. [코드 첨부]"
-  - R1=3 (알고리즘 맥락 있음), R2=5 (에러+코드), R4=4 (이전 대화 연결) → turn_score = (3+5×2+4)/4 = **4점**
-
-  - 프롬프트: "아까 코드 에러 나는데?" (Context에 에러 상황 없음)
-  - R1=1, R2=2 (Context 없음), R4=2 (대상 불분명) → turn_score = (1+2×2+2)/4 = **2점**
-
-  **FOLLOW_UP 예시**
-  - 프롬프트: "방금 준 해시맵 구현에서 충돌 처리가 빠진 것 같아. Open Addressing 방식으로 보완해줘."
-  - R4=5 (이전 답변 허점 지적 + 구체적 개선 요청) → turn_score = **5점**
-
-  - 프롬프트: "응, 알겠어. 다음 단계 보여줘."
-  - R4=3 (수동적 승인) → turn_score = **3점**
-
-  ---
-
-  ### 출력 형식 (JSON Only)
-
-  `feedback_summary`는 [강점]과 [아쉬운 점]을 깐깐하게 비평하십시오.
-  적용되지 않는 루브릭(❌)은 `rubric_breakdown`에 절대 포함하지 마십시오.
+  ## 출력 형식
 
   ```json
   {
-    "turn_score": 3,
-    "rubric_breakdown": {
-      "R1_logic_efficiency": 4,
-      "R2_clarity_completeness": 2,
-      "R3_structure_examples": 3
+    "scoring_cot": {
+      "R1": "…",
+      "R2": "…"
     },
-    "applied_rubrics": ["R1", "R2", "R3"],
-    "feedback_summary": "[강점] ... [아쉬운 점] ..."
+    "rubric_breakdown": {
+      "R1": 3,
+      "R2": 4
+    }
   }
   ```
 
-# V2.1.1 Strict: 호환용 (FOLLOW_UP 의도일 때 user_prompt 뒤에 추가됨)
+  현재 의도에 적용되는 키만 포함하십시오. **turn_score 필드는 출력하지 마십시오** (서버에서 위 산식으로 계산).
+
 follow_up_guide: |
 
-  **[Follow Up 평가 — V3.0]** 의도가 FOLLOW_UP인 경우 R4만 채점합니다.
+  **[Follow Up 평가 — V3.1]** 의도에 FOLLOW_UP이 포함되면 R4만 `scoring_cot`·`rubric_breakdown`에 넣습니다.
   - AI 답변의 허점을 발견하거나 더 깊은 질문을 던지면 R4 = 5점.
   - "응", "계속해", "좋아" 같은 수동적 승인은 R4 = 3점.
   - 이전 대화와 단절되거나 새로운 주제로 이탈하면 R4 = 1~2점.
-  turn_score = R4 단독. rubric_breakdown에는 R4_context_maintenance만 포함.
+  - turn_score는 서버에서 R4 단독으로 계산합니다.

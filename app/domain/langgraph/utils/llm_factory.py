@@ -83,12 +83,23 @@ def create_gemini_llm(
     - thinking_budget=0 : gemini-2.5-* 모델의 thinking 비활성화 → 응답 속도 개선
     - timeout : LLM API 요청 타임아웃 설정 (기본 60초)
     """
+    selected_model = model or settings.DEFAULT_LLM_MODEL
+    thinking_budget = settings.LLM_THINKING_BUDGET
+    # gemini-2.5-pro 계열은 thinking 모드가 필수인 경우가 있어
+    # budget=0을 강제하면 400(Budget 0 is invalid) 오류가 발생할 수 있음.
+    if (
+        isinstance(selected_model, str)
+        and "gemini-2.5-pro" in selected_model.lower()
+        and thinking_budget == 0
+    ):
+        thinking_budget = None
+
     return ChatGoogleGenerativeAI(
-        model=model or settings.DEFAULT_LLM_MODEL,
+        model=selected_model,
         google_api_key=api_key or settings.GEMINI_API_KEY,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
-        thinking_budget=settings.LLM_THINKING_BUDGET,
+        thinking_budget=thinking_budget,
         timeout=settings.LLM_REQUEST_TIMEOUT,
     )
 

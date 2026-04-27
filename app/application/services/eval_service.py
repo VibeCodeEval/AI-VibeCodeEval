@@ -127,6 +127,7 @@ class EvalService:
                 state = existing_state
                 state["human_message"] = human_message
                 state["is_submitted"] = is_submission
+                state["request_type"] = "SUBMISSION" if is_submission else "CHAT"
                 if code_content:
                     state["code_content"] = code_content
             else:
@@ -137,6 +138,7 @@ class EvalService:
                     participant_id=participant_id,
                     spec_id=spec_id,
                     human_message=human_message,
+                    request_type="SUBMISSION" if is_submission else "CHAT",
                 )
                 if is_submission:
                     state["is_submitted"] = True
@@ -332,6 +334,7 @@ class EvalService:
                 state = existing_state
                 state["human_message"] = human_message
                 state["is_submitted"] = is_submission
+                state["request_type"] = "SUBMISSION" if is_submission else "CHAT"
                 if code_content:
                     state["code_content"] = code_content
             else:
@@ -342,6 +345,7 @@ class EvalService:
                     participant_id=participant_id,
                     spec_id=spec_id,
                     human_message=human_message,
+                    request_type="SUBMISSION" if is_submission else "CHAT",
                 )
                 if is_submission:
                     state["is_submitted"] = True
@@ -386,6 +390,7 @@ class EvalService:
                     state = existing_state
                     state["human_message"] = human_message
                     state["is_submitted"] = is_submission
+                    state["request_type"] = "SUBMISSION" if is_submission else "CHAT"
                     if code_content:
                         state["code_content"] = code_content
                 else:
@@ -395,6 +400,7 @@ class EvalService:
                         participant_id=participant_id,
                         spec_id=spec_id,
                         human_message=human_message,
+                        request_type="SUBMISSION" if is_submission else "CHAT",
                     )
                     if is_submission:
                         state["is_submitted"] = True
@@ -461,6 +467,7 @@ class EvalService:
             existing_state["spec_id"] = spec_id
             existing_state["human_message"] = "코드를 제출합니다."
             existing_state["is_submitted"] = True
+            existing_state["request_type"] = "SUBMISSION"
             existing_state["code_content"] = code_content
             existing_state["lang"] = lang
             if submission_id:
@@ -473,6 +480,7 @@ class EvalService:
                 participant_id=participant_id,
                 spec_id=spec_id,
                 human_message="코드를 제출합니다.",
+                request_type="SUBMISSION",
             )
             state["is_submitted"] = True
             state["code_content"] = code_content
@@ -938,6 +946,31 @@ class EvalService:
                 else (intent_types[0] if intent_types else "UNKNOWN")
             )
 
+            # V3.1: unified_intent에 대응하는 단일 평가 노드 결과 → Redis/DB용 rubric 필드
+            _v3_eval_key_bg = {
+                "SETTING": "rule_setting_eval",
+                "CREATION": "generation_eval",
+                "REFINEMENT": "optimization_eval",
+                "DEBUGGING": "debugging_eval",
+                "EXPLORATION": "exploration_eval",
+                "VALIDATION": "debugging_eval",
+                "FOLLOW_UP": "follow_up_eval",
+            }
+            _ui_bg = (
+                (result.get("unified_intent") or intent_type or "")
+                .upper()
+                .replace("-", "_")
+            )
+            _pk_bg = _v3_eval_key_bg.get(_ui_bg)
+            _pv_bg = result.get(_pk_bg) if _pk_bg else None
+            _rb_bg: dict = {}
+            _ar_bg: list = []
+            _sc_bg: dict = {}
+            if isinstance(_pv_bg, dict):
+                _rb_bg = _pv_bg.get("rubric_breakdown") or {}
+                _ar_bg = _pv_bg.get("applied_rubrics") or []
+                _sc_bg = _pv_bg.get("scoring_cot") or {}
+
             # 상세 turn_log 구조 생성 (사용자 정의 형식, 중복 최소화)
             detailed_turn_log = {
                 "turn_number": current_turn,
@@ -954,6 +987,9 @@ class EvalService:
                     "intent_confidence": main_state.get("intent_confidence", 0.0),
                     "score": turn_score,
                     "rubrics": detailed_rubrics,  # 상세 루브릭 정보 (name, score, reasoning 포함) - 중복 제거
+                    "rubric_breakdown": _rb_bg,
+                    "applied_rubrics": _ar_bg,
+                    "scoring_cot": _sc_bg,
                     "weights": weights,  # 가중치 정보 (올바른 intent로 가져온 값)
                     "final_reasoning": comprehensive_reasoning_from_log,  # 전체 평가 근거 (LLM의 의견)
                     # 참고용: 상세 정보는 필요시에만 포함 (중복 방지)

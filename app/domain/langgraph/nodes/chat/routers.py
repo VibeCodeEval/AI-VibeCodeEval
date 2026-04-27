@@ -82,8 +82,13 @@ def intent_router(
 
     intent_status = state.get("intent_status")
     is_submitted = state.get("is_submitted", False)
+    request_type = (state.get("request_type") or "").upper()
 
-    # 제출 요청인 경우 - eval_turn_guard 노드로 이동
+    # API request_type가 SUBMISSION이면 최우선으로 평가 플로우 진입
+    if request_type == "SUBMISSION":
+        return "eval_turn_guard"
+
+    # 하위 호환: 기존 플래그/상태 기반 제출 분기
     if is_submitted or intent_status == IntentAnalyzerStatus.PASSED_SUBMIT.value:
         return "eval_turn_guard"
 
@@ -116,8 +121,9 @@ def main_router(
     logger = logging.getLogger(__name__)
 
     is_submitted = state.get("is_submitted", False)
+    request_type = (state.get("request_type") or "").upper()
 
-    if is_submitted:
+    if request_type == "SUBMISSION" or is_submitted:
         logger.info("[Main Router] 제출 요청 확인 - eval_holistic_flow로 진행")
         return "eval_holistic_flow"
 
