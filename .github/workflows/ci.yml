@@ -25,17 +25,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          enable-cache: true
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-cov pytest-timeout
+          uv python install 3.11
+          uv sync --dev
 
       - name: Run tests (LLM 테스트 제외)
         env:
@@ -47,7 +45,7 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: ai_vibe_coding_test
         run: |
-          pytest -m "not llm" --timeout=60 -v
+          uv run pytest -m "not llm" --timeout=60 -v
 
   build-push:
     name: Build & Push Docker Image
