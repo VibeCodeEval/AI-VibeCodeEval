@@ -18,6 +18,7 @@ from app.domain.langgraph.nodes.chat.n3_writer import (
     format_writer_messages,
     get_writer_chain,
 )
+from langchain_core.messages import SystemMessage, HumanMessage
 from app.domain.langgraph.states import MainGraphState
 from app.infrastructure.persistence.models.enums import IntentAnalyzerStatus
 
@@ -176,7 +177,7 @@ class TestWriterChain:
         assert "messages" in result
         assert "human_message" in result
         assert result["human_message"] == "피보나치 함수를 작성해주세요"
-        assert "정상적인" in result["system_prompt"] or "소크라테스" in result["system_prompt"]
+        assert "바이브코딩" in result["system_prompt"] or "AI 시험 감독관" in result["system_prompt"] or "LOGIC_HINT" in result["system_prompt"]
     
     def test_prepare_writer_input_guardrail_failed(self):
         """가드레일 위반 입력 준비 테스트"""
@@ -266,9 +267,9 @@ class TestWriterChain:
         result = format_writer_messages(inputs)
         
         assert len(result) == 4  # system + 2 messages + current
-        assert result[0]["role"] == "system"
-        assert result[-1]["role"] == "user"
-        assert result[-1]["content"] == "현재 메시지"
+        assert isinstance(result[0], SystemMessage)
+        assert isinstance(result[-1], HumanMessage)
+        assert result[-1].content == "현재 메시지"
     
     def test_format_writer_messages_empty_history(self):
         """빈 히스토리 메시지 포맷팅 테스트"""
@@ -282,8 +283,8 @@ class TestWriterChain:
         result = format_writer_messages(inputs)
         
         assert len(result) == 2  # system + current
-        assert result[0]["role"] == "system"
-        assert result[1]["role"] == "user"
+        assert isinstance(result[0], SystemMessage)
+        assert isinstance(result[1], HumanMessage)
 
 
 class TestChainIntegration:
@@ -400,7 +401,7 @@ class TestChainIntegration:
         formatted = format_writer_messages(prepared)
         
         assert len(formatted) >= 2
-        assert formatted[0]["role"] == "system"
-        assert formatted[-1]["role"] == "user"
-        assert formatted[-1]["content"] == "피보나치 함수를 작성해주세요"
+        assert isinstance(formatted[0], SystemMessage)
+        assert isinstance(formatted[-1], HumanMessage)
+        assert formatted[-1].content == "피보나치 함수를 작성해주세요"
 

@@ -142,9 +142,9 @@ class TestPromptGeneration:
         """Intent Analyzer 프롬프트 (문제 정보 없음)"""
         prompt = create_intent_analysis_system_prompt(None)
         
-        # 기본 프롬프트 구조 확인 (현재: AI 시험 감독관 / Test Proctor)
+        # 기본 프롬프트 구조 확인 (현재: AI 시험 감독관 / Test Proctor + Guardrail)
         assert "감독관" in prompt or "Proctor" in prompt
-        assert "정답 코드 유출 방지" in prompt
+        assert "JAILBREAK" in prompt or "Guardrail" in prompt
     
     def test_writer_prompt_with_problem_context(self):
         """Writer LLM 프롬프트에 문제 정보 포함 확인"""
