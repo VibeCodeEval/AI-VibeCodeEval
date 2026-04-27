@@ -73,6 +73,9 @@ jobs:
             USE_REDIS_QUEUE=true
             EOF
 
+            echo ">>> Ensuring shared Docker network exists..."
+            docker network inspect vibecode-net >/dev/null 2>&1 || docker network create vibecode-net
+
             echo ">>> Pulling latest AI images..."
             docker compose --env-file .env -f docker-compose.prod.yml pull ai_worker judge_worker
 

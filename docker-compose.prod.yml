@@ -2,8 +2,6 @@
 # 배포 환경의 PostgreSQL 사용
 # 사용법: docker-compose -f docker-compose.prod.yml up -d
 
-version: '3.8'
-
 services:
   # PostgreSQL 데이터베이스 (배포 환경에서는 외부 DB 사용)
   # 이 서비스는 주석 처리하거나 제거 (외부 DB 사용 시)
@@ -104,6 +102,5 @@ networks:
   ai_vibe_network:
     driver: bridge
   vibecode-net:
+    name: vibecode-net
     external: true
-
-
