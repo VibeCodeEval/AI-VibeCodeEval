@@ -154,6 +154,8 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         test_cases_total = state.get("test_cases_total")
         execution_time = state.get("execution_time")
         memory_used_mb = state.get("memory_used_mb")
+        time_limit_sec = state.get("time_limit_sec")
+        memory_limit_mb = state.get("memory_limit_mb")
         skip_performance = state.get("skip_performance", False)
         skip_reason = state.get("skip_reason")
 
@@ -199,6 +201,8 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                 {
                     "execution_time": execution_time,
                     "memory_used_mb": memory_used_mb,
+                    "time_limit_sec": time_limit_sec,
+                    "memory_limit_mb": memory_limit_mb,
                     "skip_performance": skip_performance,
                     "skip_reason": skip_reason,
                 }

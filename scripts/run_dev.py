@@ -55,14 +55,35 @@ def run_uvicorn():
         port=8000,
         reload=True,
         log_level="debug",
+        # 개발 중 생성되는 산출물 변경으로 인한 과도한 reload 방지
+        reload_excludes=[
+            "tmp/*",
+            ".maestro/*",
+            "data/*",
+            "*.json",
+            "*.jsonl",
+            "*.log",
+        ],
     )
 
 
 if __name__ == "__main__":
-    # Judge0 Worker를 백그라운드 스레드에서 실행
-    judge_worker_thread = Thread(target=run_judge_worker, daemon=True)
-    judge_worker_thread.start()
-    logger.info("[Dev Server] Judge0 Worker 시작됨")
+    # app.main(lifespan)에서도 Worker를 시작하므로,
+    # 여기서는 중복 실행을 막기 위해 opt-in으로만 실행.
+    run_worker_in_script = os.getenv("RUN_DEV_START_WORKER", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if run_worker_in_script:
+        judge_worker_thread = Thread(target=run_judge_worker, daemon=True)
+        judge_worker_thread.start()
+        logger.info("[Dev Server] Judge0 Worker 시작됨 (run_dev.py)")
+    else:
+        logger.info(
+            "[Dev Server] Judge0 Worker 스레드 시작 생략 "
+            "(app.main의 ENABLE_JUDGE_WORKER 사용)"
+        )
     
     # FastAPI 서버 실행 (메인 스레드)
     try:

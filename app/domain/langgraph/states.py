@@ -74,6 +74,17 @@ class MainGraphState(TypedDict):
     aggregate_turn_score: Optional[float]
     code_performance_score: Optional[float]
     code_correctness_score: Optional[float]
+    # N5 Judge0 실행 상세 (N7/N8/N9 전달용)
+    execution_time: Optional[float]      # 실제 실행 시간(초)
+    memory_used_mb: Optional[float]      # 실제 메모리 사용량(MB)
+    # N5 평가 기준값 (limit) — 결과 해석/표시용
+    time_limit_sec: Optional[float]      # 시간 기준(초)
+    memory_limit_mb: Optional[float]     # 메모리 기준(MB)
+    skip_performance: Optional[bool]
+    skip_reason: Optional[str]
+    test_cases_passed: Optional[int]
+    test_cases_total: Optional[int]
+    correctness_reasoning: Optional[str]
     final_scores: Optional[Dict[str, float]]
 
     # 메모리 요약

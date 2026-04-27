@@ -15,25 +15,25 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 # 1~5 Likert → Backend 점수 (0~100) 매핑
-# 5: Excellence(탁월) 100, 4: Good(우수) 90, 3: Neutral(보통) 80, 2: Weak(미흡) 60, 1: Bad(나쁨) 0
+# 5: Excellence(탁월) 100, 4: Good(우수) 80, 3: Neutral(보통) 70, 2: Weak(미흡) 50, 1: Bad(나쁨) 0
 SCORE_MAPPING: Dict[int, int] = {
     5: 100,
-    4: 90,
-    3: 80,
-    2: 60,
+    4: 80,
+    3: 70,
+    2: 50,
     1: 0,
 }
 
 
 def likert_to_final(likert_score: int) -> int:
     """
-    LLM이 부여한 1~5 Likert 점수를 Backend 최종 점수(0, 60, 80, 90, 100)로 환산.
+    LLM이 부여한 1~5 Likert 점수를 Backend 최종 점수(0, 50, 70, 80, 100)로 환산.
 
     Args:
         likert_score: 1, 2, 3, 4, 5 중 하나
 
     Returns:
-        0, 60, 80, 90, 100 중 하나. 범위 밖이면 0 반환.
+        0, 50, 70, 80, 100 중 하나. 범위 밖이면 0 반환.
     """
     return SCORE_MAPPING.get(int(likert_score), 0)
 
