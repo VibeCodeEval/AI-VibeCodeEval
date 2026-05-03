@@ -98,8 +98,10 @@ class EvaluationStorageService:
             )
 
             # V3.0: rubric_breakdown / applied_rubrics (리스트 rubrics와 병행 저장)
+            # V3.1: scoring_cot (Rn별 CoT 근거)
             rubric_breakdown = prompt_eval_details.get("rubric_breakdown")
             applied_rubrics = prompt_eval_details.get("applied_rubrics")
+            scoring_cot = prompt_eval_details.get("scoring_cot")
             if not detailed_rubrics and isinstance(applied_rubrics, list):
                 for rubric in applied_rubrics:
                     if isinstance(rubric, dict):
@@ -131,6 +133,7 @@ class EvaluationStorageService:
                 "rubrics": detailed_rubrics,  # 상세 루브릭 정보 (name, score, reasoning 포함) - 중복 제거
                 "rubric_breakdown": rubric_breakdown,
                 "applied_rubrics": applied_rubrics,
+                "scoring_cot": scoring_cot,
                 "weights": prompt_eval_details.get("weights", {}),  # 가중치 정보
                 "turn_score": turn_log.get("turn_score"),
                 "is_guardrail_failed": turn_log.get("is_guardrail_failed", False),

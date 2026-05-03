@@ -1,0 +1,94 @@
+name: CD Pipeline
+
+on:
+  workflow_run:
+    workflows: [ "CI Pipeline" ]
+    branches: [ main ]
+    types: [ completed ]
+
+jobs:
+  deploy:
+    name: Deploy to On-Premises
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    env:
+      DEPLOY_DIR: /home/${{ secrets.DEPLOY_USER }}/vibecode-ai
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      POSTGRES_HOST: ${{ secrets.POSTGRES_HOST }}
+      POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      JUDGE0_API_KEY: ${{ secrets.JUDGE0_API_KEY }}
+      JUDGE0_API_URL: ${{ secrets.JUDGE0_API_URL }}
+      JUDGE0_USE_RAPIDAPI: ${{ secrets.JUDGE0_USE_RAPIDAPI }}
+      JUDGE0_RAPIDAPI_HOST: ${{ secrets.JUDGE0_RAPIDAPI_HOST }}
+      SPRING_CALLBACK_URL: ${{ secrets.SPRING_CALLBACK_URL }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Copy docker-compose.prod.yml to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: docker-compose.prod.yml
+          target: ${{ env.DEPLOY_DIR }}/
+          debug: true
+
+      - name: Pull latest image & restart containers
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          envs: DEPLOY_DIR,DOCKERHUB_USERNAME,POSTGRES_HOST,POSTGRES_PORT,POSTGRES_USER,POSTGRES_PASSWORD,POSTGRES_DB,GEMINI_API_KEY,JUDGE0_API_KEY,JUDGE0_API_URL,JUDGE0_USE_RAPIDAPI,JUDGE0_RAPIDAPI_HOST,SPRING_CALLBACK_URL
+          script: |
+            set -e
+            mkdir -p "${{ env.DEPLOY_DIR }}"
+            cd "${{ env.DEPLOY_DIR }}"
+            umask 077
+
+            cat > .env <<EOF
+            DOCKERHUB_USERNAME=$DOCKERHUB_USERNAME
+            POSTGRES_HOST=vibecode_postgres
+            POSTGRES_PORT=${POSTGRES_PORT:-5432}
+            POSTGRES_USER=$POSTGRES_USER
+            POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+            POSTGRES_DB=${POSTGRES_DB:-ai_vibe_coding_test}
+            REDIS_HOST=vibecode-redis
+            REDIS_PORT=6379
+            GEMINI_API_KEY=$GEMINI_API_KEY
+            JUDGE0_API_KEY=$JUDGE0_API_KEY
+            JUDGE0_API_URL=$JUDGE0_API_URL
+            JUDGE0_USE_RAPIDAPI=${JUDGE0_USE_RAPIDAPI:-true}
+            JUDGE0_RAPIDAPI_HOST=$JUDGE0_RAPIDAPI_HOST
+            SPRING_CALLBACK_URL=${SPRING_CALLBACK_URL:-http://vibecode-app:8080/api/ai/callback}
+            USE_REDIS_QUEUE=true
+            EOF
+
+            echo ">>> Ensuring shared Docker network exists..."
+            docker network inspect vibecode-net >/dev/null 2>&1 || docker network create vibecode-net
+            for container in vibecode-redis vibecode_postgres vibecode-app; do
+              if docker container inspect "$container" >/dev/null 2>&1; then
+                docker network connect vibecode-net "$container" 2>/dev/null || true
+              fi
+            done
+
+            echo ">>> Pulling latest AI images..."
+            docker compose --env-file .env -f docker-compose.prod.yml pull ai_worker judge_worker
+
+            echo ">>> Restarting containers..."
+            docker compose --env-file .env -f docker-compose.prod.yml up -d --remove-orphans
+
+            echo ">>> Pruning old images..."
+            docker image prune -f
+
+            echo ">>> Deploy complete. Container status:"
+            docker compose --env-file .env -f docker-compose.prod.yml ps

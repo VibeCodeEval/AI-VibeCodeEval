@@ -38,8 +38,8 @@ async def test_legacy_input_score_85_returns_85():
 
 
 @pytest.mark.asyncio
-async def test_new_input_likert_4_returns_90():
-    """New 입력: likert_score 4면 환산표 적용 → 90."""
+async def test_new_input_likert_4_returns_80():
+    """New 입력: likert_score 4면 환산표 적용 → 80."""
     state = {
         "session_id": "test",
         "turn": 1,
@@ -53,7 +53,7 @@ async def test_new_input_likert_4_returns_90():
         },
     }
     result = await aggregate_turn_log(state)
-    assert result["turn_score"] == 90.0
+    assert result["turn_score"] == 80.0
 
 
 @pytest.mark.asyncio
@@ -80,11 +80,11 @@ async def test_tier3_rubrics_only_uses_legacy_adapter():
 
 
 def test_likert_to_final_mapping():
-    """환산표: 5→100, 4→90, 3→80, 2→60, 1→0."""
+    """환산표: 5→100, 4→80, 3→70, 2→50, 1→0."""
     assert likert_to_final(5) == 100
-    assert likert_to_final(4) == 90
-    assert likert_to_final(3) == 80
-    assert likert_to_final(2) == 60
+    assert likert_to_final(4) == 80
+    assert likert_to_final(3) == 70
+    assert likert_to_final(2) == 50
     assert likert_to_final(1) == 0
 
 
@@ -100,4 +100,4 @@ def test_evaluation_result_from_payload_always_has_final_score():
     legacy = evaluation_result_from_payload({"score": 85, "final_reasoning": "x"})
     assert legacy["final_score"] == 85
     new_style = evaluation_result_from_payload({"likert_score": 4})
-    assert new_style["final_score"] == 90
+    assert new_style["final_score"] == 80

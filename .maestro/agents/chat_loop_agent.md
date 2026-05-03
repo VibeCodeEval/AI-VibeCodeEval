@@ -27,7 +27,7 @@ app/domain/langgraph/nodes/chat/n3_writer.py             # LLM 응답 생성
 app/domain/langgraph/nodes/chat/routers.py               # 라우팅 (intent_router, writer_router, main_router)
 app/domain/langgraph/nodes/system/system_nodes.py        # handle_failure, summarize_memory
 
-app/domain/langgraph/prompts/intent_analyzer.yaml  # 의도 분석 프롬프트
+app/domain/langgraph/prompts/eval_intent_analysis.yaml  # 의도 분석 프롬프트
 app/domain/langgraph/prompts/writer_normal.yaml    # Writer 기본 프롬프트
 app/domain/langgraph/prompts/writer_guardrail.yaml # 가드레일 프롬프트
 app/domain/langgraph/prompts/summary.yaml          # 메모리 요약 프롬프트
@@ -64,7 +64,7 @@ app/domain/langgraph/utils/                        # llm_factory, problem_info �
 - **의도 분류**: V2.2 5-way (SETTING/CREATION/REFINEMENT/VALIDATION/FOLLOW_UP) 적용 완료
 - **Writer**: 클린/스파게티 분기 (spec_id=20), 구조적 용어 감지, Phase 6 레거시 제거 완료
 - **가드레일**: writer_guardrail.yaml 업데이트 완료
-- **intent_analyzer.yaml**: 5-way 의도 분류 프롬프트 적용 완료
+- **eval_intent_analysis.yaml**: 의도 분석 프롬프트 적용 완료
 
 ## 주요 플로우
 

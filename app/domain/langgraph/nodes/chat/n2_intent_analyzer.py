@@ -102,8 +102,11 @@ def quick_answer_detection(
     turn_number: Optional[int] = None,
 ) -> Dict[str, Any] | None:
     """
-    정답 관련 키워드 기반 빠른 검증 (LLM 호출 없음)
-    맥락을 고려한 가드레일 검사
+    Layer 1 빠른 검증 (현재 비활성화).
+
+    정책 변경(2026-04): BLOCKED는 JAILBREAK/OFF_TOPIC만 허용하고,
+    DIRECT_ANSWER 차단은 사용하지 않음.
+    따라서 Layer 1 키워드 차단을 스킵하고 Layer 2 LLM 판정에 위임한다.
 
     Args:
         message: 사용자 메시지
@@ -114,6 +117,8 @@ def quick_answer_detection(
     Returns:
         차단 결과 또는 None (통과)
     """
+    # 정책상 Layer 1 차단 비활성화: 항상 통과
+    return None
     message_lower = message.lower()
 
     # [수정] 구조/인터페이스/의사코드 관련 키워드는 Layer 2 분석으로 넘김 (차단하지 않음)
@@ -448,7 +453,7 @@ def create_intent_analysis_system_prompt(
 
     # YAML 템플릿에서 프롬프트 렌더링
     return render_prompt(
-        "intent_analyzer",
+        "eval_intent_analysis",
         problem_info_section=problem_info_section,
         problem_title=problem_title,
         algorithms_text=algorithms_text,
@@ -593,8 +598,23 @@ async def intent_analyzer(state: MainGraphState) -> Dict[str, Any]:
     logger = logging.getLogger(__name__)
 
     human_message = state.get("human_message", "")
+    request_type = (state.get("request_type") or "").upper()
 
     logger.info(f"[Intent Analyzer] 메시지 분석 시작: {human_message[:100]}...")
+
+    # API request_type가 SUBMISSION이면 LLM 분기 없이 제출 플로우로 넘김
+    if request_type == "SUBMISSION" or state.get("is_submitted", False):
+        logger.info("[Intent Analyzer] SUBMISSION 요청 - LLM 분기 생략, PASSED_SUBMIT")
+        return {
+            "intent_status": IntentAnalyzerStatus.PASSED_SUBMIT.value,
+            "is_guardrail_failed": False,
+            "guardrail_message": None,
+            "is_submitted": True,
+            "guide_strategy": None,
+            "keywords": [],
+            "updated_at": datetime.utcnow().isoformat(),
+            "intent_llm_ran": False,
+        }
 
     if not human_message:
         logger.warning("[Intent Analyzer] 빈 메시지 - PASSED_HINT로 처리")
@@ -719,6 +739,11 @@ async def intent_analyzer(state: MainGraphState) -> Dict[str, Any]:
 
         # 출력 처리 (State 형식으로 변환)
         result = process_output(structured_result)
+        # 라우팅 단일 소스(request_type) 우선: LLM이 제출 여부를 덮어쓰지 않도록 보정
+        if request_type == "CHAT":
+            result["is_submitted"] = False
+            if result.get("intent_status") == IntentAnalyzerStatus.PASSED_SUBMIT.value:
+                result["intent_status"] = IntentAnalyzerStatus.PASSED_HINT.value
         result["intent_llm_ran"] = intent_recorded_user_prompt
 
         # State에 누적된 토큰 정보를 result에 포함 (LangGraph 병합을 위해)

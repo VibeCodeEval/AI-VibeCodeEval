@@ -1,5 +1,5 @@
 version: "1.0"
-name: intent_analyzer
+name: eval_intent_analysis
 description: Intent Analysis 시스템 프롬프트 (Guardrail Policy 포함)
 
 variables:

@@ -1,0 +1,130 @@
+{
+  "count": 2,
+  "items": [
+    {
+      "submission_id": 2,
+      "scores": {
+        "prompt_score": 85.6,
+        "perf_score": 100.0,
+        "correctness_score": 100.0,
+        "total_score": 94.24
+      },
+      "debate_summary": {
+        "round1_count": 3,
+        "round2_count": 3,
+        "has_verdict": true,
+        "holistic_flow_score": 70.0,
+        "r4_context_maintenance_score": 100.0,
+        "holistic_flow_analysis": "[합의 요약] 모든 평가관은 제출된 코드가 외판원 문제(TSP)에 대한 기술적으로 우수하고 정확한 해결책이라는 점에 동의합니다. 이는 Judge0의 만점 기록과 낮은 코드 복잡도 지표를 통해 객관적으로 증명됩니다. 이견은 프롬프트와 코드의 완전한 불일치를 어떻게 평가할 것인가에 집중됩니다.\n\n[종합 분석] 본 평가의 핵심 쟁점은 프롬프트(이동형 유닛 시뮬레이션)와 제출 코드(외판원 문제) 간의 완전한 불일치입니다. 코드 자체는 A 등급에 해당하는 우수한 품질을 보여주지만, 명시된 요구사항을 해결하지 못했습니다. 그러나 코드 내 주석('# 외판원... 백준 2098 스타일')은 이것이 단순한 지시 불이행이 아니라, 평가 환경의 오류로 인해 잘못된 프롬프트가 제시되었을 가능성을 강력하게 시사합니다. 제출자는 주어진 오류 상황 속에서 '의도된' 문제를 정확히 추론하고 완벽하게 해결한 것으로 보이며, 이는 높은 수준의 문제 해결 능력을 보여줍니다. 따라서 이 사례는 프롬프트 활용 능력의 실패라기보다는, 결함이 있는 과제 환경에 대한 지능적인 대응으로 해석하는 것이 더 타당합니다. 대화 로그 자체는 완벽한 맥락 유지를 보여주지만, 최종 제출물과는 전혀 관련이 없어 전체 흐름의 단절을 더욱 부각시킵니다.\n\n[점수 근거] 최종 점수는 두 가지 상반된 측면을 균형 있게 반영합니다. 첫째, 제시된 프롬프트의 요구사항을 따르지 않은 것은 과제의 근본적인 목표를 위반한 중대한 결함이므로 상당한 감점이 불가피합니다. 이로 인해 A나 B 등급을 부여하기는 어렵습니다. 둘째, 코드 자체의 기술적 완성도가 매우 높고, 잘못된 프롬프트에도 불구하고 '의도된' 문제를 정확히 추론하여 해결한 정황이 명백하므로 D나 F 등급을 주는 것 또한 부당합니다. 따라서 최종 점수는 프롬프트-코드 불일치에 대한 큰 감점을 적용하되, 코드의 품질과 오류 상황에서의 문제 해결 능력을 인정하여 C 등급(70점)으로 결정합니다. R4 점수는 제공된 대화 로그의 궤적만을 평가한 것으로, 대화 자체는 완벽한 맥락을 유지했기에 100점으로 산정되었으나, 이는 최종 코드와 무관합니다.\n\n[R4 맥락 유지] 100.0/100 (turn_scores 궤적 기반 수석 심사관 산정)"
+      },
+      "timeline": {
+        "round1": [
+          {
+            "agent": "strict",
+            "suggested_score": 40.0,
+            "stance": "제출된 코드는 외판원 문제의 정석적인 풀이지만, 전역 변수 사용 등 개선점이 존재합니다. 그러나 문제 설명이 없고 코드와 무관한 대화 로그가 제공된 프롬프트의 질적 결함이 매우 심각하여, 전체적인 평가 점수를 크게 낮춥니다.",
+            "key_points_count": 4
+          },
+          {
+            "agent": "advocate",
+            "suggested_score": 95.0,
+            "stance": "제출된 코드는 외판원 문제(TSP)를 동적 계획법과 비트마스크를 활용하여 효율적으로 해결한 훌륭한 코드입니다. 문제 설명이 없었음에도 불구하고, 표준적인 TSP 해결 방식을 정확히 구현했습니다.",
+            "key_points_count": 5
+          },
+          {
+            "agent": "neutral",
+            "suggested_score": 55.0,
+            "stance": "제출된 코드는 외판원 문제(TSP)에 대한 표준적이고 우수한 풀이입니다. 그러나 함께 제공된 프롬프트는 코드와 전혀 관련 없는 별개의 시뮬레이션 문제에 대한 것이므로, 프롬프트를 활용하여 코드를 생성했다는 본래의 과제 목적을 달성하지 못했습니다.",
+            "key_points_count": 5
+          }
+        ],
+        "round2": [
+          {
+            "agent": "strict",
+            "suggested_score": 40.0,
+            "stance": "제출된 코드는 외판원 문제의 정석적인 풀이로 그 자체의 완성도는 높습니다. 그러나 이는 제공된 프롬프트(이동형 유닛 시뮬레이션)와 전혀 무관한 결과물입니다. 프롬프트의 요구사항을 완전히 무시한 것은 과제의 근본적인 목적을 위배한 중대한 결함이므로, 코드의 독립적인 품질에도 불구하고 매우 낮은 점수를 받아야 합니다.",
+            "key_points_count": 5
+          },
+          {
+            "agent": "advocate",
+            "suggested_score": 90.0,
+            "stance": "제출된 코드는 문제 설명이 부재한 상황에서 외판원 문제(TSP)를 동적 계획법과 비트마스크를 활용하여 완벽하게 해결했습니다. 프롬프트 불일치는 평가 환경의 오류로 인한 것이며, 코드 자체의 우수성은 높이 평가되어야 합니다.",
+            "key_points_count": 5
+          },
+          {
+            "agent": "neutral",
+            "suggested_score": 60.0,
+            "stance": "제출된 코드는 기술적으로 훌륭하지만, 제공된 프롬프트의 요구사항과는 완전히 무관합니다. 이는 과제의 핵심 평가 기준인 '프롬프트 활용 능력'을 정면으로 위배한 중대한 결함입니다. 그러나 코드의 주석을 통해 제출자가 잘못된 프롬프트 대신 '의도된' 문제를 정확히 추론하여 해결했을 가능성이 매우 높아, 이를 단순한 지시 불이행으로만 평가하기는 어렵습니다.",
+            "key_points_count": 5
+          }
+        ],
+        "verdict": {
+          "grade": "C",
+          "holistic_flow_score": 70.0,
+          "r4_context_maintenance_score": 100.0,
+          "consensus_summary": "모든 평가관은 제출된 코드가 외판원 문제(TSP)에 대한 기술적으로 우수하고 정확한 해결책이라는 점에 동의합니다. 이는 Judge0의 만점 기록과 낮은 코드 복잡도 지표를 통해 객관적으로 증명됩니다. 이견은 프롬프트와 코드의 완전한 불일치를 어떻게 평가할 것인가에 집중됩니다."
+        }
+      }
+    },
+    {
+      "submission_id": 1,
+      "scores": {
+        "prompt_score": 69.2,
+        "perf_score": 100.0,
+        "correctness_score": 100.0,
+        "total_score": 87.68
+      },
+      "debate_summary": {
+        "round1_count": 3,
+        "round2_count": 3,
+        "has_verdict": false,
+        "holistic_flow_score": 65.0,
+        "r4_context_maintenance_score": 78.0,
+        "holistic_flow_analysis": "최종 판결 생성 실패 — holistic 평균(65.0), R4 궤적 추정(78.0)로 대체. 오류: Invalid argument provided to Gemini: 400 Budget 0 is invalid. This model only works in thinking mode."
+      },
+      "timeline": {
+        "round1": [
+          {
+            "agent": "strict",
+            "suggested_score": 50.0,
+            "stance": "평가 실패",
+            "key_points_count": 0
+          },
+          {
+            "agent": "advocate",
+            "suggested_score": 95.0,
+            "stance": "제출된 코드는 외판원 문제(TSP)를 비트마스킹과 동적 계획법을 활용하여 효율적이고 정확하게 해결한 모범적인 사례입니다. 프롬프트의 요구사항을 충실히 반영하며, 창의적인 문제 해결 능력을 보여줍니다.",
+            "key_points_count": 5
+          },
+          {
+            "agent": "neutral",
+            "suggested_score": 50.0,
+            "stance": "평가 실패",
+            "key_points_count": 0
+          }
+        ],
+        "round2": [
+          {
+            "agent": "strict",
+            "suggested_score": 50.0,
+            "stance": "반론 실패",
+            "key_points_count": 0
+          },
+          {
+            "agent": "advocate",
+            "suggested_score": 95.0,
+            "stance": "제출된 코드는 외판원 문제(TSP)를 비트마스킹과 동적 계획법을 활용하여 효율적이고 정확하게 해결한 모범적인 사례입니다. 프롬프트의 요구사항을 충실히 반영하며, 창의적인 문제 해결 능력을 보여줍니다. Round 1의 비판은 문제 설명의 부재와 Judge0 지표의 한계에서 비롯된 오해이며, 코드 자체의 우수성을 간과했습니다.",
+            "key_points_count": 5
+          },
+          {
+            "agent": "neutral",
+            "suggested_score": 50.0,
+            "stance": "반론 실패",
+            "key_points_count": 0
+          }
+        ],
+        "verdict": null
+      }
+    }
+  ]
+}

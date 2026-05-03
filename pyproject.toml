@@ -45,15 +45,16 @@ dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
+    "pytest-timeout>=2.3.0",
     "black>=23.12.0",
     "isort>=5.13.0",
     "mypy>=1.8.0",
 ]
 
 [tool.pytest.ini_options]
-# pytest-asyncio 설정
 asyncio_mode = "auto"
-# 각 테스트마다 새로운 event loop 생성 (기본값)
-# 이렇게 하면 LLM 호출 중 event loop가 닫히는 문제 방지
 asyncio_default_fixture_loop_scope = "function"
-# LLM 호출 테스트 시 커맨드라인에서 --timeout=300 사용 권장 (pytest-timeout 설치 시)
+testpaths = ["tests"]
+markers = [
+    "llm: marks tests that make real LLM API calls (deselect with '-m not llm')",
+]

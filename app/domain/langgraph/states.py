@@ -59,6 +59,7 @@ class MainGraphState(TypedDict):
     writer_error: Optional[str]
 
     # 제출 상태
+    request_type: Optional[str]  # API 입력 기준 분기 소스 (CHAT/SUBMISSION)
     is_submitted: bool
     submission_id: Optional[int]
     code_content: Optional[str]
@@ -73,6 +74,17 @@ class MainGraphState(TypedDict):
     aggregate_turn_score: Optional[float]
     code_performance_score: Optional[float]
     code_correctness_score: Optional[float]
+    # N5 Judge0 실행 상세 (N7/N8/N9 전달용)
+    execution_time: Optional[float]      # 실제 실행 시간(초)
+    memory_used_mb: Optional[float]      # 실제 메모리 사용량(MB)
+    # N5 평가 기준값 (limit) — 결과 해석/표시용
+    time_limit_sec: Optional[float]      # 시간 기준(초)
+    memory_limit_mb: Optional[float]     # 메모리 기준(MB)
+    skip_performance: Optional[bool]
+    skip_reason: Optional[str]
+    test_cases_passed: Optional[int]
+    test_cases_total: Optional[int]
+    correctness_reasoning: Optional[str]
     final_scores: Optional[Dict[str, float]]
 
     # 메모리 요약
@@ -253,6 +265,19 @@ class IntentClassification(BaseModel):
     )
     confidence: float = Field(..., ge=0.0, le=1.0, description="분류 신뢰도 (0-1)")
     reasoning: Optional[str] = Field(None, description="분류 이유")
+
+
+class IntentTurnLLMOutput(BaseModel):
+    """턴별 의도 단일 LLM JSON (eval_intent_disambiguation classify_intent 노드)."""
+
+    predicted_intent: str = Field(
+        ...,
+        description="6대 라벨 중 정확히 하나: SETTING, CREATION, REFINEMENT, DEBUGGING, EXPLORATION, FOLLOW_UP (대문자)",
+    )
+    intent_cot: str = Field(
+        ...,
+        description="한국어 1~4문장, 왜 이 라벨인지 근거",
+    )
 
 
 class GuardrailCheck(BaseModel):

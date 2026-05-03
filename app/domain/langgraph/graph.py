@@ -246,6 +246,7 @@ def get_initial_state(
     participant_id: int,
     spec_id: Optional[int],
     human_message: str = "",
+    request_type: str = "CHAT",
 ) -> MainGraphState:
     """
     초기 상태 생성
@@ -288,6 +289,7 @@ def get_initial_state(
         intent_llm_ran=None,
         writer_status=None,
         writer_error=None,
+        request_type=request_type,
         is_submitted=False,
         submission_id=None,
         code_content=None,
@@ -298,6 +300,15 @@ def get_initial_state(
         aggregate_turn_score=None,
         code_performance_score=None,
         code_correctness_score=None,
+        execution_time=None,
+        memory_used_mb=None,
+        time_limit_sec=None,
+        memory_limit_mb=None,
+        skip_performance=None,
+        skip_reason=None,
+        test_cases_passed=None,
+        test_cases_total=None,
+        correctness_reasoning=None,
         final_scores=None,
         memory_summary=None,
         error_message=None,

@@ -410,10 +410,12 @@ async def _evaluate_turn_sync(
 
         rubric_breakdown: dict = {}
         applied_rubrics: list = []
+        scoring_cot: dict = {}
         v3_feedback_summary: str = ""
         if _primary_eval_data and isinstance(_primary_eval_data, dict):
             rubric_breakdown = _primary_eval_data.get("rubric_breakdown") or {}
             applied_rubrics = _primary_eval_data.get("applied_rubrics") or []
+            scoring_cot = _primary_eval_data.get("scoring_cot") or {}
             v3_feedback_summary = (
                 _primary_eval_data.get("feedback_summary")
                 or _primary_eval_data.get("final_reasoning")
@@ -797,9 +799,11 @@ async def _evaluate_turn_sync(
                 "intent_confidence": intent_confidence,
                 "score": turn_score,
                 # V3.0: rubric_breakdown(dict) + applied_rubrics(list) 사용
+                # V3.1: scoring_cot(Rn→근거 문장) Redis/DB 동기 저장
                 # weights/rubrics(old list) 제거
                 "rubric_breakdown": rubric_breakdown,
                 "applied_rubrics": applied_rubrics,
+                "scoring_cot": scoring_cot,
                 "final_reasoning": (
                     v3_feedback_summary
                     or comprehensive_reasoning

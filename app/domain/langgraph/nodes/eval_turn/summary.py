@@ -1,8 +1,7 @@
 import logging
 from typing import Any, Dict
 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableLambda
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.domain.langgraph.nodes.eval_turn.utils import get_llm
 from app.domain.langgraph.states import EvalTurnState
@@ -12,40 +11,12 @@ from app.domain.langgraph.utils.token_tracking import (accumulate_tokens,
 logger = logging.getLogger(__name__)
 
 
-# 시스템 프롬프트 정의 - YAML에서 로드
-def get_summary_system_prompt() -> str:
-    """요약 시스템 프롬프트를 YAML에서 로드"""
-    from app.domain.langgraph.prompts import get_prompt_template
-
-    return get_prompt_template("summary")
-
-
-# 프롬프트 템플릿 생성
-summary_prompt = ChatPromptTemplate.from_messages(
-    [("system", get_summary_system_prompt()), ("user", "{ai_message}")]
-)
-
-
-def prepare_summary_input(inputs: Dict[str, Any]) -> Dict[str, Any]:
-    """요약 입력 준비"""
-    state = inputs.get("state")
-    ai_message = state.get("ai_message", "")
-    return {"ai_message": ai_message}
-
-
-def extract_summary_with_response(response: Any) -> Dict[str, Any]:
-    """요약 내용과 LLM 응답 객체 추출"""
-    ai_content = response.content if hasattr(response, "content") else str(response)
-    return {"ai_content": ai_content, "_llm_response": response}  # 토큰 추출용
-
-
-# Summary Chain 구성 (토큰 추출을 위해 LLM 응답 객체도 전달)
-summary_chain = (
-    RunnableLambda(prepare_summary_input)
-    | summary_prompt
-    | get_llm()
-    | RunnableLambda(extract_summary_with_response)
-)
+def _build_latest_turn(human_message: str, ai_message: str) -> str:
+    """최근 턴(human/ai)을 요약 프롬프트 입력 형태로 구성."""
+    return (
+        f"human: {human_message or '(없음)'}\n"
+        f"ai: {ai_message or '(없음)'}"
+    )
 
 
 async def summarize_answer(state: EvalTurnState) -> Dict[str, Any]:
@@ -57,6 +28,9 @@ async def summarize_answer(state: EvalTurnState) -> Dict[str, Any]:
     turn = state.get("turn", 0)
     logger.info(f"[4.X 답변 요약] 진입 - session_id: {session_id}, turn: {turn}")
 
+    from app.domain.langgraph.prompts import load_prompt, render_prompt
+
+    human_message = state.get("human_message", "")
     ai_message = state.get("ai_message", "")
 
     if not ai_message:
@@ -66,19 +40,33 @@ async def summarize_answer(state: EvalTurnState) -> Dict[str, Any]:
         return {"answer_summary": None}
 
     try:
-        # Summary Chain 실행
-        chain_result = await summary_chain.ainvoke({"state": state})
+        prev_summary = (state.get("previous_turns_summary") or "").strip()
+        if not prev_summary:
+            prev_summary = "(이전 대화 없음)"
 
-        # Chain 결과에서 내용과 LLM 응답 객체 분리
-        summary = (
-            chain_result.get("ai_content", "")
-            if isinstance(chain_result, dict)
-            else str(chain_result)
+        latest_turn = _build_latest_turn(human_message, ai_message)
+        summary_yaml = load_prompt("summary")
+        system_prompt = summary_yaml.get(
+            "system",
+            "당신은 대화 요약 전문가입니다. 핵심만 남긴 갱신 요약 1개를 만듭니다.",
         )
-        llm_response = (
-            chain_result.get("_llm_response")
-            if isinstance(chain_result, dict)
-            else None
+        user_prompt = render_prompt(
+            "summary",
+            prev_summary=prev_summary,
+            latest_turn=latest_turn,
+        )
+
+        llm = get_llm()
+        llm_response = await llm.ainvoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ]
+        )
+        summary = (
+            llm_response.content
+            if hasattr(llm_response, "content")
+            else str(llm_response)
         )
 
         # 토큰 사용량 추출 및 State에 누적

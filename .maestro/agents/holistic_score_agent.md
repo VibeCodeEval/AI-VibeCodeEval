@@ -12,7 +12,7 @@
 
 핵심 책임:
 - `n5_integrated_evaluator` — Radon CC 분석, AST 패턴 검사, 5대 루브릭, v1/v2 DeltaCC
-- `eval_holistic_flow` — 전략/체이닝 평가 (1-5 정수 → 0-100 환산)
+- `n6_holistic_flow` — 정적 분석 노드(구 Holistic LLM 노드 대체)
 - `aggregate_turn_scores` — 턴 점수 집계
 - `eval_code_execution` — Judge0 코드 실행 결과 반영
 - `aggregate_final_scores` — 최종 등급 산정, v21_summary 포함
@@ -25,7 +25,7 @@
 app/domain/langgraph/nodes/eval/n5_integrated_evaluator.py   # 통합 평가 (CC, AST, 루브릭)
 
 app/domain/langgraph/nodes/eval/
-├── n6_holistic_flow.py           # eval_holistic_flow (전략/체이닝, V2.3 정수 1-5)
+├── n6_holistic_flow.py           # 정적 분석 전용 (구 eval_holistic_flow LLM 대체)
 ├── n7_aggregate_turn_scores.py   # aggregate_turn_scores
 ├── n8_code_execution.py          # eval_code_execution (Judge0, correctness/performance 병합)
 ├── n9_final_scores.py            # aggregate_final_scores, v21_summary
@@ -34,7 +34,7 @@ app/domain/langgraph/nodes/eval/
 └── langsmith_utils.py            # LangSmith 추적
 
 app/domain/langgraph/utils/code_quality.py                 # compute_radon_cc, check_ast_patterns, compute_delta_cc
-app/domain/langgraph/prompts/eval_holistic_flow.yaml       # Holistic Flow 프롬프트 (V2.3)
+app/domain/langgraph/prompts/(Legacy)_eval_holistic_flow.yaml  # 레거시 Holistic LLM 프롬프트 보관본
 ```
 
 ### 읽기 전용
@@ -75,10 +75,8 @@ n5_integrated_evaluator
   → v1 vs v2 DeltaCC 산정 (v1 스냅샷 있을 때)
   → code_quality_metrics + rubric_breakdown 출력
 
-eval_holistic_flow
-  → LLM이 1-5 정수 출력 (A:problem_decomposition, B:feedback_integration, C:strategic_exploration, D:overall)
-  → Python에서 likert_to_final()로 0-100 환산
-  → 위임 전략도 5점 인정
+n6_holistic_flow
+  → 정적 분석 결과 생성 (구 LLM holistic 역할은 N8 토론/최종 집계 흐름으로 이관)
 
 aggregate_turn_scores
   → 턴별 점수 평균 → aggregate_turn_score
@@ -94,7 +92,7 @@ aggregate_final_scores
 ```
 
 ### 적용된 주요 기능
-- **V2.3 eval_holistic_flow**: 정수 1-5 출력, Python 환산, 위임 전략 인정
+- **Holistic LLM 프롬프트 레거시화**: `(Legacy)_eval_holistic_flow.yaml` 보관, 런타임 미사용
 - **Radon CC + AST**: spec_id=20 전용 패턴, required_patterns 확장 가능
 - **v1/v2 DeltaCC**: v1 스냅샷 대비 복잡도 변화율
 - **학점 보정**: DeltaCC <= 10% + AST 일치 → 상향, DeltaCC > 30% → 하향

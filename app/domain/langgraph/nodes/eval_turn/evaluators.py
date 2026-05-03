@@ -5,9 +5,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda
 
 from app.domain.langgraph.nodes.eval_turn.grading import (
-    EvalTurnV21Output,
-    EvalTurnV30Output,
+    EvalTurnV31LLMOutput,
+    compute_turn_score_v31,
+    infer_applied_rubrics_from_breakdown,
     likert_to_final,
+    resolve_unified_intent_for_turn_eval,
 )
 from app.domain.langgraph.nodes.eval_turn.utils import get_llm
 from app.domain.langgraph.states import EvalTurnState, TurnEvaluation
@@ -86,33 +88,35 @@ def prepare_evaluation_input_internal(
         problem_info_section=problem_info_section,
         metrics_section=metrics_section,
         algorithms_display=algorithms_display,
-        word_count=metrics['word_count'],
-        sentence_count=metrics['sentence_count'],
-        specific_value_count=metrics['clarity']['specific_value_count'],
-        technical_term_count=metrics['problem_relevance']['technical_term_count'],
-        has_examples=metrics['examples']['has_examples'],
-        example_count=metrics['examples']['example_count'],
-        xml_tag_count=metrics['rules']['xml_tag_count'],
-        constraint_count=metrics['rules']['constraint_count'],
-        has_structured_format=metrics['rules']['has_structured_format'],
-        has_context_reference=metrics['context']['has_context_reference'],
-        context_reference_count=metrics['context']['context_reference_count'],
+        word_count=metrics["word_count"],
+        sentence_count=metrics["sentence_count"],
+        specific_value_count=metrics["clarity"]["specific_value_count"],
+        technical_term_count=metrics["problem_relevance"]["technical_term_count"],
+        has_examples=metrics["examples"]["has_examples"],
+        example_count=metrics["examples"]["example_count"],
+        xml_tag_count=metrics["rules"]["xml_tag_count"],
+        constraint_count=metrics["rules"]["constraint_count"],
+        has_structured_format=metrics["rules"]["has_structured_format"],
+        has_context_reference=metrics["context"]["has_context_reference"],
+        context_reference_count=metrics["context"]["context_reference_count"],
         previous_turns_summary=previous_turns_summary,
+        text=human_message,
+        ai_message=ai_message,
     )
 
-    # Follow Up 평가에 대한 특별 가이드 추가
     follow_up_guide = ""
     if "후속 질문" in eval_type or "Follow Up" in eval_type:
         yaml_data = load_prompt("eval_turn")
         follow_up_guide = yaml_data.get("follow_up_guide", "")
 
-    user_prompt = f"""[사용자 프롬프트]
-{human_message}
-
-[AI 응답 (참고용)]
-{ai_message}
-{follow_up_guide}
-위 사용자 프롬프트를 '{eval_type}' 관점에서 평가하세요."""
+    user_tail = (
+        "출력은 JSON 한 객체뿐이며, 키는 scoring_cot와 rubric_breakdown만 사용하세요."
+    )
+    user_prompt = (
+        f"{follow_up_guide}\n{user_tail}".strip()
+        if follow_up_guide.strip()
+        else user_tail
+    )
 
     return {
         "system_prompt": system_prompt,
@@ -271,37 +275,42 @@ async def _evaluate_turn(
                 f"[{eval_type} 평가] 토큰 사용량 추출 실패 - raw_response 타입: {type(raw_response)}"
             )
 
-        # V3.0: 원본 응답을 EvalTurnV30Output(turn_score, rubric_breakdown, applied_rubrics, feedback_summary)으로 파싱
+        # V3.1: LLM → EvalTurnV31LLMOutput, turn_score는 YAML 산식으로 백엔드 계산
         try:
-            structured_llm = llm.with_structured_output(EvalTurnV30Output)
+            structured_llm = llm.with_structured_output(EvalTurnV31LLMOutput)
             structured_result = await parse_structured_output_async(
                 raw_response=raw_response,
-                model_class=EvalTurnV30Output,
+                model_class=EvalTurnV31LLMOutput,
                 fallback_llm=structured_llm,
                 formatted_messages=formatted_messages,
             )
         except Exception as parse_error:
             logger.error(
-                f"[{eval_type} 평가] V3.0 구조화된 출력 파싱 실패: {str(parse_error)}",
+                f"[{eval_type} 평가] V3.1 구조화된 출력 파싱 실패: {str(parse_error)}",
                 exc_info=True,
             )
             logger.info(f"[{eval_type} 평가] Fallback: 구조화된 출력 Chain 사용")
-            structured_llm = llm.with_structured_output(EvalTurnV30Output)
+            structured_llm = llm.with_structured_output(EvalTurnV31LLMOutput)
             structured_result = await structured_llm.ainvoke(formatted_messages)
 
-        # 1~5 turn_score → final_score 환산 ({5:100, 4:90, 3:80, 2:60, 1:0})
-        final_score = likert_to_final(structured_result.turn_score)
         rubric_breakdown = structured_result.rubric_breakdown or {}
-        applied_rubrics = structured_result.applied_rubrics or []
-        feedback_summary = structured_result.feedback_summary or ""
+        scoring_cot = structured_result.scoring_cot or {}
+        unified = resolve_unified_intent_for_turn_eval(state, eval_type)
+        turn_score = compute_turn_score_v31(unified, rubric_breakdown)
+        applied_rubrics = infer_applied_rubrics_from_breakdown(rubric_breakdown)
+        feedback_summary = "\n\n".join(
+            f"{k}: {v}" for k, v in sorted(scoring_cot.items())
+        )
 
-        # 반환 객체: final_score 필수 포함 → aggregation에서 별도 계산 없이 평균
+        final_score = likert_to_final(turn_score)
+
         chain_result = {
             "intent": eval_type,
-            "turn_score": structured_result.turn_score,
+            "turn_score": turn_score,
             "final_score": final_score,
             "rubric_breakdown": rubric_breakdown,
             "applied_rubrics": applied_rubrics,
+            "scoring_cot": scoring_cot,
             "feedback_summary": feedback_summary,
             "score": final_score,
             "average": final_score,
@@ -323,6 +332,7 @@ async def _evaluate_turn(
             "final_score": 0,
             "rubric_breakdown": {},
             "applied_rubrics": [],
+            "scoring_cot": {},
             "feedback_summary": f"평가 실패: {str(e)}",
             "score": 0,
             "average": 0,
