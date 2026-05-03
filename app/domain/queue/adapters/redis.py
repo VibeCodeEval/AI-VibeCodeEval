@@ -57,6 +57,8 @@ class RedisQueueAdapter(QueueAdapter):
             "execution_time": result.execution_time,
             "memory_used": result.memory_used,
             "exit_code": result.exit_code,
+            "passed_test_cases": result.passed_test_cases,
+            "total_test_cases": result.total_test_cases,
         }
 
     def _dict_to_result(self, data: dict) -> JudgeResult:
@@ -69,6 +71,8 @@ class RedisQueueAdapter(QueueAdapter):
             execution_time=data.get("execution_time", 0.0),
             memory_used=data.get("memory_used", 0),
             exit_code=data.get("exit_code", 0),
+            passed_test_cases=data.get("passed_test_cases"),
+            total_test_cases=data.get("total_test_cases"),
         )
 
     async def enqueue(self, task: JudgeTask) -> str:
@@ -137,10 +141,9 @@ class RedisQueueAdapter(QueueAdapter):
             f"{self.result_prefix}{task_id}", result_json, ttl_seconds=self.default_ttl
         )
 
-        # 상태 업데이트
-        status = "completed" if result.status == "success" else "failed"
+        # 결과가 저장되면 처리 완료(폴링은 completed로 종료). 성공 여부는 JudgeResult.status
         await self.redis.set(
-            f"{self.status_prefix}{task_id}", status, ttl_seconds=self.default_ttl
+            f"{self.status_prefix}{task_id}", "completed", ttl_seconds=self.default_ttl
         )
 
         return True

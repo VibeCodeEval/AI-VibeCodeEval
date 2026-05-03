@@ -36,7 +36,7 @@ class Problem(Base):
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
     )
     current_spec_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("problem_specs.id"), nullable=True
+        BigInteger, ForeignKey("problem_specs.spec_id"), nullable=True
     )
 
     # Relationships
@@ -49,11 +49,19 @@ class Problem(Base):
 
 
 class ProblemSpec(Base):
-    """문제 스펙 테이블 (버전 관리)"""
+    """
+    문제 스펙 테이블 (버전 관리).
+
+    DB DDL(``scripts/init-db.sql``) 기준 PK 컬럼명은 ``spec_id``입니다.
+    API의 ``specId`` / state의 ``spec_id``는 이 PK와 동일합니다.
+    같은 행의 ``problem_id``는 ``problems.id`` FK입니다.
+    """
 
     __tablename__ = "problem_specs"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    spec_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=True
+    )
     problem_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("problems.id"), nullable=False
     )

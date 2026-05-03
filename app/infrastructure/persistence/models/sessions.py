@@ -30,7 +30,7 @@ class PromptSession(Base):
         BigInteger, ForeignKey(f"{settings.VIBECODE_PARTICIPANT_TABLE}.id"), nullable=False
     )
     spec_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("problem_specs.id"), nullable=True
+        BigInteger, ForeignKey("problem_specs.spec_id"), nullable=True
     )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow

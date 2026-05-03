@@ -13,6 +13,8 @@ from app.domain.langgraph.nodes.eval_turn.grading import (
 )
 from app.domain.langgraph.nodes.eval_turn.utils import get_llm
 from app.domain.langgraph.states import EvalTurnState, TurnEvaluation
+from app.domain.langgraph.utils.problem_info import \
+    problem_statement_for_evaluation
 from app.domain.langgraph.utils.prompt_metrics import calculate_all_metrics
 from app.domain.langgraph.utils.structured_output_parser import \
     parse_structured_output_async
@@ -56,10 +58,18 @@ def prepare_evaluation_input_internal(
         algorithms_text = ", ".join(key_algorithms) if key_algorithms else "없음"
         algorithms_display = algorithms_text
 
+        # DB problem_specs.content_md 우선 (턴 평가 프롬프트 길이 제한)
+        problem_body = problem_statement_for_evaluation(
+            problem_context, max_chars=16_000
+        )
+
         problem_info_section = f"""
 [문제 정보]
 - 문제: {problem_title}
 - 필수 알고리즘: {algorithms_text}
+
+[문제 본문 (content_md / 요약)]
+{problem_body}
 
 """
 

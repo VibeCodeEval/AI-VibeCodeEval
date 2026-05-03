@@ -377,7 +377,7 @@ async def _async_main() -> int:
     parser.add_argument("--participant-id", type=int, help="participants.id")
     parser.add_argument("--exam-id", type=int, help="exams.id (시험 번호)")
     parser.add_argument("--problem-id", type=int, help="problems.id")
-    parser.add_argument("--spec-id", type=int, help="problem_specs.id")
+    parser.add_argument("--spec-id", type=int, help="problem_specs.spec_id (PK)")
     parser.add_argument("--session-id", type=int, help="prompt_sessions.id")
     parser.add_argument(
         "-o",

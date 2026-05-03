@@ -46,9 +46,7 @@ class MemoryQueueAdapter(QueueAdapter):
         """결과 저장"""
         async with self.lock:
             self.results[task_id] = result
-            self.status[task_id] = (
-                "completed" if result.status == "success" else "failed"
-            )
+            self.status[task_id] = "completed"
         return True
 
     async def set_status(self, task_id: str, status: str) -> bool:

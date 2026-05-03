@@ -10,6 +10,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.domain.langgraph.prompts import render_prompt
+from app.domain.langgraph.utils.problem_info import \
+    problem_statement_for_evaluation
 from app.domain.langgraph.nodes.eval_turn.utils import get_llm
 from app.domain.langgraph.states import MainGraphState
 
@@ -49,11 +51,28 @@ async def eval_code_agent(state: MainGraphState) -> Dict[str, Any]:
         f"execution_time={execution_time}, memory_used_mb={memory_used_mb}"
     )
         
+    ref_r = code_quality_metrics.get("reference_radon_cc") or {}
+    d_vs_ref = code_quality_metrics.get("delta_cc_vs_reference") or {}
+    has_ref_radon = bool(code_quality_metrics.get("has_reference_code"))
+    if has_ref_radon:
+        reference_radon_block = (
+            f"- 참고 구현(reference_code) 평균 CC: {ref_r.get('avg_cc', 'N/A')}\n"
+            f"- 참고 구현 최대 CC: {ref_r.get('max_cc', 'N/A')}\n"
+            f"- 제출 코드 평균 CC: {(code_quality_metrics.get('radon_cc') or {}).get('avg_cc', 'N/A')}\n"
+            f"- 제출 코드 최대 CC: {(code_quality_metrics.get('radon_cc') or {}).get('max_cc', 'N/A')}\n"
+            f"- 참고 대비 제출 ΔCC(%): {d_vs_ref.get('delta_cc_pct', 'N/A')} "
+            f"(양수면 제출이 참고보다 평균 복잡도가 높음)"
+        )
+    else:
+        reference_radon_block = (
+            "reference_code가 없어 참조 Radon CC 측정 및 제출 대비 비교를 수행하지 않았습니다."
+        )
+
     system_prompt = render_prompt("eval_code_agent", section="system")
     human_msg_content = render_prompt(
         "eval_code_agent",
         section="human",
-        problem_description=problem_context.get("basic_info", {}).get("description", "설명 없음"),
+        problem_description=problem_statement_for_evaluation(problem_context),
         code_content=code_content,
         code_correctness_score=code_correctness_score,
         code_performance_score=code_performance_score,
@@ -63,6 +82,7 @@ async def eval_code_agent(state: MainGraphState) -> Dict[str, Any]:
         max_cc=code_quality_metrics.get("radon_cc", {}).get("max_cc", "N/A"),
         delta_cc_pct=code_quality_metrics.get("delta_cc", {}).get("delta_cc_pct", "N/A"),
         junior_grade=code_quality_metrics.get("junior_grade", False),
+        reference_radon_block=reference_radon_block,
     )
     logger.info(
         f"[N7] 렌더 프롬프트 요약 - "

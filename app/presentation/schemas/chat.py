@@ -116,7 +116,7 @@ class SubmitCodeRequest(BaseModel):
     examId: int = Field(..., description="시험 ID")
     participantId: int = Field(..., description="참가자 ID (participants.id)")
     problemId: int = Field(..., description="문제 ID")
-    specId: int = Field(..., description="스펙 ID (problem_specs.id)")
+    specId: int = Field(..., description="스펙 ID (problem_specs.spec_id, PK)")
     finalCode: str = Field(..., description="제출 코드")
     language: str = Field(..., description="프로그래밍 언어 (예: python3.11)")
     submissionId: int = Field(..., description="제출 ID (백엔드에서 생성)")
@@ -255,10 +255,17 @@ class SaveChatMessageResponse(BaseModel):
 
 
 class ProblemContext(BaseModel):
-    """문제 컨텍스트"""
+    """문제 컨텍스트 (Spring/Core → Worker 전달)"""
 
-    problemId: Optional[int] = Field(None, description="문제 ID", alias="problemId")
-    specVersion: int = Field(..., description="스펙 버전", alias="specVersion")
+    problemId: Optional[int] = Field(None, description="문제 ID (problems.id)", alias="problemId")
+    specVersion: Optional[int] = Field(
+        None,
+        description=(
+            "문제 스펙 버전 (problem_specs.version). "
+            "생략·null이면 세션의 spec_id로 DB 조회해 채움."
+        ),
+        alias="specVersion",
+    )
 
 
 class ChatMessagesRequest(BaseModel):

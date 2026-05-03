@@ -31,6 +31,9 @@ class JudgeResult:
     execution_time: float = 0.0  # seconds
     memory_used: int = 0  # bytes
     exit_code: int = 0
+    # 다중 테스트 케이스 실행 시에만 설정 (부분 통과 점수용)
+    passed_test_cases: Optional[int] = None
+    total_test_cases: Optional[int] = None
 
 
 class QueueAdapter(ABC):

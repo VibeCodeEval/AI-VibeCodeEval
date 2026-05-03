@@ -74,6 +74,25 @@ class EvalService:
         self.checkpointer = MemorySaver()  # LangGraph 체크포인트 (in-memory)
         self.graph = create_main_graph(self.checkpointer)  # 메인 그래프 컴파일
 
+    async def _load_problem_context(
+        self, spec_id: Optional[int]
+    ) -> Optional[Dict[str, Any]]:
+        """DB + checker_json 우선, 실패 시 problem_info 폴백."""
+        if spec_id is None:
+            return None
+        from app.domain.langgraph.utils.problem_info import get_problem_info
+
+        try:
+            async with get_db_context() as db:
+                return await get_problem_info(spec_id, db)
+        except Exception as e:
+            logger.warning(
+                "[EvalService] problem_context DB 조회 실패, 폴백 — spec_id=%s error=%s",
+                spec_id,
+                e,
+            )
+            return await get_problem_info(spec_id, None)
+
     async def process_message(
         self,
         session_id: str,
@@ -131,7 +150,8 @@ class EvalService:
                 if code_content:
                     state["code_content"] = code_content
             else:
-                # 초기 상태 생성
+                # 초기 상태 생성 (problem_context는 DB 우선)
+                pc = await self._load_problem_context(spec_id)
                 state = get_initial_state(
                     session_id=session_id,
                     exam_id=exam_id,
@@ -139,6 +159,7 @@ class EvalService:
                     spec_id=spec_id,
                     human_message=human_message,
                     request_type="SUBMISSION" if is_submission else "CHAT",
+                    problem_context=pc,
                 )
                 if is_submission:
                     state["is_submitted"] = True
@@ -338,7 +359,7 @@ class EvalService:
                 if code_content:
                     state["code_content"] = code_content
             else:
-                # 초기 상태 생성
+                pc = await self._load_problem_context(spec_id)
                 state = get_initial_state(
                     session_id=session_id,
                     exam_id=exam_id,
@@ -346,6 +367,7 @@ class EvalService:
                     spec_id=spec_id,
                     human_message=human_message,
                     request_type="SUBMISSION" if is_submission else "CHAT",
+                    problem_context=pc,
                 )
                 if is_submission:
                     state["is_submitted"] = True
@@ -394,6 +416,7 @@ class EvalService:
                     if code_content:
                         state["code_content"] = code_content
                 else:
+                    pc = await self._load_problem_context(spec_id)
                     state = get_initial_state(
                         session_id=session_id,
                         exam_id=exam_id,
@@ -401,6 +424,7 @@ class EvalService:
                         spec_id=spec_id,
                         human_message=human_message,
                         request_type="SUBMISSION" if is_submission else "CHAT",
+                        problem_context=pc,
                     )
                     if is_submission:
                         state["is_submitted"] = True
@@ -465,6 +489,27 @@ class EvalService:
             existing_state["exam_id"] = exam_id
             existing_state["participant_id"] = participant_id
             existing_state["spec_id"] = spec_id
+            # Redis에 남아 있던 이전 턴의 problem_context로는 N5 TC·reference가 어긋날 수 있음.
+            # 제출 요청의 spec_id 기준으로 항상 다시 로드한다.
+            pc_submit = await self._load_problem_context(spec_id)
+            if pc_submit:
+                existing_state["problem_context"] = pc_submit
+                basic_info = pc_submit.get("basic_info") or {}
+                ai_guide = pc_submit.get("ai_guide") or {}
+                existing_state["problem_id"] = basic_info.get("problem_id")
+                existing_state["problem_name"] = basic_info.get("title")
+                existing_state["problem_algorithm"] = (
+                    ai_guide.get("key_algorithms", [None])[0]
+                    if ai_guide.get("key_algorithms")
+                    else None
+                )
+                existing_state["problem_keywords"] = pc_submit.get("keywords", [])
+                logger.info(
+                    "[SubmitCode] problem_context 재로드 완료 — spec_id=%s tc_count=%s has_content_md=%s",
+                    spec_id,
+                    len(pc_submit.get("test_cases") or []),
+                    bool((pc_submit.get("content_md") or "").strip()),
+                )
             existing_state["human_message"] = "코드를 제출합니다."
             existing_state["is_submitted"] = True
             existing_state["request_type"] = "SUBMISSION"
@@ -473,7 +518,7 @@ class EvalService:
             if submission_id:
                 existing_state["submission_id"] = submission_id
         else:
-            # 초기 상태 생성
+            pc = await self._load_problem_context(spec_id)
             state = get_initial_state(
                 session_id=session_id,
                 exam_id=exam_id,
@@ -481,6 +526,7 @@ class EvalService:
                 spec_id=spec_id,
                 human_message="코드를 제출합니다.",
                 request_type="SUBMISSION",
+                problem_context=pc,
             )
             state["is_submitted"] = True
             state["code_content"] = code_content
