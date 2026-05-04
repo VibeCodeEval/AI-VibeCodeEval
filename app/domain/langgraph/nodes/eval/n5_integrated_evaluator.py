@@ -185,7 +185,8 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
             f"[N5] 스마트 게이트 2026 모드 - v2_code + test_suite_code 합성, ALL_TESTS_PASSED 정답 판정"
         )
     else:
-        # Judge0: checker_json에서 로드한 모든 TC를 한 번에 실행 (부분 통과 시 통과율×100)
+        # Judge0: checker_json에서 로드한 모든 TC를 한 번에 실행
+        # (부분 통과 시 통과율 × settings.CODE_CORRECTNESS_MAX_POINTS 스케일)
         test_cases_raw = problem_context.get("test_cases", [])
         if test_cases_raw:
             test_cases = []

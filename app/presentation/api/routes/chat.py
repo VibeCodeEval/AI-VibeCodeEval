@@ -76,12 +76,13 @@ async def _resolve_spec_id_and_version_for_message(
     db: AsyncSession,
     session: Any,
     context: ProblemContext,
-) -> tuple[int, int]:
+) -> tuple[int, Optional[int]]:
     """
-    LangGraph에 넘길 problem_specs.spec_id(PK)와 problem_specs.version.
+    LangGraph에 넘길 problem_specs.spec_id(PK)와, 로깅용 spec 버전 힌트.
 
     - spec_id: prompt_sessions.spec_id → 없으면 exam_participants.spec_id
-    - specVersion: 요청 context 값 → 없으면 DB problem_specs.version (기본 1)
+    - specVersion: 요청 context에 있으면 그 값만 사용. 생략·null이면 None(추가 DB 조회 없음).
+      EvalService.process_message 등 LangGraph 경로에는 spec_id만 전달됩니다.
     """
     spec_id = session.spec_id
     if spec_id is None:
@@ -107,11 +108,8 @@ async def _resolve_spec_id_and_version_for_message(
 
     spec_version = context.specVersion
     if spec_version is None:
-        row = await ExamRepository(db).get_problem_spec(spec_id)
-        spec_version = int(row.version) if row is not None else 1
         logging.getLogger(__name__).info(
-            "[SendMessages] context.specVersion 생략/null → DB version=%s (spec_id=%s)",
-            spec_version,
+            "[SendMessages] context.specVersion 미전달 (spec_id=%s, LangGraph에는 spec_id만 사용)",
             spec_id,
         )
 
@@ -235,8 +233,7 @@ async def send_messages(
         )
         logger.info(
             "[SendMessages] LangGraph 입력 spec_id=%s (problem_specs.spec_id), "
-            "spec_version=%s (problem_specs.version, 참고), "
-            "요청 context.specVersion=%s",
+            "로깅용 spec_version=%s, 요청 context.specVersion=%s",
             effective_spec_id,
             effective_spec_version,
             request.context.specVersion,

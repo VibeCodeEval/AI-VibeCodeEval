@@ -262,7 +262,8 @@ class ProblemContext(BaseModel):
         None,
         description=(
             "문제 스펙 버전 (problem_specs.version). "
-            "생략·null이면 세션의 spec_id로 DB 조회해 채움."
+            "전달 시 서버가 로깅·추적에 참고할 수 있으나, 요청/응답 본문에 자동으로 다시 채워지지는 않습니다. "
+            "생략·null이면 추가 DB 조회 없이 미전달로 처리되며, LangGraph 입력에는 spec_id만 사용됩니다."
         ),
         alias="specVersion",
     )

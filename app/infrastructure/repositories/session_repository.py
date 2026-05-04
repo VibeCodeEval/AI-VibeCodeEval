@@ -83,7 +83,7 @@ class SessionRepository:
         self.db = db
 
     async def create_session(
-        self, exam_id: int, participant_id: int, spec_id: Optional[int] = None
+        self, exam_id: int, participant_id: int, spec_id: int
     ) -> PromptSession:
         """
         새 프롬프트 세션 생성
@@ -105,7 +105,7 @@ class SessionRepository:
         Args:
             exam_id: 시험 ID
             participant_id: 참가자 ID
-            spec_id: 문제 스펙 ID (선택)
+            spec_id: 문제 스펙 ID (DB NOT NULL과 일치)
 
         Returns:
             생성된 PromptSession (id 포함)
