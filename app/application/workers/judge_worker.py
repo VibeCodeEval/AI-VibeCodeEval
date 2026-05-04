@@ -205,6 +205,8 @@ class JudgeWorker:
                     execution_time=max_time,
                     memory_used=max_memory * 1024,  # KB -> bytes
                     exit_code=0 if status == "success" else 1,
+                    passed_test_cases=passed_count,
+                    total_test_cases=total_count,
                 )
 
             else:

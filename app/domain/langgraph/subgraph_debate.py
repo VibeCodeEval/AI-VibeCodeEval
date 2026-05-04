@@ -29,6 +29,9 @@ from pydantic import BaseModel, Field
 from app.domain.langgraph.nodes.eval_turn.utils import get_llm_for_model
 from app.domain.langgraph.prompts import load_prompt
 from app.domain.langgraph.states import DebateState
+from app.core.config import settings
+from app.domain.langgraph.utils.problem_info import \
+    problem_statement_for_evaluation
 
 logger = logging.getLogger(__name__)
 
@@ -116,8 +119,7 @@ def _build_base_context(state: DebateState) -> str:  # noqa: C901
     mem_mb = state.get("memory_used_mb")
     c_reason = state.get("correctness_reasoning") or ""
 
-    basic_info = problem_context.get("basic_info", {})
-    problem_desc = basic_info.get("description", "설명 없음")
+    problem_desc = problem_statement_for_evaluation(problem_context)
 
     radon = quality.get("radon_cc", {})
     delta = quality.get("delta_cc", {})
@@ -128,9 +130,10 @@ def _build_base_context(state: DebateState) -> str:  # noqa: C901
     mem_str = f"{mem_mb:.2f}MB" if mem_mb is not None else "N/A"
     c_reason_str = f"\n  오류 원인: {c_reason}" if c_reason else ""
 
+    cc_max = settings.CODE_CORRECTNESS_MAX_POINTS
     judge0_section = (
         f"[Judge0 코드 실행 결과]\n"
-        f"- 정확성 점수(Correctness): {correctness}\n"
+        f"- 정확성 점수(Correctness): {correctness} / {cc_max}\n"
         f"- 성능 점수(Performance): {performance}\n"
         f"- 테스트 케이스 통과: {tc_str}\n"
         f"- 실행 시간: {exec_str}\n"
@@ -145,6 +148,18 @@ def _build_base_context(state: DebateState) -> str:  # noqa: C901
         f"- Delta CC (%): {delta.get('delta_cc_pct', 'N/A')}\n"
         f"- Junior Grade 플래그: {quality.get('junior_grade', False)}"
     )
+    ref_radon = quality.get("reference_radon_cc") or {}
+    d_ref = quality.get("delta_cc_vs_reference") or {}
+    if quality.get("has_reference_code"):
+        radon_section += (
+            f"\n- 참고 구현(reference) avg_cc: {ref_radon.get('avg_cc', 'N/A')}\n"
+            f"- 참고 구현 max_cc: {ref_radon.get('max_cc', 'N/A')}\n"
+            f"- 참고 대비 제출 ΔCC(%): {d_ref.get('delta_cc_pct', 'N/A')}"
+        )
+    else:
+        radon_section += (
+            "\n- 참고 구현 Radon: reference_code 없음 — 비교 생략"
+        )
 
     # ── N7 LLM 코드 리뷰 ────────────────────────────────────────────────
     n7_section = (

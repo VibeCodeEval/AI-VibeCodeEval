@@ -32,7 +32,7 @@ class Submission(Base):
         BigInteger, ForeignKey(f"{settings.VIBECODE_PARTICIPANT_TABLE}.id"), nullable=False
     )
     spec_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("problem_specs.id"), nullable=False
+        BigInteger, ForeignKey("problem_specs.spec_id"), nullable=False
     )
     lang: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[SubmissionStatusEnum] = mapped_column(

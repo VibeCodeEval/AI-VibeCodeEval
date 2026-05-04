@@ -27,6 +27,48 @@ logger = logging.getLogger(__name__)
 TRACE_NAME_CODE_EXECUTION = "eval_code_execution"
 
 
+def _scores_from_correctness_result(
+    correctness_result: Any,
+    test_cases: list,
+    use_smart_gate_suite: bool,
+) -> tuple[Any, int, int, Any]:
+    """
+    Worker/JudgeResult → (correctness_score 0~CODE_CORRECTNESS_MAX_POINTS, passed, total, reasoning).
+
+    다중 TC: 통과 TC마다 (만점 / TC 수)점 — 즉 (통과 수 / 총 수) × 만점.
+    """
+    mx = float(settings.CODE_CORRECTNESS_MAX_POINTS)
+    if use_smart_gate_suite:
+        stdout = (correctness_result.output or "").strip()
+        if "ALL_TESTS_PASSED" in stdout:
+            return mx, 1, 1, None
+        if "ASSERTION_FAILED:" in stdout:
+            return 0.0, 0, 1, stdout
+        if correctness_result.error:
+            reasoning = "인터페이스 미준수: " + (
+                correctness_result.error[:500]
+                if len(correctness_result.error or "") > 500
+                else (correctness_result.error or "")
+            )
+        else:
+            reasoning = "인터페이스 미준수"
+        return 0.0, 0, 1, reasoning
+
+    n = len(test_cases)
+    pt = getattr(correctness_result, "passed_test_cases", None)
+    tt = getattr(correctness_result, "total_test_cases", None)
+    if pt is not None and tt is not None and tt > 0:
+        score = round((pt / tt) * mx, 2)
+        reasoning = None if pt == tt else (correctness_result.error or None)
+        return score, int(pt), int(tt), reasoning
+
+    if correctness_result.status == "success" and n > 0:
+        return round(mx, 2), n, n, None
+    if correctness_result.status == "success" and n == 0:
+        return round(mx * 0.5, 2), 0, 0, None
+    return 0.0, 0, n, correctness_result.error
+
+
 async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
     """
     N5: 코드 실행 평가 (Judge0 연동)
@@ -88,25 +130,40 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         line_count = len(code_content.split("\n"))
         logger.info(f"[N5] 코드 라인 수: {line_count}줄")
 
-    # 문제 정보 가져오기
-    problem_context = state.get("problem_context", {})
+    # 문제 정보 가져오기 (DB checker_json 반영본 우선; 스마트 게이트는 test_suite_code 기준)
+    problem_context = dict(state.get("problem_context") or {})
+    spec_id = state.get("spec_id")
 
-    # problem_context가 없으면 spec_id로 다시 로드
-    if not problem_context or not problem_context.get("test_cases"):
-        spec_id = state.get("spec_id")
+    need_reload = not problem_context
+    if not need_reload and spec_id is not None:
+        if spec_id in settings.SMART_GATE_SPEC_IDS:
+            need_reload = not (problem_context.get("test_suite_code") or "").strip()
+        else:
+            need_reload = not (problem_context.get("test_cases") or [])
+
+    if need_reload:
         if spec_id:
             logger.warning(
-                f"[N5] problem_context 없음 또는 test_cases 없음 - spec_id로 다시 로드: {spec_id}"
+                f"[N5] problem_context 보강 필요 — DB 우선 재로드 spec_id={spec_id}"
             )
-            from app.domain.langgraph.utils.problem_info import \
-                get_problem_info_sync
+            try:
+                from app.domain.langgraph.utils.problem_info import get_problem_info
+                from app.infrastructure.persistence.session import get_db_context
 
-            problem_context = get_problem_info_sync(spec_id)
+                async with get_db_context() as db:
+                    problem_context = await get_problem_info(spec_id, db)
+            except Exception as e:
+                logger.warning(
+                    f"[N5] problem_context DB 로드 실패, 폴백 — spec_id={spec_id} error={e}"
+                )
+                from app.domain.langgraph.utils.problem_info import get_problem_info
+
+                problem_context = await get_problem_info(spec_id, None)
             logger.info(
                 f"[N5] problem_context 로드 완료 - test_cases: {len(problem_context.get('test_cases', []))}개"
             )
         else:
-            logger.error(f"[N5] spec_id 없음 - problem_context를 로드할 수 없음")
+            logger.error("[N5] spec_id 없음 - problem_context를 로드할 수 없음")
             problem_context = {}
 
     constraints = problem_context.get("constraints", {})
@@ -114,7 +171,6 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
     memory_limit = constraints.get("memory_limit_mb") or 128
 
     # 스마트 게이트: v2_code + test_suite_code 합성 후 Judge0 실행 (대상 spec_id는 settings.SMART_GATE_SPEC_IDS로 관리)
-    spec_id = state.get("spec_id")
     test_suite_code = problem_context.get("test_suite_code") if problem_context else None
     use_smart_gate_suite = bool(test_suite_code and spec_id in settings.SMART_GATE_SPEC_IDS)
     code_to_run = code_content
@@ -129,23 +185,30 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
             f"[N5] 스마트 게이트 2026 모드 - v2_code + test_suite_code 합성, ALL_TESTS_PASSED 정답 판정"
         )
     else:
-        # 테스트 케이스 준비 (첫 번째 TC만 사용)
+        # Judge0: checker_json에서 로드한 모든 TC를 한 번에 실행
+        # (부분 통과 시 통과율 × settings.CODE_CORRECTNESS_MAX_POINTS 스케일)
         test_cases_raw = problem_context.get("test_cases", [])
         if test_cases_raw:
-            first_tc = test_cases_raw[0]
-            test_cases = [
-                {
-                    "input": first_tc.get("input", ""),
-                    "expected": first_tc.get("expected", ""),
-                }
-            ]
-            test_cases_total = 1
+            test_cases = []
+            for idx, raw in enumerate(test_cases_raw):
+                if not isinstance(raw, dict):
+                    continue
+                test_cases.append(
+                    {
+                        "input": raw.get("input", "") or "",
+                        "expected": raw.get("expected", "") or "",
+                    }
+                )
+            test_cases_total = len(test_cases)
             logger.info(
-                f"[N5] 테스트 케이스 사용 - TC: {first_tc.get('description', '기본 케이스')}"
+                f"[N5] 테스트 케이스 {test_cases_total}건 — Judge0 일괄 실행"
             )
-            logger.info(
-                f"[N5] 테스트 케이스 입력 길이: {len(test_cases[0].get('input', ''))} 문자, 예상 출력: {test_cases[0].get('expected', '')}"
-            )
+            if test_cases:
+                tc0 = test_cases_raw[0] if isinstance(test_cases_raw[0], dict) else {}
+                logger.info(
+                    f"[N5] 첫 TC 설명: {tc0.get('description', '—')}, "
+                    f"입력 길이: {len(test_cases[0].get('input', ''))}"
+                )
         else:
             test_cases = []
             test_cases_total = 0
@@ -225,126 +288,67 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
                     correctness_result = await queue.get_result(correctness_task_id)
 
                 if correctness_result:
-                    # 스마트 게이트 2026: stdout에 ALL_TESTS_PASSED 포함 시 100점, 아니면 0점 + reasoning
-                    if use_smart_gate_suite:
-                        stdout = (correctness_result.output or "").strip()
-                        if "ALL_TESTS_PASSED" in stdout:
-                            correctness_score = 100.0
-                            test_cases_passed = 1
-                            correctness_reasoning = None
-                        else:
-                            correctness_score = 0.0
-                            test_cases_passed = 0
-                            if "ASSERTION_FAILED:" in stdout:
-                                correctness_reasoning = stdout
-                            elif correctness_result.error:
-                                correctness_reasoning = "인터페이스 미준수: " + (
-                                    correctness_result.error[:500]
-                                    if len(correctness_result.error or "") > 500
-                                    else (correctness_result.error or "")
-                                )
-                            else:
-                                correctness_reasoning = "인터페이스 미준수"
-                        if correctness_result.execution_time is not None:
-                            correctness_execution_time = correctness_result.execution_time
-                        if correctness_result.memory_used is not None:
-                            correctness_memory_used_mb = (
-                                correctness_result.memory_used / (1024 * 1024)
-                            )
+                    correctness_score, test_cases_passed, tc_tot, correctness_reasoning = (
+                        _scores_from_correctness_result(
+                            correctness_result, test_cases, use_smart_gate_suite
+                        )
+                    )
+                    if tc_tot > 0:
+                        test_cases_total = tc_tot
+                    if correctness_result.execution_time is not None:
+                        correctness_execution_time = correctness_result.execution_time
+                    if correctness_result.memory_used is not None:
+                        correctness_memory_used_mb = (
+                            correctness_result.memory_used / (1024 * 1024)
+                        )
+                    logger.info(
+                        f"[N5. Eval Code Execution] ===== Correctness 평가 완료 ===== task_id={correctness_task_id} "
+                        f"result_status={correctness_result.status} score={correctness_score} "
+                        f"passed={test_cases_passed}/{test_cases_total}"
+                    )
+                    if correctness_execution_time is not None:
                         logger.info(
-                            f"[N5] 스마트 게이트 정답 판정 - score: {correctness_score}, reasoning: {correctness_reasoning or 'OK'}"
+                            f"[N5. Eval Code Execution] 실행 시간: {correctness_execution_time:.3f}초 (기준: {timeout}초)"
                         )
-                        break
-                    if correctness_result.status == "success" and test_cases:
-                        # 테스트 케이스 통과율 계산
-                        correctness_score = (
-                            100.0 if correctness_result.status == "success" else 0.0
-                        )
-                        test_cases_passed = (
-                            len(test_cases)
-                            if correctness_result.status == "success"
-                            else 0
-                        )
-
-                        # Correctness 결과에서 execution_time과 memory_used 추출
-                        if correctness_result.execution_time is not None:
-                            correctness_execution_time = (
-                                correctness_result.execution_time
-                            )
-                        if correctness_result.memory_used is not None:
-                            correctness_memory_used_mb = (
-                                correctness_result.memory_used / (1024 * 1024)
-                            )  # bytes -> MB
-
+                    if correctness_memory_used_mb is not None:
                         logger.info(
-                            f"[N5. Eval Code Execution] ===== Correctness 평가 완료 ====="
+                            f"[N5. Eval Code Execution] 메모리 사용: {correctness_memory_used_mb:.2f}MB (기준: {memory_limit}MB)"
                         )
+                    if correctness_result.output:
                         logger.info(
-                            f"[N5. Eval Code Execution] task_id: {correctness_task_id}"
+                            f"[N5. Eval Code Execution] 출력 (처음 200자): {correctness_result.output[:200]}..."
                         )
-                        logger.info(
-                            f"[N5. Eval Code Execution] status: {correctness_result.status}"
-                        )
-                        logger.info(
-                            f"[N5. Eval Code Execution] Correctness Score: {correctness_score}"
-                        )
-                        logger.info(
-                            f"[N5. Eval Code Execution] test_cases_passed: {test_cases_passed}/{len(test_cases)}"
-                        )
-                        if correctness_execution_time is not None:
-                            logger.info(
-                                f"[N5. Eval Code Execution] 실행 시간: {correctness_execution_time:.3f}초 (기준: {timeout}초)"
-                            )
-                        if correctness_memory_used_mb is not None:
-                            logger.info(
-                                f"[N5. Eval Code Execution] 메모리 사용: {correctness_memory_used_mb:.2f}MB (기준: {memory_limit}MB)"
-                            )
-                        if correctness_result.output:
-                            logger.info(
-                                f"[N5. Eval Code Execution] 출력 (처음 200자): {correctness_result.output[:200]}..."
-                            )
-                        if correctness_result.error:
-                            logger.warning(
-                                f"[N5. Eval Code Execution] 에러: {correctness_result.error}"
-                            )
-                        break
-                    elif correctness_result.status == "success" and not test_cases:
-                        # 테스트 케이스가 없으면 실행만 확인
-                        correctness_score = 50.0
-                        test_cases_passed = 0
-                        logger.info(
-                            f"[N5] Correctness 평가 완료 (TC 없음) - task_id: {correctness_task_id}"
-                        )
-                        break
-                    else:
-                        # 실행 실패
-                        correctness_score = 0.0
-                        test_cases_passed = 0
-                        error_msg = (
-                            correctness_result.error
-                            if correctness_result
-                            else "Unknown error"
-                        )
+                    if correctness_result.error:
                         logger.warning(
-                            f"[N5] Correctness 평가 실패 - task_id: {correctness_task_id}, error: {error_msg}"
+                            f"[N5. Eval Code Execution] 에러: {correctness_result.error}"
                         )
-                        break
+                    break
 
             elif status == "failed":
-                correctness_score = 0.0
-                test_cases_passed = 0
-                # 실패 원인 확인
+                # 구버전 큐 등: 결과만 있으면 동일 로직으로 점수 산출
                 result = await queue.get_result(correctness_task_id)
                 if result:
+                    correctness_score, test_cases_passed, tc_tot, correctness_reasoning = (
+                        _scores_from_correctness_result(
+                            result, test_cases, use_smart_gate_suite
+                        )
+                    )
+                    if tc_tot > 0:
+                        test_cases_total = tc_tot
+                    if result.execution_time is not None:
+                        correctness_execution_time = result.execution_time
+                    if result.memory_used is not None:
+                        correctness_memory_used_mb = result.memory_used / (1024 * 1024)
                     logger.warning(
-                        f"[N5] Correctness 작업 실패 - task_id: {correctness_task_id}, "
-                        f"status: {result.status}, error: {result.error}, "
-                        f"execution_time: {result.execution_time}s"
+                        f"[N5] 상태 failed이나 결과 존재 — score={correctness_score} "
+                        f"passed={test_cases_passed}/{test_cases_total} "
+                        f"result_status={result.status}"
                     )
                 else:
+                    correctness_score = 0.0
+                    test_cases_passed = 0
                     logger.warning(
-                        f"[N5] Correctness 작업 실패 - task_id: {correctness_task_id}, "
-                        f"결과 없음 (Worker가 작업을 처리하지 못했을 수 있음)"
+                        f"[N5] Correctness 작업 실패 - task_id: {correctness_task_id}, 결과 없음"
                     )
                 break
 
@@ -354,46 +358,30 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
                 maybe_result = await queue.get_result(correctness_task_id)
                 if maybe_result is not None:
                     correctness_result = maybe_result
-                    if correctness_result.status == "success":
-                        if use_smart_gate_suite:
-                            stdout = (correctness_result.output or "").strip()
-                            if "ALL_TESTS_PASSED" in stdout:
-                                correctness_score = 100.0
-                                test_cases_passed = 1
-                                correctness_reasoning = None
-                            else:
-                                correctness_score = 0.0
-                                test_cases_passed = 0
-                                if "ASSERTION_FAILED:" in stdout:
-                                    correctness_reasoning = stdout
-                                elif correctness_result.error:
-                                    correctness_reasoning = "인터페이스 미준수: " + (
-                                        correctness_result.error[:500]
-                                        if len(correctness_result.error or "") > 500
-                                        else (correctness_result.error or "")
-                                    )
-                                else:
-                                    correctness_reasoning = "인터페이스 미준수"
-                        else:
-                            correctness_score = 100.0 if test_cases else 50.0
-                            test_cases_passed = len(test_cases) if test_cases else 0
-
-                        if correctness_result.execution_time is not None:
-                            correctness_execution_time = correctness_result.execution_time
-                        if correctness_result.memory_used is not None:
-                            correctness_memory_used_mb = (
-                                correctness_result.memory_used / (1024 * 1024)
-                            )
-                    else:
-                        correctness_score = 0.0
-                        test_cases_passed = 0
+                    correctness_score, test_cases_passed, tc_tot, correctness_reasoning = (
+                        _scores_from_correctness_result(
+                            correctness_result, test_cases, use_smart_gate_suite
+                        )
+                    )
+                    if tc_tot > 0:
+                        test_cases_total = tc_tot
+                    if correctness_result.execution_time is not None:
+                        correctness_execution_time = correctness_result.execution_time
+                    if correctness_result.memory_used is not None:
+                        correctness_memory_used_mb = (
+                            correctness_result.memory_used / (1024 * 1024)
+                        )
+                    if correctness_result.status != "success" and (
+                        test_cases_passed == 0 and len(test_cases) > 0
+                    ):
                         logger.warning(
-                            f"[N5] 결과 키 확인: 실패 상태 - task_id: {correctness_task_id}, "
-                            f"status: {correctness_result.status}, error: {correctness_result.error}"
+                            f"[N5] 결과 키 확인: result_status={correctness_result.status}, "
+                            f"error: {correctness_result.error}"
                         )
                     logger.info(
                         f"[N5] 결과 키 기반 완료 감지 - task_id: {correctness_task_id}, "
-                        f"status_key={status}, result_status={correctness_result.status}"
+                        f"status_key={status}, result_status={correctness_result.status}, "
+                        f"passed={test_cases_passed}/{test_cases_total}"
                     )
                     break
 

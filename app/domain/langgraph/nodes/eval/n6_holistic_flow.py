@@ -30,6 +30,12 @@ async def eval_static_analysis(state: MainGraphState) -> Dict[str, Any]:
     code_content = state.get("code_content", "")
     v1_code = state.get("v1_code", "")
     spec_id = state.get("spec_id")
+    problem_context = state.get("problem_context") or {}
+    # checker_json.reference_code → get_problem_info에서 solution_code로 병합됨
+    reference_code = (
+        (problem_context.get("solution_code") or problem_context.get("reference_code") or "")
+        .strip()
+    )
 
     logger.info(f"[N6. Eval Static Analysis] 진입 - session_id: {session_id}")
 
@@ -59,25 +65,45 @@ async def eval_static_analysis(state: MainGraphState) -> Dict[str, Any]:
             
         v2_radon = compute_radon_cc(code_content)
         v1_radon = compute_radon_cc(v1_code) if v1_code and v1_code.strip() else {}
-        
+
         has_v1 = bool(v1_code and v1_code.strip())
-        
+
         delta_cc = compute_delta_cc(v1_radon, v2_radon) if has_v1 else {}
-        
+
+        has_reference_code = bool(reference_code)
+        reference_radon: Dict[str, Any] = {}
+        delta_cc_vs_reference: Dict[str, Any] = {}
+        if has_reference_code:
+            reference_radon = compute_radon_cc(reference_code)
+            delta_cc_vs_reference = compute_delta_cc(reference_radon, v2_radon)
+            logger.info(
+                "[N6] reference_code Radon CC 측정 완료 — avg_cc=%s, 제출 대비 ΔCC%%=%s",
+                reference_radon.get("avg_cc"),
+                delta_cc_vs_reference.get("delta_cc_pct"),
+            )
+        else:
+            logger.info(
+                "[N6] reference_code가 없어 참조 Radon CC 및 제출 대비 비교를 건너뜁니다. "
+                "(checker_json.reference_code / problem_context.solution_code 비어 있음)"
+            )
+
         ast_result = check_ast_patterns(code_content, spec_id=spec_id)
-        
+
         avg_cc = v2_radon.get("avg_cc", 0.0)
         max_cc = v2_radon.get("max_cc", 0)
         junior_grade = v2_radon.get("junior_grade", False)
-        
+
         if delta_cc and delta_cc.get("delta_cc_pct", 0) > 30 and avg_cc > 8:
             junior_grade = True
-            
+
         code_quality_metrics = {
             "radon_cc": v2_radon,
             "v1_metrics": {"radon_cc": v1_radon} if has_v1 else {},
             "delta_cc": delta_cc,
             "has_v1": has_v1,
+            "reference_radon_cc": reference_radon,
+            "delta_cc_vs_reference": delta_cc_vs_reference,
+            "has_reference_code": has_reference_code,
             "ast_pattern_matched": ast_result.get("ast_pattern_matched", False),
             "ast_applicable": ast_result.get("applicable", False),
             "junior_grade": junior_grade,

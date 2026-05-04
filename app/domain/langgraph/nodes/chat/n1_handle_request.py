@@ -8,8 +8,7 @@ from datetime import datetime
 from typing import Any, Dict
 
 from app.domain.langgraph.states import MainGraphState
-from app.domain.langgraph.utils.problem_info import (get_problem_info,
-                                                     get_problem_info_sync)
+from app.domain.langgraph.utils.problem_info import get_problem_info
 from app.infrastructure.persistence.session import get_db_context
 
 logger = logging.getLogger(__name__)
@@ -47,8 +46,6 @@ async def handle_request_load_state(state: MainGraphState) -> Dict[str, Any]:
 
         # 문제 정보가 없으면 추가 (기존 State 로드 시 문제 정보가 없을 수 있음)
         if not state.get("problem_context") and spec_id:
-            # DB 조회 시도 (실패 시 하드코딩 딕셔너리로 Fallback)
-            problem_context = None
             try:
                 async with get_db_context() as db:
                     problem_context = await get_problem_info(spec_id, db)
@@ -57,10 +54,9 @@ async def handle_request_load_state(state: MainGraphState) -> Dict[str, Any]:
                     )
             except Exception as e:
                 logger.warning(
-                    f"[1. Handle Request] DB 조회 실패, 하드코딩 딕셔너리 사용 - spec_id: {spec_id}, error: {str(e)}"
+                    f"[1. Handle Request] DB 조회 실패, get_problem_info 폴백 경로 - spec_id: {spec_id}, error: {str(e)}"
                 )
-                # Fallback: 하드코딩 딕셔너리 사용
-            problem_context = get_problem_info_sync(spec_id)
+                problem_context = await get_problem_info(spec_id, None)
 
             # 1. problem_context 저장 (새 구조)
             result["problem_context"] = problem_context

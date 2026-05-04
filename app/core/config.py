@@ -114,6 +114,10 @@ class Settings(BaseSettings):
     # 환경 변수로 오버라이드: SMART_GATE_SPEC_IDS="11,20"
     SMART_GATE_SPEC_IDS: List[int] = Field(default=[11, 20])
 
+    # N5 Judge0 정확성(Correctness) 만점. TC당 점수 = (만점 / TC 개수), 합산 상한 = 이 값.
+    # State의 code_correctness_score는 0 ~ 이 값 범위. N9 총점 가중치는 이를 0~100으로 환산해 적용.
+    CODE_CORRECTNESS_MAX_POINTS: float = 30.0
+
     # LangSmith 설정 (개발 환경에서 사용)
     # 공식 문서: https://docs.langchain.com/langsmith/create-account-api-key
     LANGCHAIN_TRACING_V2: bool = False  # 개발 환경에서만 True로 설정
