@@ -4,6 +4,7 @@ AI 답변 생성 (Runnable & Chain 구조)
 """
 
 from datetime import datetime
+import re
 from typing import Any, Dict, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -50,6 +51,44 @@ def has_structural_intent(text: str) -> bool:
         return False
     t = text.strip()
     return any(term in t for term in STRUCTURAL_TERMS)
+
+
+def _normalize_code_response(ai_content: str, state: MainGraphState) -> str:
+    """
+    코드 응답을 FE 파싱 친화적인 XML 태그로 정규화.
+    - LLM 재호출 없이 문자열 후처리만 수행
+    - ``` fenced code ``` → <code_block language="...">...</code_block>
+    - [Code] 헤더인데 fenced block이 없으면 본문을 code_block으로 래핑
+    """
+    if not ai_content or "<code_block" in ai_content:
+        return ai_content
+
+    default_lang = (state.get("lang") or "python").lower()
+
+    fenced_pattern = re.compile(r"```([a-zA-Z0-9_+\-\.]*)\n(.*?)```", re.DOTALL)
+
+    def _replace_fenced(match: re.Match) -> str:
+        lang = (match.group(1) or "").strip().lower() or default_lang
+        code = (match.group(2) or "").rstrip()
+        return f'<code_block language="{lang}">\n{code}\n</code_block>'
+
+    converted = fenced_pattern.sub(_replace_fenced, ai_content)
+    if converted != ai_content:
+        return converted
+
+    # fenced block이 없는데 [Code] 헤더가 있으면 헤더 아래를 코드로 간주해 래핑
+    guide_strategy = (state.get("guide_strategy") or "").upper()
+    if "[Code]" in ai_content and guide_strategy in {"GENERATION", "FULL_CODE_ALLOWED"}:
+        head, tail = ai_content.split("[Code]", 1)
+        body = (tail or "").strip()
+        if body:
+            wrapped = (
+                f"{head}[Code]\n"
+                f'<code_block language="{default_lang}">\n{body}\n</code_block>'
+            )
+            return wrapped
+
+    return ai_content
 
 
 def get_llm():
@@ -560,6 +599,9 @@ async def writer_llm(state: MainGraphState) -> Dict[str, Any]:
                 logger.debug(
                     f"[Writer LLM] response_metadata: {llm_response.response_metadata}"
                 )
+
+        # FE에서 코드 블록을 안정적으로 인식할 수 있도록 XML 태그 정규화
+        ai_content = _normalize_code_response(ai_content, state)
 
         # 빈 응답 체크 및 처리
         if not ai_content or (isinstance(ai_content, str) and not ai_content.strip()):

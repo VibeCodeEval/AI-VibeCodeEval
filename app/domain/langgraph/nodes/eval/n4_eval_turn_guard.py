@@ -14,6 +14,17 @@ from app.infrastructure.cache.redis_client import redis_client
 logger = logging.getLogger(__name__)
 
 
+def _is_guardrail_blocked_response(ai_message: str) -> bool:
+    """Writer 가드레일 거절 응답 패턴 감지."""
+    if not ai_message:
+        return False
+    text = ai_message.strip()
+    return (
+        "해당 요청은 시험 규정상 답변할 수 없습니다" in text
+        or "시험 규정상 답변할 수 없습니다" in text
+    )
+
+
 async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
     """
     제출 시 4번 가드 노드
@@ -77,6 +88,7 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
             logger.info("")
             return {
                 "turn_scores": {},
+                "guardrail_flag_count": 0,
                 "updated_at": datetime.utcnow().isoformat(),
             }
 
@@ -84,6 +96,7 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
         # V2.2 Context-Integrated: 이전 턴 요약 누적 후 다음 턴 평가 시 전달
         prev_user_content: Optional[str] = None
         previous_turns_summaries: List[str] = []
+        guardrail_flag_count = 0
         logger.info("-" * 80)
         for idx, turn in enumerate(turns_to_evaluate, 1):
             logger.info("")
@@ -186,6 +199,16 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                     else None
                 )
 
+                # 해당 턴 가드레일 플래그 감지 (감점은 아직 적용하지 않고 횟수만 저장)
+                guardrail_failed_for_turn = _is_guardrail_blocked_response(ai_msg)
+                if guardrail_failed_for_turn:
+                    guardrail_flag_count += 1
+                    logger.info(
+                        "[4. Eval Turn Guard] 턴 %s 가드레일 플래그 감지 - 누적 횟수: %s",
+                        turn,
+                        guardrail_flag_count,
+                    )
+
                 # 평가 실행 및 결과 받기
                 eval_result = await _evaluate_turn_sync(
                     session_id=session_id,
@@ -195,6 +218,7 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                     problem_context=state.get("problem_context"),
                     is_phase2_first_turn=is_phase2_first_turn,
                     previous_turns_summary=previous_turns_summary_str,
+                    is_guardrail_failed=guardrail_failed_for_turn,
                 )
 
                 # 평가 결과 요약 출력
@@ -302,6 +326,7 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
 
         return {
             "turn_scores": turn_scores,
+            "guardrail_flag_count": guardrail_flag_count,
             "updated_at": datetime.utcnow().isoformat(),
         }
 
@@ -326,6 +351,7 @@ async def _evaluate_turn_sync(
     problem_context: Optional[Dict[str, Any]] = None,
     is_phase2_first_turn: bool = False,
     previous_turns_summary: Optional[str] = None,
+    is_guardrail_failed: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
     특정 턴을 동기적으로 평가
@@ -333,6 +359,77 @@ async def _evaluate_turn_sync(
     제출 시 모든 턴을 평가하기 위해 사용
     """
     try:
+        if is_guardrail_failed:
+            logger.info(
+                "[Eval Turn Sync] 턴 %s 가드레일 위반 감지 - 평가 호출 건너뛰고 0점 저장",
+                turn,
+            )
+            from app.application.services.evaluation_storage_service import (
+                EvaluationStorageService,
+            )
+            from app.infrastructure.persistence.session import get_db_context
+
+            postgres_session_id = (
+                int(session_id.replace("session_", ""))
+                if session_id.startswith("session_")
+                else None
+            )
+
+            guardrail_turn_log = {
+                "prompt_evaluation_details": {
+                    "intent": "GUARDRAIL_BLOCKED",
+                    "intent_types": ["GUARDRAIL_BLOCKED"],
+                    "unified_intent": "GUARDRAIL_BLOCKED",
+                    "intent_confidence": 1.0,
+                    "score": 0.0,
+                    "rubric_breakdown": {},
+                    "applied_rubrics": [],
+                    "scoring_cot": {},
+                    "final_reasoning": "가드레일 위반 턴으로 평가를 건너뛰고 0점 처리",
+                },
+                "comprehensive_reasoning": "가드레일 위반 턴으로 평가를 건너뛰고 0점 처리",
+                "intent_types": ["GUARDRAIL_BLOCKED"],
+                "unified_intent": "GUARDRAIL_BLOCKED",
+                "intent_confidence": 1.0,
+                "evaluations": {},
+                "detailed_feedback": [],
+                "turn_score": 0.0,
+                "is_guardrail_failed": True,
+                "guardrail_message": "가드레일 위반 응답 감지",
+                "user_prompt_summary": (
+                    human_message[:200] + "..."
+                    if len(human_message) > 200
+                    else human_message
+                ),
+                "llm_answer_summary": (
+                    ai_message[:200] + "..." if len(ai_message) > 200 else ai_message
+                ),
+                "llm_answer_reasoning": "가드레일 위반 턴으로 평가를 건너뛰고 0점 처리",
+            }
+
+            if postgres_session_id:
+                async with get_db_context() as db:
+                    storage_service = EvaluationStorageService(db)
+                    pg_evaluation = await storage_service.save_turn_evaluation(
+                        session_id=postgres_session_id, turn=turn, turn_log=guardrail_turn_log
+                    )
+                    if pg_evaluation:
+                        await db.commit()
+                    else:
+                        await db.rollback()
+
+            return {
+                "intent_type": "GUARDRAIL_BLOCKED",
+                "intent_types": ["GUARDRAIL_BLOCKED"],
+                "intent_confidence": 1.0,
+                "turn_score": 0.0,
+                "rubrics": [],
+                "comprehensive_reasoning": "가드레일 위반 턴으로 평가를 건너뛰고 0점 처리",
+                "answer_summary": ai_message,
+                "user_prompt_summary": guardrail_turn_log["user_prompt_summary"],
+                "llm_answer_summary": guardrail_turn_log["llm_answer_summary"],
+            }
+
         from app.domain.langgraph.states import EvalTurnState
         from app.domain.langgraph.subgraph_eval_turn import \
             create_eval_turn_subgraph
