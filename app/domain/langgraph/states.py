@@ -72,6 +72,7 @@ class MainGraphState(TypedDict):
     r4_context_maintenance_score: Optional[float]
     holistic_flow_analysis: Optional[str]  # 체이닝 전략에 대한 상세 분석
     aggregate_turn_score: Optional[float]
+    guardrail_flag_count: Optional[int]  # 제출 시 턴 평가에서 감지된 가드레일 플래그 횟수 (감점용 후보)
     code_performance_score: Optional[float]
     code_correctness_score: Optional[float]
     # N5 Judge0 실행 상세 (N7/N8/N9 전달용)

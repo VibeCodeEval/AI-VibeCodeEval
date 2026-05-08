@@ -45,9 +45,10 @@ from app.core.config import settings
 from app.domain.langgraph.utils.problem_info import get_problem_info_sync
 from app.infrastructure.cache.redis_client import get_redis, redis_client
 from app.infrastructure.persistence.session import get_db
+from app.infrastructure.repositories.exam_repository import ExamRepository
 from app.presentation.schemas.chat import (AIMessageInfo, ChatMessagesRequest,
                                            ChatMessagesResponse, ChatRequest,
-                                           ChatResponse,
+                                           ChatResponse, ProblemContext,
                                            SaveChatMessageRequest,
                                            SaveChatMessageResponse,
                                            SubmitRequest, SubmitResponse)
@@ -69,6 +70,50 @@ async def get_eval_service() -> EvalService:
     EvalService: 평가 서비스 인스턴스
     """
     return EvalService(redis_client)
+
+
+async def _resolve_spec_id_and_version_for_message(
+    db: AsyncSession,
+    session: Any,
+    context: ProblemContext,
+) -> tuple[int, Optional[int]]:
+    """
+    LangGraph에 넘길 problem_specs.spec_id(PK)와, 로깅용 spec 버전 힌트.
+
+    - spec_id: prompt_sessions.spec_id → 없으면 exam_participants.spec_id
+    - specVersion: 요청 context에 있으면 그 값만 사용. 생략·null이면 None(추가 DB 조회 없음).
+      EvalService.process_message 등 LangGraph 경로에는 spec_id만 전달됩니다.
+    """
+    spec_id = session.spec_id
+    if spec_id is None:
+        exam_repo = ExamRepository(db)
+        ep = await exam_repo.get_exam_participant(
+            session.exam_id, session.participant_id
+        )
+        if ep is not None and ep.spec_id is not None:
+            spec_id = ep.spec_id
+
+    if spec_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": True,
+                "error_code": "SPEC_ID_MISSING",
+                "error_message": (
+                    "세션·시험 참가 정보에 spec_id가 없습니다. "
+                    "Core에서 세션 생성/동기화를 확인하세요."
+                ),
+            },
+        )
+
+    spec_version = context.specVersion
+    if spec_version is None:
+        logging.getLogger(__name__).info(
+            "[SendMessages] context.specVersion 미전달 (spec_id=%s, LangGraph에는 spec_id만 사용)",
+            spec_id,
+        )
+
+    return spec_id, spec_version
 
 
 @router.post(
@@ -181,12 +226,25 @@ async def send_messages(
             state_before.get("chat_tokens", {}) if state_before else {}
         )
 
+        effective_spec_id, effective_spec_version = (
+            await _resolve_spec_id_and_version_for_message(
+                db, session, request.context
+            )
+        )
+        logger.info(
+            "[SendMessages] LangGraph 입력 spec_id=%s (problem_specs.spec_id), "
+            "로깅용 spec_version=%s, 요청 context.specVersion=%s",
+            effective_spec_id,
+            effective_spec_version,
+            request.context.specVersion,
+        )
+
         langgraph_task = asyncio.create_task(
             eval_service.process_message(
                 session_id=redis_session_id,
                 exam_id=session.exam_id,
                 participant_id=session.participant_id,
-                spec_id=session.spec_id or request.context.specVersion,
+                spec_id=effective_spec_id,
                 human_message=request.content,
             )
         )

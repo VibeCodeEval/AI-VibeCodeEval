@@ -36,7 +36,7 @@ START → 1. Handle Request → 2. Intent Analyzer → 3. Writer LLM → END
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -247,17 +247,18 @@ def get_initial_state(
     spec_id: Optional[int],
     human_message: str = "",
     request_type: str = "CHAT",
+    problem_context: Optional[Dict[str, Any]] = None,
 ) -> MainGraphState:
     """
     초기 상태 생성
 
-    문제 정보를 하드코딩 딕셔너리에서 가져와서 State에 추가
-    추후 DB 조회로 전환 가능
+    problem_context가 없으면 동기 경로(get_problem_info_sync)로 내장 스펙만 로드합니다.
+    DB 스펙·checker_json이 필요하면 호출부에서 await get_problem_info(spec_id, db) 후 전달하세요.
     """
     now = datetime.utcnow().isoformat()
 
-    # 문제 정보 가져오기 (하드코딩 딕셔너리)
-    problem_context = get_problem_info_sync(spec_id)
+    if problem_context is None:
+        problem_context = get_problem_info_sync(spec_id)
 
     # 개별 필드 추출 (하위 호환성 유지)
     basic_info = problem_context.get("basic_info", {})

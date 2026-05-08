@@ -1,14 +1,18 @@
 """
 문제 정보 관리 모듈
-하드코딩 → DB 전환을 고려한 구조
+DB `problem_specs` + `checker_json` 우선, 비어 있거나 조회 실패 시 하드코딩(더미) 폴백.
 
 [데이터 구조]
-- HARDCODED_PROBLEM_SPEC: 상세한 문제 정보 (basic_info, constraints, ai_guide, solution_code)
-- 추후 DB의 ProblemSpec.meta (JSON) 컬럼과 동일한 구조로 저장 예정
+- HARDCODED_PROBLEM_SPEC: 로컬 더미/레거시 스펙 (Judge0 TC, 스마트 게이트 스위트 등)
+- DB: `docs/AI_PROBLEM_SPEC_USAGE.md` — checker_json.test_cases, reference_code, limits
+
+[더미 사용 시]
+- logger.warning 으로 사유(spec_id, cause)를 남김.
 """
 
+import copy
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -447,49 +451,63 @@ print(tsp(0, 1))
     # },
 }
 
+# 평가 LLM 컨텍스트 한도 (토큰 폭주 방지; 필요 시 호출부에서 max_chars 오버라이드)
+DEFAULT_EVAL_PROBLEM_MAX_CHARS = 24_000
 
-def get_problem_info_sync(spec_id: int) -> Dict[str, Any]:
+
+def problem_statement_for_evaluation(
+    problem_context: Optional[Dict[str, Any]],
+    *,
+    max_chars: int = DEFAULT_EVAL_PROBLEM_MAX_CHARS,
+) -> str:
     """
-    spec_id로 문제 정보 가져오기 (동기 버전)
+    평가(N4 턴 평가, N7 코드 리뷰, N8 토론 등)에 넣을 문제 본문.
 
-    [현재 구현]
-    - 하드코딩 딕셔너리 사용 (HARDCODED_PROBLEM_SPEC)
-
-    [사용 위치]
-    - get_initial_state() 등 동기 함수에서 사용
-    - handle_request에서 problem_context로 저장
-
-    Args:
-        spec_id: 문제 스펙 ID
-
-    Returns:
-        Dict[str, Any]: 상세한 문제 정보 (basic_info, constraints, ai_guide, solution_code 포함)
+    우선순위:
+    1. ``content_md`` — DB ``problem_specs.content_md`` 가 ``get_problem_info`` 로 들어온 값
+    2. ``basic_info.description_summary``
+    3. ``basic_info.description``
+    4. 제목만 (본문 없음 표시)
     """
-    # spec_id가 None이면 기본값(10, 외판원 순회)으로 fallback
+    if not problem_context:
+        return "설명 없음"
+
+    raw = (problem_context.get("content_md") or "").strip()
+    if raw:
+        if len(raw) > max_chars:
+            return (
+                raw[:max_chars].rstrip()
+                + "\n\n[… 문제 본문이 길어 일부만 표시했습니다 …]"
+            )
+        return raw
+
+    basic = problem_context.get("basic_info") or {}
+    summary = (basic.get("description_summary") or "").strip()
+    if summary:
+        return summary
+
+    desc = (basic.get("description") or "").strip()
+    if desc:
+        return desc
+
+    title = (basic.get("title") or "").strip()
+    if title:
+        return f"(상세 본문 없음) 문제: {title}"
+
+    return "설명 없음"
+
+
+def _normalize_spec_id(spec_id: Optional[int]) -> int:
     if spec_id is None:
         logger.warning("[Problem Info] spec_id가 None입니다. 기본값(10)으로 fallback합니다.")
-        spec_id = 10
-
-    # DB에 스마트 게이트 2026이 spec_id=11로 저장된 환경: 11 → 20(스마트 게이트) 매핑
+        return 10
     if spec_id == 11 and 20 in HARDCODED_PROBLEM_SPEC:
-        spec_id = 20
-    # 하드코딩 딕셔너리 사용
-    if spec_id in HARDCODED_PROBLEM_SPEC:
-        problem_context = HARDCODED_PROBLEM_SPEC[spec_id].copy()
-        problem_name = problem_context.get("basic_info", {}).get("title", "알 수 없음")
-        logger.debug(
-            f"[Problem Info] 하드코딩 딕셔너리에서 조회 - spec_id: {spec_id}, problem_name: {problem_name}"
-        )
-        return problem_context
+        return 20
+    return int(spec_id)
 
-    # 기본값 반환 (문제 정보 없음)
-    # 외판원 문제의 기본 테스트 케이스 1개 제공
-    logger.warning(
-        f"[Problem Info] 기본값 반환 - spec_id: {spec_id} (문제 정보 없음, HARDCODED_PROBLEM_SPEC에 정의되지 않음)"
-    )
-    logger.warning(
-        f"[Problem Info] 기본 테스트 케이스 제공 (외판원 문제 - 백준 2098번)"
-    )
+
+def _default_unknown_spec_context(spec_id: int) -> Dict[str, Any]:
+    """HARDCODED에 없는 spec_id용 최소 더미(샘플 TSP TC 1건)."""
     return {
         "basic_info": {
             "problem_id": str(spec_id),
@@ -512,7 +530,6 @@ def get_problem_info_sync(spec_id: int) -> Dict[str, Any]:
         },
         "solution_code": None,
         "keywords": [],
-        # 외판원 문제의 기본 테스트 케이스 1개 제공
         "test_cases": [
             {
                 "input": "4\n0 10 15 20\n5 0 9 10\n6 13 0 12\n8 8 9 0\n",
@@ -523,163 +540,258 @@ def get_problem_info_sync(spec_id: int) -> Dict[str, Any]:
     }
 
 
+def _merge_checker_json_into_context(
+    context: Dict[str, Any], checker: Optional[Dict[str, Any]]
+) -> None:
+    """
+    DB checker_json → problem_context (docs/AI_PROBLEM_SPEC_USAGE.md).
+    - test_cases: expected_output 또는 expected → Judge0용 expected
+    - reference_code → solution_code
+    - limits.timeMs / memoryMb → constraints (rubric 값이 비어 있을 때만)
+    - 선택: test_suite_code (스마트 게이트용 인라인 스위트)
+    """
+    if not checker or not isinstance(checker, dict):
+        return
+
+    if checker.get("type") is not None:
+        context["checker_type"] = checker["type"]
+
+    limits = checker.get("limits")
+    if isinstance(limits, dict):
+        constraints = context.setdefault(
+            "constraints",
+            {
+                "time_limit_sec": None,
+                "memory_limit_mb": None,
+                "variable_ranges": {},
+                "logic_reasoning": None,
+            },
+        )
+        if limits.get("timeMs") is not None and constraints.get("time_limit_sec") is None:
+            try:
+                constraints["time_limit_sec"] = float(limits["timeMs"]) / 1000.0
+            except (TypeError, ValueError):
+                pass
+        if limits.get("memoryMb") is not None and constraints.get("memory_limit_mb") is None:
+            try:
+                constraints["memory_limit_mb"] = int(limits["memoryMb"])
+            except (TypeError, ValueError):
+                pass
+
+    raw_tcs = checker.get("test_cases")
+    if isinstance(raw_tcs, list) and raw_tcs:
+        normalized: List[Dict[str, Any]] = []
+        for i, raw in enumerate(raw_tcs):
+            if not isinstance(raw, dict):
+                continue
+            exp = raw.get("expected_output")
+            if exp is None:
+                exp = raw.get("expected")
+            normalized.append(
+                {
+                    "input": ""
+                    if raw.get("input") is None
+                    else str(raw.get("input")),
+                    "expected": "" if exp is None else str(exp),
+                    "description": raw.get("description")
+                    or str(raw.get("id") or f"TC{i + 1}"),
+                }
+            )
+        if normalized:
+            context["test_cases"] = normalized
+
+    ref = checker.get("reference_code")
+    if isinstance(ref, str) and ref.strip():
+        context["solution_code"] = ref
+        context["reference_code"] = ref
+
+    tscode = checker.get("test_suite_code")
+    if isinstance(tscode, str) and tscode.strip():
+        context["test_suite_code"] = tscode
+
+
+def _build_problem_context_from_db_row(spec: Any, spec_id: int) -> Dict[str, Any]:
+    problem = getattr(spec, "problem", None)
+
+    basic_info = {
+        "problem_id": str(problem.id) if problem else str(getattr(spec, "problem_id", "")),
+        "title": (problem.title or "") if problem else "",
+        "description_summary": (spec.content_md[:200] if spec.content_md else None),
+        "input_format": None,
+        "output_format": None,
+    }
+
+    constraints = {
+        "time_limit_sec": None,
+        "memory_limit_mb": None,
+        "variable_ranges": {},
+        "logic_reasoning": None,
+    }
+    if spec.rubric_json and isinstance(spec.rubric_json, dict):
+        performance = spec.rubric_json.get("performance", {})
+        if isinstance(performance, dict):
+            constraints["time_limit_sec"] = performance.get("time_limit_sec")
+            constraints["memory_limit_mb"] = performance.get("memory_limit_mb")
+
+    ai_guide = {
+        "key_algorithms": [],
+        "solution_architecture": None,
+        "hint_roadmap": {},
+        "common_pitfalls": [],
+    }
+    if spec.rubric_json and isinstance(spec.rubric_json, dict):
+        code_quality = spec.rubric_json.get("code_quality", {})
+        if isinstance(code_quality, dict):
+            ai_guide["key_algorithms"] = code_quality.get("algorithms", [])
+
+    keywords = _extract_keywords_from_problem_spec(spec)
+
+    return {
+        "basic_info": basic_info,
+        "constraints": constraints,
+        "ai_guide": ai_guide,
+        "solution_code": None,
+        "keywords": keywords,
+        "content_md": spec.content_md,
+        "problem_spec_id": spec_id,
+    }
+
+
+def _fill_eval_dummy_gaps(spec_id: int, context: Dict[str, Any], db_had_row: bool) -> None:
+    """Judge0에 필요한 test_cases / 스마트 게이트 test_suite_code가 비면 내장 스펙으로 보강."""
+    from app.core.config import settings
+
+    smart = spec_id in settings.SMART_GATE_SPEC_IDS
+    if smart:
+        if (context.get("test_suite_code") or "").strip():
+            return
+        dummy = HARDCODED_PROBLEM_SPEC.get(spec_id)
+        if dummy and dummy.get("test_suite_code"):
+            context["test_suite_code"] = dummy["test_suite_code"]
+            logger.warning(
+                "[Problem Info] 스마트 게이트용 test_suite_code가 없어 내장(하드코딩) 스위트로 보강합니다. "
+                "spec_id=%s db_row=%s",
+                spec_id,
+                db_had_row,
+            )
+        return
+
+    tcs = context.get("test_cases") or []
+    if tcs:
+        return
+
+    dummy = HARDCODED_PROBLEM_SPEC.get(spec_id)
+    if dummy and dummy.get("test_cases"):
+        context["test_cases"] = copy.deepcopy(dummy["test_cases"])
+        logger.warning(
+            "[Problem Info] Judge0용 test_cases가 비어 있어 내장(하드코딩) TC로 보강합니다. "
+            "spec_id=%s db_row=%s",
+            spec_id,
+            db_had_row,
+        )
+        return
+
+    context["test_cases"] = copy.deepcopy(
+        _default_unknown_spec_context(spec_id)["test_cases"]
+    )
+    logger.warning(
+        "[Problem Info] test_cases를 확보할 수 없어 기본 TSP 샘플 1건으로 보강합니다. spec_id=%s db_row=%s",
+        spec_id,
+        db_had_row,
+    )
+
+
+def _dummy_context_no_db(spec_id: int, reason: str) -> Dict[str, Any]:
+    """DB 세션 없음·조회 실패·행 없음 등 — 내장 HARDCODED 또는 최소 더미."""
+    if spec_id in HARDCODED_PROBLEM_SPEC:
+        ctx = copy.deepcopy(HARDCODED_PROBLEM_SPEC[spec_id])
+        if reason in ("sync_no_db", "no_db_session"):
+            logger.info(
+                "[Problem Info] 내장 스펙 사용 (DB 미연결). spec_id=%s reason=%s",
+                spec_id,
+                reason,
+            )
+        else:
+            logger.warning(
+                "[Problem Info] 더미/내장 스펙으로 폴백합니다. spec_id=%s reason=%s source=HARDCODED",
+                spec_id,
+                reason,
+            )
+        return ctx
+    ctx = _default_unknown_spec_context(spec_id)
+    logger.warning(
+        "[Problem Info] 더미 스펙 사용 (알 수 없는 spec_id). spec_id=%s reason=%s source=default_tsp_sample",
+        spec_id,
+        reason,
+    )
+    return ctx
+
+
+def get_problem_info_sync(spec_id: int) -> Dict[str, Any]:
+    """
+    동기 로드: DB 연결 없이 내장 HARDCODED 또는 최소 더미만 사용.
+
+    DB 기반 스펙이 필요하면 get_problem_info(spec_id, db) 또는 EvalService 초기화 경로를 사용합니다.
+    """
+    sid = _normalize_spec_id(spec_id)
+    return _dummy_context_no_db(sid, "sync_no_db")
+
+
 async def get_problem_info(spec_id: int, db: Optional[Any] = None) -> Dict[str, Any]:
     """
-    spec_id로 문제 정보 가져오기 (비동기 버전)
-
-    [구현]
-    - DB 조회 우선, 실패 시 하드코딩 딕셔너리 Fallback
-    - ProblemSpec과 Problem 테이블에서 정보 조회
-    - content_md, rubric_json 등을 활용하여 problem_context 구성
+    문제 정보 로드 (비동기).
 
     Args:
-        spec_id: 문제 스펙 ID
-        db: 데이터베이스 세션 (필수)
+        spec_id: ``problem_specs.spec_id`` (PK). 제출/세션의 specId와 동일.
+            ``problems.id``(문제 본체)와는 다른 값입니다.
 
-    Returns:
-        Dict[str, Any]: 상세한 문제 정보 (basic_info, constraints, ai_guide, solution_code 포함)
+    - DB(`problem_specs` + `checker_json`) 우선 — `docs/AI_PROBLEM_SPEC_USAGE.md` 스키마
+    - 조회 실패·행 없음·checker 비어 Judge0 불가 시 내장 스펙으로 보강 (warning 로그)
     """
-    # DB 조회 시도
+    sid = _normalize_spec_id(spec_id)
+
     if db:
         try:
             from app.infrastructure.repositories.exam_repository import \
                 ExamRepository
 
             exam_repo = ExamRepository(db)
-            spec = await exam_repo.get_problem_spec_with_problem(spec_id)
+            spec_row = await exam_repo.get_problem_spec_with_problem(sid)
 
-            if spec and spec.problem:
-                problem = spec.problem
-
-                # basic_info 구성
-                basic_info = {
-                    "problem_id": str(problem.id),
-                    "title": problem.title or "",
-                    "description_summary": (
-                        spec.content_md[:200] if spec.content_md else None
-                    ),  # 처음 200자
-                    "input_format": None,  # content_md에서 파싱 필요 시 추가
-                    "output_format": None,  # content_md에서 파싱 필요 시 추가
-                }
-
-                # constraints 구성 (rubric_json에서 가져오거나 기본값)
-                constraints = {
-                    "time_limit_sec": None,
-                    "memory_limit_mb": None,
-                    "variable_ranges": {},
-                    "logic_reasoning": None,
-                }
-                if spec.rubric_json and isinstance(spec.rubric_json, dict):
-                    performance = spec.rubric_json.get("performance", {})
-                    if isinstance(performance, dict):
-                        constraints["time_limit_sec"] = performance.get(
-                            "time_limit_sec"
-                        )
-                        constraints["memory_limit_mb"] = performance.get(
-                            "memory_limit_mb"
-                        )
-
-                # ai_guide 구성 (rubric_json에서 가져오거나 기본값)
-                ai_guide = {
-                    "key_algorithms": [],
-                    "solution_architecture": None,
-                    "hint_roadmap": {},
-                    "common_pitfalls": [],
-                }
-                if spec.rubric_json and isinstance(spec.rubric_json, dict):
-                    code_quality = spec.rubric_json.get("code_quality", {})
-                    if isinstance(code_quality, dict):
-                        ai_guide["key_algorithms"] = code_quality.get("algorithms", [])
-
-                # keywords 추출
-                keywords = _extract_keywords_from_problem_spec(spec)
-
-                problem_context = {
-                    "basic_info": basic_info,
-                    "constraints": constraints,
-                    "ai_guide": ai_guide,
-                    "solution_code": None,  # checker_json에서 가져올 수 있으면 추가
-                    "keywords": keywords,
-                    "content_md": spec.content_md,  # 전체 내용도 포함
-                }
-
-                problem_name = basic_info.get("title", "알 수 없음")
-                logger.debug(
-                    f"[Problem Info] DB에서 조회 - spec_id: {spec_id}, problem_name: {problem_name}"
-                )
-                return problem_context
-            else:
-                # DB에 spec이 없거나 problem이 없는 경우 → 하드코딩 딕셔너리로 Fallback
-                logger.debug(
-                    f"[Problem Info] DB에 spec 없음 - spec_id: {spec_id}, 하드코딩 딕셔너리로 Fallback"
-                )
-                if spec_id in HARDCODED_PROBLEM_SPEC:
-                    problem_context = HARDCODED_PROBLEM_SPEC[spec_id].copy()
-                    logger.debug(
-                        f"[Problem Info] Fallback 하드코딩 사용 - spec_id: {spec_id}"
+            if spec_row:
+                ctx = _build_problem_context_from_db_row(spec_row, sid)
+                _merge_checker_json_into_context(ctx, spec_row.checker_json)
+                _fill_eval_dummy_gaps(sid, ctx, db_had_row=True)
+                if not getattr(spec_row, "problem", None):
+                    logger.warning(
+                        "[Problem Info] problem_spec은 있으나 연결된 problem 행이 없습니다. "
+                        "spec_id=%s problem_id=%s — checker_json·content_md만 반영합니다.",
+                        sid,
+                        getattr(spec_row, "problem_id", None),
                     )
-                    return problem_context
+                logger.info(
+                    "[Problem Info] DB 기반 problem_context 완료 spec_id=%s checker=%s tc_count=%s",
+                    sid,
+                    bool(spec_row.checker_json),
+                    len(ctx.get("test_cases") or []),
+                )
+                return ctx
+
+            logger.warning(
+                "[Problem Info] DB에 problem_spec 행이 없어 내장/더미로 폴백합니다. spec_id=%s",
+                sid,
+            )
+            return _dummy_context_no_db(sid, "db_spec_missing")
 
         except Exception as e:
             logger.warning(
-                f"[Problem Info] DB 조회 실패 - spec_id: {spec_id}, error: {str(e)}"
+                "[Problem Info] DB 조회 중 예외 — 내장/더미 폴백합니다. spec_id=%s error=%s",
+                sid,
+                e,
             )
-            # Fallback: 하드코딩 딕셔너리 재시도
-            if spec_id in HARDCODED_PROBLEM_SPEC:
-                problem_context = HARDCODED_PROBLEM_SPEC[spec_id].copy()
-                logger.debug(
-                    f"[Problem Info] Fallback 하드코딩 사용 - spec_id: {spec_id}"
-                )
-                return problem_context
+            return _dummy_context_no_db(sid, f"db_error:{e}")
 
-    # Fallback: 하드코딩 딕셔너리 사용
-    if spec_id in HARDCODED_PROBLEM_SPEC:
-        problem_context = HARDCODED_PROBLEM_SPEC[spec_id].copy()
-        problem_name = problem_context.get("basic_info", {}).get("title", "알 수 없음")
-        logger.debug(
-            f"[Problem Info] 하드코딩 딕셔너리에서 조회 - spec_id: {spec_id}, problem_name: {problem_name}"
-        )
-        return problem_context
-
-    # 기본값 반환 (문제 정보 없음)
-    # 외판원 문제의 기본 테스트 케이스 1개 제공
-    logger.warning(
-        f"[Problem Info] 기본값 반환 - spec_id: {spec_id} (문제 정보 없음, HARDCODED_PROBLEM_SPEC에 정의되지 않음)"
-    )
-    logger.warning(
-        f"[Problem Info] 기본 테스트 케이스 제공 (외판원 문제 - 백준 2098번)"
-    )
-    return {
-        "basic_info": {
-            "problem_id": str(spec_id),
-            "title": "",
-            "description_summary": None,
-            "input_format": None,
-            "output_format": None,
-        },
-        "constraints": {
-            "time_limit_sec": 1.0,
-            "memory_limit_mb": 128,
-            "variable_ranges": {},
-            "logic_reasoning": None,
-        },
-        "ai_guide": {
-            "key_algorithms": [],
-            "solution_architecture": None,
-            "hint_roadmap": {},
-            "common_pitfalls": [],
-        },
-        "solution_code": None,
-        "keywords": [],
-        # 외판원 문제의 기본 테스트 케이스 1개 제공
-        "test_cases": [
-            {
-                "input": "4\n0 10 15 20\n5 0 9 10\n6 13 0 12\n8 8 9 0\n",
-                "expected": "35",
-                "description": "기본 케이스: 4개 도시 (외판원 문제)",
-            }
-        ],
-    }
+    return _dummy_context_no_db(sid, "no_db_session")
 
 
 def _extract_keywords_from_problem_spec(spec: Any) -> list[str]:

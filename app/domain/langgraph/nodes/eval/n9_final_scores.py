@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict
 
+from app.core.config import settings
 from app.domain.langgraph.states import MainGraphState
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,22 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                     
         code_performance_score = state.get("code_performance_score")
         code_correctness_score = state.get("code_correctness_score")
-        
+
+        cc_max = float(settings.CODE_CORRECTNESS_MAX_POINTS)
+        try:
+            correctness_raw_pre = float(
+                code_correctness_score if code_correctness_score is not None else 0.0
+            )
+        except (TypeError, ValueError):
+            correctness_raw_pre = 0.0
+        # 구버전 N5(0~100) 체크포인트: 값이 만점(30)을 넘으면 이미 0~100 스케일로 간주
+        if correctness_raw_pre > cc_max + 1e-6:
+            correctness_normalized_pre = min(100.0, correctness_raw_pre)
+        else:
+            correctness_normalized_pre = (
+                (correctness_raw_pre / cc_max) * 100.0 if cc_max > 0 else 0.0
+            )
+
         integrated_score = state.get("integrated_score")
         integrated_evaluation = state.get("integrated_evaluation")
         code_quality_metrics = state.get("code_quality_metrics")
@@ -45,7 +61,10 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         )
         logger.info(f"[N9. Final Scores]   - Aggregate Turn Score: {aggregate_turn_score}")
         logger.info(f"[N9. Final Scores]   - Code Performance Score: {code_performance_score}")
-        logger.info(f"[N9. Final Scores]   - Code Correctness Score: {code_correctness_score}")
+        logger.info(
+            f"[N9. Final Scores]   - Code Correctness Score: {code_correctness_score} "
+            f"(만점 {cc_max}, 가중용 환산 {correctness_normalized_pre:.2f}/100)"
+        )
         logger.info(f"[N9. Final Scores]   - Integrated Score: {integrated_score}")
 
         weights = {
@@ -79,13 +98,16 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
 
         perf_score = code_performance_score if code_performance_score is not None else 0
 
-        correctness_score = (
-            code_correctness_score if code_correctness_score is not None else 0
-        )
+        correctness_raw = correctness_raw_pre
+        correctness_normalized = correctness_normalized_pre
+        if correctness_raw_pre > cc_max + 1e-6:
+            correctness_score = round((correctness_raw_pre / 100.0) * cc_max, 2)
+        else:
+            correctness_score = correctness_raw_pre
 
         total_score = (
             prompt_score * weights["prompt"]
-            + correctness_score * weights["correctness"]
+            + correctness_normalized * weights["correctness"]
             + perf_score * weights["performance"]
         )
 
@@ -124,8 +146,8 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             )
             perf_score = round(perf_score * (0.8 + 0.2 * cc_bonus), 2)
 
-        if correctness_score < 100:
-            grade = "F" if correctness_score < 60 else "D"
+        if correctness_normalized < 100:
+            grade = "F" if correctness_normalized < 60 else "D"
         else:
             if code_quality_metrics is not None:
                 if delta_cc_pct <= 10 and ast_ok:
@@ -217,7 +239,10 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
 
         logger.info(f"[N9. Final Scores] ===== 최종 점수 집계 완료 =====")
         logger.info(f"[N9. Final Scores] Prompt Score: {prompt_score:.2f} (40%)")
-        logger.info(f"[N9. Final Scores] Correctness Score: {correctness_score:.2f} (40%)")
+        logger.info(
+            f"[N9. Final Scores] Correctness Score: {correctness_score:.2f}/{cc_max} "
+            f"(가중 반영 {correctness_normalized:.2f}/100) (40%)"
+        )
         logger.info(f"[N9. Final Scores] Performance Score: {perf_score:.2f} (20%)")
         logger.info(f"[N9. Final Scores] Total Score: {total_score:.2f}")
         logger.info(f"[N9. Final Scores] Grade: {grade}")

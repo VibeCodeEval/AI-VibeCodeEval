@@ -116,7 +116,7 @@ class SubmitCodeRequest(BaseModel):
     examId: int = Field(..., description="시험 ID")
     participantId: int = Field(..., description="참가자 ID (participants.id)")
     problemId: int = Field(..., description="문제 ID")
-    specId: int = Field(..., description="스펙 ID (problem_specs.id)")
+    specId: int = Field(..., description="스펙 ID (problem_specs.spec_id, PK)")
     finalCode: str = Field(..., description="제출 코드")
     language: str = Field(..., description="프로그래밍 언어 (예: python3.11)")
     submissionId: int = Field(..., description="제출 ID (백엔드에서 생성)")
@@ -255,10 +255,18 @@ class SaveChatMessageResponse(BaseModel):
 
 
 class ProblemContext(BaseModel):
-    """문제 컨텍스트"""
+    """문제 컨텍스트 (Spring/Core → Worker 전달)"""
 
-    problemId: Optional[int] = Field(None, description="문제 ID", alias="problemId")
-    specVersion: int = Field(..., description="스펙 버전", alias="specVersion")
+    problemId: Optional[int] = Field(None, description="문제 ID (problems.id)", alias="problemId")
+    specVersion: Optional[int] = Field(
+        None,
+        description=(
+            "문제 스펙 버전 (problem_specs.version). "
+            "전달 시 서버가 로깅·추적에 참고할 수 있으나, 요청/응답 본문에 자동으로 다시 채워지지는 않습니다. "
+            "생략·null이면 추가 DB 조회 없이 미전달로 처리되며, LangGraph 입력에는 spec_id만 사용됩니다."
+        ),
+        alias="specVersion",
+    )
 
 
 class ChatMessagesRequest(BaseModel):

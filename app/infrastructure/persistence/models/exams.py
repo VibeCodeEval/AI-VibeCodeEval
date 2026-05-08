@@ -75,7 +75,7 @@ class ExamParticipant(Base):
     token_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     token_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     spec_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("problem_specs.id"), nullable=False
+        BigInteger, ForeignKey("problem_specs.spec_id"), nullable=False
     )
     joined_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
