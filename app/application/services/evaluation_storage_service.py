@@ -62,6 +62,10 @@ class EvaluationStorageService:
             # turn_log에서 평가 정보 추출
             prompt_eval_details = turn_log.get("prompt_evaluation_details", {})
             score = prompt_eval_details.get("score")
+            is_guardrail_failed = bool(turn_log.get("is_guardrail_failed", False))
+            if is_guardrail_failed:
+                # 가드레일 위반 턴은 저장 점수를 강제로 0점 처리
+                score = 0.0
             analysis = turn_log.get(
                 "comprehensive_reasoning"
             ) or prompt_eval_details.get("final_reasoning")
@@ -135,8 +139,8 @@ class EvaluationStorageService:
                 "applied_rubrics": applied_rubrics,
                 "scoring_cot": scoring_cot,
                 "weights": prompt_eval_details.get("weights", {}),  # 가중치 정보
-                "turn_score": turn_log.get("turn_score"),
-                "is_guardrail_failed": turn_log.get("is_guardrail_failed", False),
+                "turn_score": 0.0 if is_guardrail_failed else turn_log.get("turn_score"),
+                "is_guardrail_failed": is_guardrail_failed,
                 "guardrail_message": turn_log.get("guardrail_message"),
                 "ai_summary": ai_summary,  # AI 응답 요약 (6번 Node에서 Chaining 전략 평가에 사용)
                 "user_prompt_summary": turn_log.get("user_prompt_summary"),
