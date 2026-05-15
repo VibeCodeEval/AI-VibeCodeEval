@@ -25,6 +25,10 @@ ENV/
 env/
 .conda/
 
+# Vertex / GCP 서비스 계정 JSON (폴더는 유지, JSON만 커밋 제외)
+secrets/*
+!secrets/.gitkeep
+
 # Environment variables
 .env
 .env.local

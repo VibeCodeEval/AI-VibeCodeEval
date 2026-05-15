@@ -68,16 +68,22 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
 
-    # Vertex AI 설정 (Google Cloud)
-    USE_VERTEX_AI: bool = False  # Vertex AI 사용 여부
-    GOOGLE_PROJECT_ID: Optional[str] = None  # GCP 프로젝트 ID
-    GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None  # Service Account JSON (문자열)
+    # Vertex AI 설정 (Google Cloud) — 기본은 Vertex, 로컬/테스트는 .env에서 USE_VERTEX_AI=false
+    USE_VERTEX_AI: bool = True
+    # Vertex `project` — .env 의 GOOGLE_PROJECT_ID (비우면 SA JSON 의 project_id 폴백, vertex_auth)
+    GOOGLE_PROJECT_ID: Optional[str] = None
+    GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None  # SA JSON 전체를 문자열로 (비권장·민감)
+    # 프로젝트 루트 기준 상대 경로 권장. 예: secrets/vertex-sa.json (.gitignore 처리)
+    GOOGLE_SERVICE_ACCOUNT_JSON_PATH: Optional[str] = None
     GOOGLE_LOCATION: str = "us-central1"  # GCP 리전
 
     # 기본 LLM 설정
     DEFAULT_LLM_MODEL: str = "gemini-2.5-flash"  # .env에서 오버라이드 가능 (기본값)
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 4096
+
+    # Writer(N3): LLM에 넘기는 최근 대화 턴 수 (user+assistant 한 쌍=1턴). 클수록 맥락↑·토큰·지연↑
+    WRITER_MAX_HISTORY_TURNS: int = Field(default=4, ge=1, le=20)
 
     # Judge0 설정 (코드 실행 평가)
     JUDGE0_API_URL: str = (

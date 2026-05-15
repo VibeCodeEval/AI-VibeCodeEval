@@ -1,6 +1,11 @@
 """
 Pytest 설정 및 Fixtures
 """
+import os
+
+# 앱 설정 로드 전에 적용: 기본 Vertex 대신 테스트는 AI Studio(GEMINI_API_KEY) 경로 사용
+os.environ.setdefault("USE_VERTEX_AI", "false")
+
 import pytest
 import sys
 import asyncio

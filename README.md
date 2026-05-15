@@ -565,10 +565,12 @@ docker-compose down
 | `REDIS_HOST` | Redis 호스트 | `localhost` | ✅ |
 | `REDIS_PORT` | Redis 포트 | `6379` | ❌ |
 | `REDIS_PASSWORD` | Redis 비밀번호 | - | ❌ |
-| `GEMINI_API_KEY` | Gemini API 키 | - | ✅ |
-| `USE_VERTEX_AI` | Vertex AI 사용 여부 | `false` | ❌ |
+| `GEMINI_API_KEY` | Gemini API 키 (AI Studio, `USE_VERTEX_AI=false`일 때) | - | ⚠️ |
+| `USE_VERTEX_AI` | Vertex AI 사용 여부 | `true` | ❌ |
 | `GOOGLE_PROJECT_ID` | GCP 프로젝트 ID | - | ⚠️ (Vertex AI 사용 시) |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | 서비스 계정 JSON 문자열 | - | ⚠️ (Vertex AI 사용 시) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON_PATH` | 서비스 계정 JSON 파일 경로(프로젝트 루트 기준 상대 또는 절대) | - | ⚠️ (Vertex, SA 파일 사용 시) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | 서비스 계정 JSON 문자열(.env 직접 주입, 비권장) | - | ⚠️ |
+| `GOOGLE_LOCATION` | Vertex 리전 | `us-central1` | ❌ |
 | `JUDGE0_API_URL` | Judge0 API URL | `http://localhost:2358` | ✅ |
 | `JUDGE0_API_KEY` | Judge0 API 키 (RapidAPI) | - | ⚠️ (RapidAPI 사용 시) |
 | `JUDGE0_USE_RAPIDAPI` | RapidAPI 사용 여부 | `false` | ❌ |

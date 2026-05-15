@@ -52,6 +52,33 @@ _LLM_REGISTRY: Dict[str, Any] = {
 }
 
 
+def _resolved_llm_model_label(llm: Any) -> str:
+    """LangChain 채팅 모델에서 실제 요청에 쓰이는 모델 식별자(가능한 경우)."""
+    for attr in ("model_name", "model"):
+        v = getattr(llm, attr, None)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return type(llm).__name__
+
+
+def _log_n8_debate_llm_registry() -> None:
+    """N8 토론에 바인딩된 모델 확인용(서버/워커 프로세스 기동 시 1회)."""
+    parts: List[str] = []
+    for role in ("strict", "advocate", "neutral", "verdict"):
+        cfg = _AGENT_CONFIG[role]
+        yaml_model = cfg.get("model")
+        temp = cfg.get("temperature")
+        llm = _LLM_REGISTRY[role]
+        resolved = _resolved_llm_model_label(llm)
+        parts.append(f"{role} yaml={yaml_model!r} client={resolved!r} temp={temp}")
+    logger.info(
+        "[N8] LLM 레지스트리 (debate_agents.yaml → get_llm_for_model): %s | USE_VERTEX_AI=%s",
+        " | ".join(parts),
+        settings.USE_VERTEX_AI,
+    )
+
+
+_log_n8_debate_llm_registry()
 def _make_llm(role: str):
     """역할에 맞는 LLM 인스턴스 반환 (모듈 레벨 캐시 사용)"""
     return _LLM_REGISTRY[role]

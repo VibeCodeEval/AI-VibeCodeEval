@@ -14,11 +14,11 @@ from functools import lru_cache
 from typing import Any, Dict, Literal, Optional
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_vertexai import ChatVertexAI
 from langchain_openai import ChatOpenAI
 
-# from langchain_google_vertexai import ChatVertexAI  # Vertex AI 사용 시 주석 해제
-
 from app.core.config import settings
+from app.core.vertex_auth import load_vertex_credentials, resolve_vertex_project_id
 
 # from langchain_anthropic import ChatAnthropic  # 필요시 추가
 
@@ -76,14 +76,22 @@ def create_gemini_llm(
     temperature: float = 0.3,
     max_output_tokens: Optional[int] = None,
     api_key: Optional[str] = None,
-) -> ChatGoogleGenerativeAI:
+) -> Any:
     """
-    Gemini LLM 생성 공통 헬퍼 (AI Studio - API Key 방식)
-
-    - thinking_budget=0 : gemini-2.5-* 모델의 thinking 비활성화 → 응답 속도 개선
-    - timeout : LLM API 요청 타임아웃 설정 (기본 60초)
+    Gemini 호출용 LLM (USE_VERTEX_AI 시 Vertex, 아니면 AI Studio API Key).
     """
     selected_model = model or settings.DEFAULT_LLM_MODEL
+
+    if settings.USE_VERTEX_AI:
+        return ChatVertexAI(
+            model=selected_model,
+            project=resolve_vertex_project_id(),
+            location=settings.GOOGLE_LOCATION,
+            credentials=load_vertex_credentials(),
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+        )
+
     thinking_budget = settings.LLM_THINKING_BUDGET
     # gemini-2.5-pro 계열은 thinking 모드가 필수인 경우가 있어
     # budget=0을 강제하면 400(Budget 0 is invalid) 오류가 발생할 수 있음.
@@ -104,8 +112,8 @@ def create_gemini_llm(
     )
 
 
-def _create_gemini_llm(**kwargs) -> ChatGoogleGenerativeAI:
-    """Gemini LLM 생성 (AI Studio - API Key 방식)"""
+def _create_gemini_llm(**kwargs) -> Any:
+    """Gemini LLM 생성 (Vertex 또는 AI Studio)"""
     return create_gemini_llm(
         model=kwargs.get("model"),
         temperature=kwargs.get("temperature", 0.3),
