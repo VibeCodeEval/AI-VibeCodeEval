@@ -41,7 +41,7 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             )
         except (TypeError, ValueError):
             correctness_raw_pre = 0.0
-        # 구버전 N5(0~100) 체크포인트: 값이 만점(30)을 넘으면 이미 0~100 스케일로 간주
+        # 구버전 N5(0~100) 체크포인트: 값이 CODE_CORRECTNESS_MAX_POINTS를 넘으면 이미 0~100 스케일로 간주
         if correctness_raw_pre > cc_max + 1e-6:
             correctness_normalized_pre = min(100.0, correctness_raw_pre)
         else:

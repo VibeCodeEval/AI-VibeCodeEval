@@ -14,7 +14,6 @@ from functools import lru_cache
 from typing import Any, Dict, Literal, Optional
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_google_vertexai import ChatVertexAI
 from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
@@ -71,6 +70,18 @@ def _create_cache_key(node_name: str, llm_type: str, **kwargs) -> str:
     return f"{node_name}_{llm_type}_{config_str}"
 
 
+def _resolve_thinking_budget(model_name: str) -> Optional[int]:
+    """gemini-2.5-pro 등 thinking 필수 모델에서 budget=0 방지."""
+    thinking_budget = settings.LLM_THINKING_BUDGET
+    if (
+        isinstance(model_name, str)
+        and "gemini-2.5-pro" in model_name.lower()
+        and thinking_budget == 0
+    ):
+        return None
+    return thinking_budget
+
+
 def create_gemini_llm(
     model: Optional[str] = None,
     temperature: float = 0.3,
@@ -78,37 +89,48 @@ def create_gemini_llm(
     api_key: Optional[str] = None,
 ) -> Any:
     """
-    Gemini 호출용 LLM (USE_VERTEX_AI 시 Vertex, 아니면 AI Studio API Key).
+    Gemini 호출용 LLM.
+
+    - USE_VERTEX_AI=true: ChatGoogleGenerativeAI + Vertex (project/location/SA JSON, GCP 과금)
+    - USE_VERTEX_AI=false: ChatGoogleGenerativeAI + Gemini Developer API (GEMINI_API_KEY)
     """
     selected_model = model or settings.DEFAULT_LLM_MODEL
+    thinking_budget = _resolve_thinking_budget(selected_model)
+    common_kwargs: Dict[str, Any] = {
+        "model": selected_model,
+        "temperature": temperature,
+        "max_output_tokens": max_output_tokens,
+        "thinking_budget": thinking_budget,
+        "timeout": settings.LLM_REQUEST_TIMEOUT,
+    }
 
     if settings.USE_VERTEX_AI:
-        return ChatVertexAI(
-            model=selected_model,
-            project=resolve_vertex_project_id(),
-            location=settings.GOOGLE_LOCATION,
-            credentials=load_vertex_credentials(),
-            temperature=temperature,
-            max_output_tokens=max_output_tokens,
+        project_id = resolve_vertex_project_id()
+        if not project_id:
+            raise ValueError(
+                "USE_VERTEX_AI=true 이지만 GOOGLE_PROJECT_ID 또는 "
+                "GOOGLE_SERVICE_ACCOUNT_JSON(_PATH)의 project_id를 확인할 수 없습니다."
+            )
+        vertex_kwargs: Dict[str, Any] = {
+            **common_kwargs,
+            "vertexai": True,
+            "project": project_id,
+            "location": settings.GOOGLE_LOCATION,
+        }
+        credentials = load_vertex_credentials()
+        if credentials is not None:
+            vertex_kwargs["credentials"] = credentials
+        logger.debug(
+            "[LLM Factory] Vertex(genai) — project=%s location=%s credentials=%s",
+            project_id,
+            settings.GOOGLE_LOCATION,
+            "SA" if credentials is not None else "ADC",
         )
-
-    thinking_budget = settings.LLM_THINKING_BUDGET
-    # gemini-2.5-pro 계열은 thinking 모드가 필수인 경우가 있어
-    # budget=0을 강제하면 400(Budget 0 is invalid) 오류가 발생할 수 있음.
-    if (
-        isinstance(selected_model, str)
-        and "gemini-2.5-pro" in selected_model.lower()
-        and thinking_budget == 0
-    ):
-        thinking_budget = None
+        return ChatGoogleGenerativeAI(**vertex_kwargs)
 
     return ChatGoogleGenerativeAI(
-        model=selected_model,
+        **common_kwargs,
         google_api_key=api_key or settings.GEMINI_API_KEY,
-        temperature=temperature,
-        max_output_tokens=max_output_tokens,
-        thinking_budget=thinking_budget,
-        timeout=settings.LLM_REQUEST_TIMEOUT,
     )
 
 

@@ -45,7 +45,7 @@ def resolve_vertex_project_id(settings: Optional["Settings"] = None) -> Optional
 
 def load_vertex_credentials(settings: Optional["Settings"] = None) -> Any:
     """
-    Vertex `ChatVertexAI(..., credentials=...)`에 넘길 Credentials.
+    Vertex `ChatGoogleGenerativeAI(..., credentials=...)`에 넘길 Credentials.
     서비스 계정 정보가 없으면 None (ADC 사용).
     """
     from google.oauth2 import service_account

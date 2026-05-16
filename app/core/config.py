@@ -122,7 +122,18 @@ class Settings(BaseSettings):
 
     # N5 Judge0 정확성(Correctness) 만점. TC당 점수 = (만점 / TC 개수), 합산 상한 = 이 값.
     # State의 code_correctness_score는 0 ~ 이 값 범위. N9 총점 가중치는 이를 0~100으로 환산해 적용.
-    CODE_CORRECTNESS_MAX_POINTS: float = 30.0
+    CODE_CORRECTNESS_MAX_POINTS: float = 100.0
+
+    # N5 성능(Performance) 만점. passed TC마다 time·memory로 0~100 raw 산출 후
+    # (Σ raw / TC 수) × (만점 / 100) — failed TC는 raw 0. State code_performance_score 범위.
+    CODE_PERFORMANCE_MAX_POINTS: float = 100.0
+
+    # Judge0 POST /submissions/batch 청크 상한 (CE 기본 20)
+    JUDGE0_MAX_BATCH_SIZE: int = 20
+
+    # 제출 평가 E2E 상한 (백그라운드 LangGraph N4~N9). 초과 시 FAILED 콜백.
+    # 환경 변수: EVAL_SUBMISSION_TIMEOUT_SEC=600
+    EVAL_SUBMISSION_TIMEOUT_SEC: float = 600.0
 
     # LangSmith 설정 (개발 환경에서 사용)
     # 공식 문서: https://docs.langchain.com/langsmith/create-account-api-key

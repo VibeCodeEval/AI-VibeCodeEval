@@ -4,7 +4,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -34,6 +34,8 @@ class JudgeResult:
     # 다중 테스트 케이스 실행 시에만 설정 (부분 통과 점수용)
     passed_test_cases: Optional[int] = None
     total_test_cases: Optional[int] = None
+    # Judge0 per-TC 결과 (client._map_judge0_result_to_test_case 형식)
+    test_case_results: Optional[List[Dict[str, Any]]] = None
 
 
 class QueueAdapter(ABC):

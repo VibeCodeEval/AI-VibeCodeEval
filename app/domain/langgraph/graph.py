@@ -62,6 +62,7 @@ from app.domain.langgraph.nodes.eval.n9_final_scores import \
     aggregate_final_scores
 from app.domain.langgraph.nodes.system.system_nodes import (handle_failure,
                                                              summarize_memory)
+from app.domain.langgraph.eval_timeout_tracking import wrap_eval_node_tracking
 from app.domain.langgraph.states import MainGraphState
 from app.domain.langgraph.subgraph_eval_turn import create_eval_turn_subgraph
 from app.domain.langgraph.utils.problem_info import get_problem_info_sync
@@ -137,31 +138,60 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     # ===== 노드 추가 =====
 
     # 1. Handle Request Load State
-    builder.add_node("handle_request", handle_request_load_state)
+    builder.add_node(
+        "handle_request",
+        wrap_eval_node_tracking("handle_request", handle_request_load_state),
+    )
 
     # 2. Intent Analyzer
-    builder.add_node("intent_analyzer", intent_analyzer)
+    builder.add_node(
+        "intent_analyzer",
+        wrap_eval_node_tracking("intent_analyzer", intent_analyzer),
+    )
 
     # 3. Writer LLM
-    builder.add_node("writer", writer_llm)
+    builder.add_node("writer", wrap_eval_node_tracking("writer", writer_llm))
 
     # SYSTEM 노드들
-    builder.add_node("handle_failure", handle_failure)
-    builder.add_node("summarize_memory", summarize_memory)
+    builder.add_node(
+        "handle_failure", wrap_eval_node_tracking("handle_failure", handle_failure)
+    )
+    builder.add_node(
+        "summarize_memory",
+        wrap_eval_node_tracking("summarize_memory", summarize_memory),
+    )
 
     # 4. Eval Turn Guard (제출 시 State의 messages에서 모든 턴 추출하여 동기 평가 실행)
-    builder.add_node("eval_turn_guard", eval_turn_submit_guard)
+    builder.add_node(
+        "eval_turn_guard",
+        wrap_eval_node_tracking("eval_turn_guard", eval_turn_submit_guard),
+    )
 
     # 5. Main Router (조건부 분기 함수로 처리)
 
     # 신규 평가 파이프라인 (N5~N8)
-    builder.add_node("eval_code_execution", eval_code_execution)      # N5 Judge0
-    builder.add_node("eval_static_analysis", eval_static_analysis)    # N6 Radon CC
-    builder.add_node("eval_code_agent", eval_code_agent)              # N7 Code Review LLM
-    builder.add_node("holistic_debate", holistic_debate_flow)         # N8 다중 에이전트 토론
+    builder.add_node(
+        "eval_code_execution",
+        wrap_eval_node_tracking("eval_code_execution", eval_code_execution),
+    )
+    builder.add_node(
+        "eval_static_analysis",
+        wrap_eval_node_tracking("eval_static_analysis", eval_static_analysis),
+    )
+    builder.add_node(
+        "eval_code_agent",
+        wrap_eval_node_tracking("eval_code_agent", eval_code_agent),
+    )
+    builder.add_node(
+        "holistic_debate",
+        wrap_eval_node_tracking("holistic_debate", holistic_debate_flow),
+    )
 
     # 7. Aggregate Final Scores
-    builder.add_node("aggregate_final_scores", aggregate_final_scores)
+    builder.add_node(
+        "aggregate_final_scores",
+        wrap_eval_node_tracking("aggregate_final_scores", aggregate_final_scores),
+    )
 
     # ===== 엣지 추가 =====
 

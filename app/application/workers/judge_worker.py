@@ -207,6 +207,7 @@ class JudgeWorker:
                     exit_code=0 if status == "success" else 1,
                     passed_test_cases=passed_count,
                     total_test_cases=total_count,
+                    test_case_results=test_case_results,
                 )
 
             else:

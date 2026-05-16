@@ -464,6 +464,9 @@ async def _evaluate_turn_sync(
         }
 
         # SubGraph 실행 (동기)
+        from app.domain.langgraph.eval_timeout_tracking import set_eval_current_node
+
+        set_eval_current_node(f"eval_turn_subgraph:turn_{turn}")
         logger.info(f"[Eval Turn Sync] Eval Turn SubGraph 실행 시작 - turn: {turn}")
         result = await eval_turn_subgraph.ainvoke(turn_state)
         logger.info(f"[Eval Turn Sync] Eval Turn SubGraph 실행 완료 - turn: {turn}")
