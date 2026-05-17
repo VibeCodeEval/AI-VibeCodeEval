@@ -3,6 +3,10 @@ from datetime import datetime
 from typing import Any, Dict
 
 from app.core.config import settings
+from app.domain.langgraph.nodes.eval.rubric_json_serializers import (
+    build_correctness_details,
+    build_performance_details,
+)
 from app.domain.langgraph.states import MainGraphState
 
 logger = logging.getLogger(__name__)
@@ -180,6 +184,7 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         memory_limit_mb = state.get("memory_limit_mb")
         skip_performance = state.get("skip_performance", False)
         skip_reason = state.get("skip_reason")
+        test_case_results = state.get("test_case_results")
 
         v21_summary = None
         if rubric_breakdown or code_quality_metrics:
@@ -202,34 +207,20 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             "total_score": round(total_score, 2),
             "grade": grade,
             "v21_summary": v21_summary,
-            "correctness_details": (
-                {
-                    "test_cases_passed": test_cases_passed,
-                    "test_cases_total": test_cases_total,
-                    "pass_rate": round(
-                        (
-                            (test_cases_passed / test_cases_total * 100)
-                            if test_cases_total and test_cases_total > 0
-                            else 0
-                        ),
-                        1,
-                    ),
-                    "correctness_reasoning": state.get("correctness_reasoning"),
-                }
-                if test_cases_total is not None
-                else None
+            "correctness_details": build_correctness_details(
+                test_cases_passed=test_cases_passed,
+                test_cases_total=test_cases_total,
+                correctness_reasoning=state.get("correctness_reasoning"),
+                test_case_results=test_case_results,
             ),
-            "performance_details": (
-                {
-                    "execution_time": execution_time,
-                    "memory_used_mb": memory_used_mb,
-                    "time_limit_sec": time_limit_sec,
-                    "memory_limit_mb": memory_limit_mb,
-                    "skip_performance": skip_performance,
-                    "skip_reason": skip_reason,
-                }
-                if not skip_performance or execution_time is not None
-                else None
+            "performance_details": build_performance_details(
+                execution_time=execution_time,
+                memory_used_mb=memory_used_mb,
+                time_limit_sec=time_limit_sec,
+                memory_limit_mb=memory_limit_mb,
+                skip_performance=bool(skip_performance),
+                skip_reason=skip_reason,
+                test_case_results=test_case_results,
             ),
         }
 

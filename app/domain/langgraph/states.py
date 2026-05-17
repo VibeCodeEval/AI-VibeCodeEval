@@ -85,6 +85,8 @@ class MainGraphState(TypedDict):
     skip_reason: Optional[str]
     test_cases_passed: Optional[int]
     test_cases_total: Optional[int]
+    # N5 Judge0 per-TC 결과 (N9 rubric_json.correctness_details.test_cases)
+    test_case_results: Optional[List[Dict[str, Any]]]
     correctness_reasoning: Optional[str]
     final_scores: Optional[Dict[str, float]]
 

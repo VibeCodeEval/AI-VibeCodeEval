@@ -170,6 +170,20 @@ export interface CodeEvaluationDto {
     testCasesTotal?: number;
     passRate?: number;
     correctnessReasoning?: string | null;
+    /** Judge0 TC별 상세 (N5 → rubric_json). 실패·타임아웃 시 `[]` */
+    testCases?: Array<{
+      index: number;
+      input: string;
+      expected: string;
+      actual: string;
+      passed: boolean;
+      statusId?: number | null;
+      statusDescription?: string | null;
+      timeSec?: number | null;
+      memoryMb?: number | null;
+      stderr?: string | null;
+      compileOutput?: string | null;
+    }>;
   } | null;
   performanceDetails: {
     executionTime?: number | null;
@@ -178,6 +192,14 @@ export interface CodeEvaluationDto {
     memoryLimitMb?: number | null;
     skipPerformance?: boolean;
     skipReason?: string | null;
+    /** TC별 실행 시간·메모리·raw 성능 점수 (passed TC만 raw > 0) */
+    testCases?: Array<{
+      index: number;
+      passed: boolean;
+      timeSec?: number | null;
+      memoryMb?: number | null;
+      rawPerformanceScore?: number | null;
+    }>;
   } | null;
   codeEvalReport: {
     overallSummary?: string;
@@ -192,8 +214,8 @@ export interface CodeEvaluationDto {
 매핑 (`scores` + `scores.rubric_json`):
 - `correctnessScore` <- `scores.correctness_score`
 - `performanceScore` <- `scores.perf_score`
-- `correctnessDetails` <- `rubric_json.correctness_details`
-- `performanceDetails` <- `rubric_json.performance_details`
+- `correctnessDetails` <- `rubric_json.correctness_details` (`testCases` <- `test_cases`)
+- `performanceDetails` <- `rubric_json.performance_details` (`testCases` <- `test_cases`)
 - `codeEvalReport` <- `rubric_json.code_eval_report`
 
 ### 5) 전체 평가 내용 DTO

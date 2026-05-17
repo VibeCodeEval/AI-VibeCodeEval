@@ -79,10 +79,23 @@ class Settings(BaseSettings):
 
     # 기본 LLM 설정
     DEFAULT_LLM_MODEL: str = "gemini-2.5-flash"  # .env에서 오버라이드 가능 (기본값)
-    LLM_TEMPERATURE: float = 0.7
+    LLM_TEMPERATURE: float = 0.7  # N3 Writer
     LLM_MAX_TOKENS: int = 4096
+    LLM_TEMPERATURE_DEFAULT: float = 0.3  # create_gemini_llm 미지정 시
+    LLM_TEMPERATURE_INTENT: float = 0.3  # N2 Intent Analyzer
+    LLM_TEMPERATURE_SYSTEM: float = 0.3  # 시스템 노드(요약 등)
+    LLM_TEMPERATURE_EVAL: float = 0.0  # N4 루브릭 평가, N7
+    LLM_TEMPERATURE_EVAL_INTENT: float = 0.1  # N4 intent_analysis (6대 통합 의도)
+    LLM_TEMPERATURE_EVAL_SUMMARY: float = 0.2  # N4 summarize_answer (대화 요약)
+    LLM_TEMPERATURE_SPEC: float = 0.2  # Spec Extractor
+    # N8 토론: None이면 debate_agents.yaml temperature 사용 (B안 폴백)
+    LLM_TEMPERATURE_DEBATE_STRICT: Optional[float] = None
+    LLM_TEMPERATURE_DEBATE_ADVOCATE: Optional[float] = None
+    LLM_TEMPERATURE_DEBATE_NEUTRAL: Optional[float] = None
+    LLM_TEMPERATURE_DEBATE_VERDICT: Optional[float] = None
 
     # Writer(N3): LLM에 넘기는 최근 대화 턴 수 (user+assistant 한 쌍=1턴). 클수록 맥락↑·토큰·지연↑
+    # Field(ge=1, le=20): Pydantic 검증 — ge=이상(greater or equal), le=이하(less or equal). 1~20만 허용.
     WRITER_MAX_HISTORY_TURNS: int = Field(default=4, ge=1, le=20)
 
     # Judge0 설정 (코드 실행 평가)
@@ -146,7 +159,7 @@ class Settings(BaseSettings):
 
     # LLM 추론/타임아웃 설정
     LLM_THINKING_BUDGET: Optional[int] = 0   # 0=thinking 비활성화, None=모델 기본값
-    LLM_REQUEST_TIMEOUT: float = 60.0        # LLM API 요청 타임아웃 (초)
+    LLM_REQUEST_TIMEOUT: float = 120.0  # LLM API 요청 타임아웃 (초, N8 pro 등 장호출용)
 
     # Middleware 설정
     MIDDLEWARE_RATE_LIMIT_MAX_CALLS: int = 15  # Rate limit 최대 호출 횟수

@@ -10,6 +10,9 @@ description: >
   verdict 노드에서 r4_context_maintenance_score 산정 기준 강화.
   .maestro/RUBRIC_V3_CHANGE_PLAN.md 참조.
 
+  [temperature]
+  기본값은 아래 role별 temperature. .env의 LLM_TEMPERATURE_DEBATE_* 가 설정되면 Config가 우선.
+
 # ──────────────────────────────────────────────
 # 노드: r1_strict, r2_strict
 # 모델: Gemini 2.5 Pro  |  temperature: 0.1

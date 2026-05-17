@@ -45,9 +45,29 @@ _AGENT_CONFIG: Dict[str, Dict[str, Any]] = {
     for role in ("strict", "advocate", "neutral", "verdict")
 }
 
+_DEBATE_TEMPERATURE_OVERRIDE_KEYS = {
+    "strict": "LLM_TEMPERATURE_DEBATE_STRICT",
+    "advocate": "LLM_TEMPERATURE_DEBATE_ADVOCATE",
+    "neutral": "LLM_TEMPERATURE_DEBATE_NEUTRAL",
+    "verdict": "LLM_TEMPERATURE_DEBATE_VERDICT",
+}
+
+
+def _debate_temperature(role: str, cfg: Dict[str, Any]) -> float:
+    """Config(.env)가 설정되면 YAML보다 우선, 없으면 debate_agents.yaml 사용."""
+    override = getattr(
+        settings, _DEBATE_TEMPERATURE_OVERRIDE_KEYS[role], None
+    )
+    if override is not None:
+        return float(override)
+    return float(cfg["temperature"])
+
+
 # 역할별 LLM 인스턴스를 모듈 로드 시 1회만 생성하여 재사용
 _LLM_REGISTRY: Dict[str, Any] = {
-    role: get_llm_for_model(cfg["model"], float(cfg["temperature"]))
+    role: get_llm_for_model(
+        cfg["model"], _debate_temperature(role, cfg)
+    )
     for role, cfg in _AGENT_CONFIG.items()
 }
 
@@ -67,12 +87,19 @@ def _log_n8_debate_llm_registry() -> None:
     for role in ("strict", "advocate", "neutral", "verdict"):
         cfg = _AGENT_CONFIG[role]
         yaml_model = cfg.get("model")
-        temp = cfg.get("temperature")
+        effective_temp = _debate_temperature(role, cfg)
+        override = getattr(
+            settings, _DEBATE_TEMPERATURE_OVERRIDE_KEYS[role], None
+        )
+        temp_src = "env" if override is not None else "yaml"
         llm = _LLM_REGISTRY[role]
         resolved = _resolved_llm_model_label(llm)
-        parts.append(f"{role} yaml={yaml_model!r} client={resolved!r} temp={temp}")
+        parts.append(
+            f"{role} yaml={yaml_model!r} client={resolved!r} "
+            f"temp={effective_temp}({temp_src})"
+        )
     logger.info(
-        "[N8] LLM 레지스트리 (debate_agents.yaml → get_llm_for_model): %s | USE_VERTEX_AI=%s",
+        "[N8] LLM 레지스트리 (debate_agents.yaml + optional .env override): %s | USE_VERTEX_AI=%s",
         " | ".join(parts),
         settings.USE_VERTEX_AI,
     )

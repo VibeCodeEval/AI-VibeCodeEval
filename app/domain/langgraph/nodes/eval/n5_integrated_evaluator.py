@@ -611,6 +611,11 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         "skip_performance": skip_perf,
         "skip_reason": perf_skip_reason,
         "correctness_reasoning": correctness_reasoning,
+        "test_case_results": (
+            [tc for tc in tc_results if isinstance(tc, dict)]
+            if tc_results
+            else []
+        ),
         "updated_at": datetime.utcnow().isoformat(),
     }
 

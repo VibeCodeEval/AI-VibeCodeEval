@@ -4,7 +4,7 @@ from typing import Any, Dict, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.domain.langgraph.nodes.eval_turn.utils import get_llm
+from app.domain.langgraph.nodes.eval_turn.utils import get_llm_intent
 from app.domain.langgraph.states import EvalTurnState, IntentTurnLLMOutput
 from app.domain.langgraph.utils.structured_output_parser import \
     parse_structured_output_async
@@ -47,7 +47,7 @@ async def _classify_intent_single_llm(
     """6대 통합 의도 단일 LLM (predicted_intent + intent_cot)."""
     from app.domain.langgraph.prompts import render_prompt
 
-    llm = get_llm()
+    llm = get_llm_intent()
     structured_llm = llm.with_structured_output(IntentTurnLLMOutput)
 
     first_turn_note = (

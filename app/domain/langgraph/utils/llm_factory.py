@@ -31,28 +31,43 @@ LLMType = Literal["gemini", "openai", "anthropic"]
 NODE_DEFAULT_CONFIGS: Dict[str, Dict[str, Any]] = {
     "intent_analyzer": {
         "llm_type": "gemini",
-        "temperature": 0.3,
+        "temperature": settings.LLM_TEMPERATURE_INTENT,
         "model": settings.DEFAULT_LLM_MODEL,
     },
     "writer": {
         "llm_type": "gemini",
-        "temperature": getattr(settings, "LLM_TEMPERATURE", 0.7),
+        "temperature": settings.LLM_TEMPERATURE,
         "model": settings.DEFAULT_LLM_MODEL,
         "max_tokens": getattr(settings, "LLM_MAX_TOKENS", None),
     },
     "turn_evaluator": {
         "llm_type": "gemini",
-        "temperature": 0.1,
+        "temperature": settings.LLM_TEMPERATURE_EVAL,
+        "model": settings.DEFAULT_LLM_MODEL,
+    },
+    "turn_evaluator_intent": {
+        "llm_type": "gemini",
+        "temperature": settings.LLM_TEMPERATURE_EVAL_INTENT,
+        "model": settings.DEFAULT_LLM_MODEL,
+    },
+    "turn_evaluator_summary": {
+        "llm_type": "gemini",
+        "temperature": settings.LLM_TEMPERATURE_EVAL_SUMMARY,
         "model": settings.DEFAULT_LLM_MODEL,
     },
     "holistic_evaluator": {
         "llm_type": "gemini",
-        "temperature": 0.1,
+        "temperature": settings.LLM_TEMPERATURE_EVAL,
         "model": settings.DEFAULT_LLM_MODEL,
     },
     "system_nodes": {
         "llm_type": "gemini",
-        "temperature": 0.3,
+        "temperature": settings.LLM_TEMPERATURE_SYSTEM,
+        "model": settings.DEFAULT_LLM_MODEL,
+    },
+    "spec_extractor": {
+        "llm_type": "gemini",
+        "temperature": settings.LLM_TEMPERATURE_SPEC,
         "model": settings.DEFAULT_LLM_MODEL,
     },
 }
@@ -84,7 +99,7 @@ def _resolve_thinking_budget(model_name: str) -> Optional[int]:
 
 def create_gemini_llm(
     model: Optional[str] = None,
-    temperature: float = 0.3,
+    temperature: Optional[float] = None,
     max_output_tokens: Optional[int] = None,
     api_key: Optional[str] = None,
 ) -> Any:
@@ -95,10 +110,15 @@ def create_gemini_llm(
     - USE_VERTEX_AI=false: ChatGoogleGenerativeAI + Gemini Developer API (GEMINI_API_KEY)
     """
     selected_model = model or settings.DEFAULT_LLM_MODEL
+    resolved_temperature = (
+        settings.LLM_TEMPERATURE_DEFAULT
+        if temperature is None
+        else temperature
+    )
     thinking_budget = _resolve_thinking_budget(selected_model)
     common_kwargs: Dict[str, Any] = {
         "model": selected_model,
-        "temperature": temperature,
+        "temperature": resolved_temperature,
         "max_output_tokens": max_output_tokens,
         "thinking_budget": thinking_budget,
         "timeout": settings.LLM_REQUEST_TIMEOUT,
@@ -138,7 +158,7 @@ def _create_gemini_llm(**kwargs) -> Any:
     """Gemini LLM 생성 (Vertex 또는 AI Studio)"""
     return create_gemini_llm(
         model=kwargs.get("model"),
-        temperature=kwargs.get("temperature", 0.3),
+        temperature=kwargs.get("temperature"),
         max_output_tokens=kwargs.get("max_tokens"),
         api_key=kwargs.get("api_key"),
     )
@@ -146,10 +166,13 @@ def _create_gemini_llm(**kwargs) -> Any:
 
 def _create_openai_llm(**kwargs) -> ChatOpenAI:
     """OpenAI LLM 생성"""
+    temp = kwargs.get("temperature")
+    if temp is None:
+        temp = settings.LLM_TEMPERATURE_DEFAULT
     return ChatOpenAI(
         model=kwargs.get("model", "gpt-4"),
         api_key=kwargs.get("api_key", getattr(settings, "OPENAI_API_KEY", None)),
-        temperature=kwargs.get("temperature", 0.3),
+        temperature=temp,
         max_tokens=kwargs.get("max_tokens"),
     )
 
@@ -207,7 +230,7 @@ def get_llm(
         "temperature": (
             temperature
             if temperature is not None
-            else node_config.get("temperature", 0.3)
+            else node_config.get("temperature", settings.LLM_TEMPERATURE_DEFAULT)
         ),
         "model": model or node_config.get("model", settings.DEFAULT_LLM_MODEL),
         "max_tokens": (
