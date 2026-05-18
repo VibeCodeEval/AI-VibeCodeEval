@@ -46,3 +46,42 @@ def test_judge0_decode_submission_result_plain_stdout():
 
 def test_judge0_decode_invalid_base64_returns_empty_or_safe():
     assert judge0_decode_text("!!!not-valid-base64!!!") == ""
+
+
+def test_parse_judge_time_and_memory_null_safe():
+    from app.infrastructure.judge0.utils import (
+        parse_judge_memory_kb,
+        parse_judge_time_seconds,
+    )
+
+    assert parse_judge_time_seconds(None) is None
+    assert parse_judge_time_seconds("0.015") == 0.015
+    assert parse_judge_memory_kb(None) is None
+    assert parse_judge_memory_kb("4096") == 4096
+
+
+def test_is_blank_submission_code():
+    from app.infrastructure.judge0.utils import is_blank_submission_code
+
+    assert is_blank_submission_code(None) is True
+    assert is_blank_submission_code("") is True
+    assert is_blank_submission_code("   \n\t  ") is True
+    assert is_blank_submission_code("print(1)") is False
+
+
+def test_resolve_judge0_language_normalizes_api_values():
+    from app.infrastructure.judge0.utils import resolve_judge0_language
+
+    assert resolve_judge0_language("python3.11") == "python"
+    assert resolve_judge0_language("java") == "java"
+    assert resolve_judge0_language("C++") == "cpp"
+    assert resolve_judge0_language(None) == "python"
+
+
+def test_judge0_client_language_id_rapidapi_mapping():
+    from app.infrastructure.judge0.client import Judge0Client
+
+    client = Judge0Client(api_url="http://localhost:2358", use_rapidapi=False)
+    assert client._get_language_id("java") == 62
+    assert client._get_language_id("python3") == 71
+    assert client._get_language_id("cpp") == 54

@@ -12,6 +12,7 @@ import httpx
 
 from app.core.config import settings
 from app.infrastructure.judge0.utils import (
+    extract_language_from_string,
     judge0_decode_submission_result,
     judge0_encode_submission_payload,
 )
@@ -74,9 +75,19 @@ class Judge0Client:
             language: 언어 이름 (예: "python", "java")
 
         Returns:
-            언어 ID (기본값: 71 = Python 3)
+            언어 ID (기본값: 71 = Python 3.8.1 on Judge0 CE)
         """
-        return self.LANGUAGE_IDS.get(language.lower(), 71)
+        normalized = extract_language_from_string(language or "python")
+        lang_id = self.LANGUAGE_IDS.get(normalized)
+        if lang_id is None:
+            logger.warning(
+                "[Judge0] 지원하지 않는 언어 %r → python(71) 사용. "
+                "LANGUAGE_IDS: %s",
+                language,
+                ", ".join(sorted(self.LANGUAGE_IDS)),
+            )
+            return 71
+        return lang_id
 
     def _get_headers(self) -> Dict[str, str]:
         """요청 헤더 생성"""

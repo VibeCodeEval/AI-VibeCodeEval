@@ -204,12 +204,22 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
     session_id = state.get("session_id", "unknown")
     logger.info(f"[N5. Eval Code Execution] 진입 - session_id: {session_id}")
 
-    code_content = state.get("code_content")
+    raw_code = state.get("code_content")
     submission_id = state.get("submission_id")
 
-    if not code_content:
+    from app.infrastructure.judge0.utils import (
+        clean_code,
+        is_blank_submission_code,
+        resolve_judge0_language,
+    )
+
+    code_content = clean_code(raw_code) if raw_code is not None else ""
+
+    if is_blank_submission_code(code_content):
         logger.warning(
-            f"[N5. Eval Code Execution] 코드 없음 - session_id: {session_id}"
+            "[N5. Eval Code Execution] 코드 없음 또는 공백만 — session_id=%s, raw_len=%s",
+            session_id,
+            len(raw_code) if raw_code is not None else 0,
         )
         return {
             "code_correctness_score": None,
@@ -221,16 +231,8 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
         f"[N5. Eval Code Execution] 코드 평가 시작 - session_id: {session_id}, 코드 길이: {len(code_content)}"
     )
 
-    # 원본 코드 로그 (처음 300자)
-    original_code_preview = (
-        code_content[:300].replace("\n", "\\n") if code_content else ""
-    )
+    original_code_preview = code_content[:300].replace("\n", "\\n")
     logger.info(f"[N5] 원본 코드 미리보기 (처음 300자): {original_code_preview}")
-
-    # 코드 정리 (이스케이프된 줄바꿈 문자 변환 등)
-    from app.infrastructure.judge0.utils import clean_code
-
-    code_content = clean_code(code_content)
     logger.info(
         f"[N5. Eval Code Execution] 코드 정리 완료 - 정리 후 길이: {len(code_content)}"
     )
@@ -350,8 +352,16 @@ async def _eval_code_execution_impl(state: MainGraphState) -> Dict[str, Any]:
                 f"[N5] test_cases_raw 타입: {type(test_cases_raw)}, 값: {test_cases_raw}"
             )
 
-    # 언어 정보 가져오기 (기본값: python)
-    language = "python"  # TODO: state에서 언어 정보 가져오기
+    # 제출 언어 → Judge0 CE language_id (submit_code request.language → state["lang"])
+    raw_lang = state.get("lang") or state.get("language")
+    language = resolve_judge0_language(
+        str(raw_lang) if raw_lang is not None else None
+    )
+    logger.info(
+        "[N5] Judge0 language=%s (state.lang=%r) → language_id via client",
+        language,
+        raw_lang,
+    )
 
     # ===== 1단계: Correctness 평가 =====
     logger.info(f"[N5. Eval Code Execution] ===== 1단계: Correctness 평가 시작 =====")

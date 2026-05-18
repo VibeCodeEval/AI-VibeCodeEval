@@ -8,6 +8,8 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from app.domain.langgraph.nodes.eval.eval_turn_targets import \
+    eval_target_turn_numbers
 from app.domain.langgraph.states import MainGraphState
 from app.infrastructure.cache.redis_client import redis_client
 
@@ -75,7 +77,7 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                 )
 
         # 제출 턴(current_turn)은 평가하지 않으므로, 1 ~ (current_turn - 1)만 평가
-        turns_to_evaluate = list(range(1, current_turn))
+        turns_to_evaluate = eval_target_turn_numbers(current_turn)
         logger.info("")
         logger.info(f"[4. Eval Turn Guard] ⭐ 평가 대상 턴: {turns_to_evaluate}")
         logger.info(

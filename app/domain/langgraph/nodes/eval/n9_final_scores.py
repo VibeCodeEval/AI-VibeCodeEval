@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.core.config import settings
 from app.domain.langgraph.nodes.eval.rubric_json_serializers import (
@@ -15,6 +15,31 @@ from app.domain.langgraph.nodes.eval.turn_evaluation_details import (
 from app.domain.langgraph.states import MainGraphState
 
 logger = logging.getLogger(__name__)
+
+
+def _submission_avg_cc(code_quality_metrics: Optional[Dict[str, Any]]) -> float:
+    """N6 code_quality_metrics에서 제출 코드 avg_cc (레거시 v2_metrics 경로 폴백)."""
+    if not code_quality_metrics:
+        return 0.0
+    radon = code_quality_metrics.get("radon_cc")
+    if isinstance(radon, dict) and radon.get("avg_cc") is not None:
+        try:
+            return float(radon["avg_cc"])
+        except (TypeError, ValueError):
+            pass
+    legacy = (code_quality_metrics.get("v2_metrics") or {}).get("radon_cc")
+    if isinstance(legacy, dict) and legacy.get("avg_cc") is not None:
+        try:
+            return float(legacy["avg_cc"])
+        except (TypeError, ValueError):
+            pass
+    delta = code_quality_metrics.get("delta_cc") or {}
+    if delta.get("v2_avg_cc") is not None:
+        try:
+            return float(delta["v2_avg_cc"])
+        except (TypeError, ValueError):
+            pass
+    return 0.0
 
 
 async def _load_turn_evaluations_for_rubric(
@@ -178,12 +203,6 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         else:
             correctness_score = correctness_raw_pre
 
-        total_score = (
-            prompt_score * weights["prompt"]
-            + correctness_normalized * weights["correctness"]
-            + perf_score * weights["performance"]
-        )
-
         # legacy 호환성 (구조 변경 전 N5에서 올라온 데이터)
         if not code_quality_metrics:
             code_quality_metrics = (
@@ -191,7 +210,7 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                 if isinstance(integrated_evaluation, dict)
                 else None
             )
-            
+
         rubric_breakdown = (
             (integrated_evaluation or {}).get("rubric_breakdown")
             if isinstance(integrated_evaluation, dict)
@@ -208,8 +227,7 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             ast_ok = code_quality_metrics.get("ast_pattern_matched", False)
             ast_applicable = code_quality_metrics.get("ast_applicable", False)
             junior_grade = code_quality_metrics.get("junior_grade", False)
-            v2_avg_cc = (code_quality_metrics.get("v2_metrics") or {}).get("radon_cc") or {}
-            avg_cc = (v2_avg_cc if isinstance(v2_avg_cc, dict) else {}).get("avg_cc", 0) or 0.0
+            avg_cc = _submission_avg_cc(code_quality_metrics)
 
         if code_quality_metrics is not None and perf_score > 0:
             cc_bonus = (
@@ -218,6 +236,12 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                 else (0.6 if avg_cc <= 8 else 0.2)
             )
             perf_score = round(perf_score * (0.8 + 0.2 * cc_bonus), 2)
+
+        total_score = (
+            prompt_score * weights["prompt"]
+            + correctness_normalized * weights["correctness"]
+            + perf_score * weights["performance"]
+        )
 
         if correctness_normalized < 100:
             grade = "F" if correctness_normalized < 60 else "D"

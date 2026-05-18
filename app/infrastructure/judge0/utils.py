@@ -156,6 +156,41 @@ def extract_language_from_string(lang_str: str) -> str:
     return language_map.get(lang_lower, "python")
 
 
+def parse_judge_time_seconds(time_val: Any) -> Optional[float]:
+    """Judge0 submission time 필드 → 초. null/빈 값이면 None."""
+    if time_val is None or time_val == "":
+        return None
+    try:
+        return float(time_val)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_judge_memory_kb(memory_val: Any) -> Optional[int]:
+    """Judge0 memory 필드(KB) → 정수 KB. null/빈 값이면 None."""
+    if memory_val is None or memory_val == "":
+        return None
+    try:
+        return int(float(memory_val))
+    except (TypeError, ValueError):
+        return None
+
+
+def is_blank_submission_code(code: Optional[str]) -> bool:
+    """제출 코드가 없거나 공백·줄바꿈만 있는지 (clean_code 이후 기준과 동일하게 strip)."""
+    return not (code or "").strip()
+
+
+def resolve_judge0_language(lang: Optional[str]) -> str:
+    """
+    API/State 제출 언어 → Judge0 CE language_id 매핑 키.
+
+    Judge0 submissions API는 language_id(정수)를 받으며,
+    RapidAPI Judge0 CE 기본 매핑은 client.LANGUAGE_IDS와 동일하다.
+    """
+    return extract_language_from_string(lang or "python")
+
+
 def validate_code_format(code: str) -> tuple[bool, Optional[str]]:
     """
     코드 형식 검증

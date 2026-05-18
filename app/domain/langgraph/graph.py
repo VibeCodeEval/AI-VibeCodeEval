@@ -13,7 +13,7 @@ START → N1 handle_request → N2 intent_analyzer ─┬→ N3 writer → END (
                                                         → N5 eval_code_execution (Judge0)
                                                         → N6 eval_static_analysis (Radon)
                                                         → N7 eval_code_agent (코드 리뷰 LLM)
-                                                        → N8 holistic_debate (다중 에이전트 토론)
+                                                        → N7 → (N4 turn_scores 있으면 N8 토론, 없으면 생략)
                                                         → N9 aggregate_final_scores → END
 
 [노드 설명]
@@ -71,6 +71,7 @@ from app.domain.langgraph.nodes.eval.n8_code_execution import \
 import logging
 from app.domain.langgraph.nodes.eval.n9_final_scores import \
     aggregate_final_scores
+from app.domain.langgraph.nodes.eval.routers import holistic_debate_router
 from app.domain.langgraph.nodes.system.system_nodes import (handle_failure,
                                                              summarize_memory)
 from app.domain.langgraph.eval_timeout_tracking import wrap_eval_node_tracking
@@ -272,10 +273,17 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
 
     builder.add_edge("summarize_memory", "handle_request")
 
-    # 제출 평가 파이프라인: N5 → N6 → N7 → N8 → N9 → END
+    # 제출 평가 파이프라인: N5 → N6 → N7 → (N4 turn_scores 있으면 N8) → N9 → END
     builder.add_edge("eval_code_execution", "eval_static_analysis")
     builder.add_edge("eval_static_analysis", "eval_code_agent")
-    builder.add_edge("eval_code_agent", "holistic_debate")
+    builder.add_conditional_edges(
+        "eval_code_agent",
+        holistic_debate_router,
+        {
+            "holistic_debate": "holistic_debate",
+            "aggregate_final_scores": "aggregate_final_scores",
+        },
+    )
     builder.add_edge("holistic_debate", "aggregate_final_scores")
     builder.add_edge("aggregate_final_scores", END)
 

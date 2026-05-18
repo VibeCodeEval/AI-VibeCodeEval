@@ -55,8 +55,10 @@ async def eval_static_analysis(state: MainGraphState) -> Dict[str, Any]:
         "correctness_reasoning": state.get("correctness_reasoning"),
     }
 
-    if not code_content:
-        logger.warning(f"[N6] 코드 없음. 분석 스킵.")
+    from app.infrastructure.judge0.utils import is_blank_submission_code
+
+    if is_blank_submission_code(code_content):
+        logger.warning("[N6] 코드 없음 또는 공백만. 분석 스킵.")
         return {"code_quality_metrics": code_quality_metrics, **n5_passthrough}
 
     try:
