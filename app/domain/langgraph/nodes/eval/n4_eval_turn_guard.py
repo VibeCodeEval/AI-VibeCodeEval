@@ -273,14 +273,20 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                 logger.info("=" * 80)
                 logger.info("")
 
-                # V2.2: 다음 턴 평가용 이전 턴 요약 누적 (user_prompt_summary, llm_answer_summary)
+                # V2.2 / V3.2: 다음 턴 — 요청 한줄평만 누적 (스펙 전문 제외)
                 if eval_result:
-                    up_summary = eval_result.get("user_prompt_summary") or (
-                        (human_msg[:200] + "...") if human_msg and len(human_msg) > 200 else (human_msg or "")
+                    up_summary = (
+                        eval_result.get("request_one_liner")
+                        or eval_result.get("user_prompt_summary")
+                        or (
+                            (human_msg[:200] + "...")
+                            if human_msg and len(human_msg) > 200
+                            else (human_msg or "")
+                        )
                     )
                     ai_summary = eval_result.get("llm_answer_summary") or eval_result.get("answer_summary") or ""
                     previous_turns_summaries.append(
-                        f"[Turn {turn}] 사용자 요약: {up_summary}\nAI 요약: {ai_summary}"
+                        f"[Turn {turn}] 사용자: {up_summary}\nAI 요약: {ai_summary}"
                     )
 
                 # 다음 턴을 위해 직전 사용자 메시지 기록 (Phase 2 첫 지시 감지용)
@@ -385,6 +391,7 @@ async def _evaluate_turn_sync(
                     "rubric_breakdown": {},
                     "applied_rubrics": [],
                     "scoring_cot": {},
+                    "intent_cot": None,
                     "final_reasoning": "가드레일 위반 턴으로 평가를 건너뛰고 0점 처리",
                 },
                 "comprehensive_reasoning": "가드레일 위반 턴으로 평가를 건너뛰고 0점 처리",
@@ -477,6 +484,11 @@ async def _evaluate_turn_sync(
             [intent_type] if intent_type and intent_type != "UNKNOWN" else [],
         )
         intent_confidence = result.get("intent_confidence", 0.0)
+        intent_cot = result.get("intent_cot")
+        problem_in_turn = result.get("problem_in_turn")
+        user_request_in_turn = result.get("user_request_in_turn")
+        request_one_liner = result.get("request_one_liner")
+        carry_forward = result.get("carry_forward")
         unified_intent = result.get("unified_intent")  # v2.1 4대 통합 의도
         turn_score = result.get("turn_score", 0)
         turn_log_data = result.get("turn_log", {})
@@ -885,18 +897,29 @@ async def _evaluate_turn_sync(
 
         logger.info(f"[Eval Turn Sync] ===== 턴 {turn} 상세 평가 내용 종료 =====")
 
+        _fallback_summary = (
+            human_message[:200] + "..."
+            if len(human_message) > 200
+            else human_message
+        )
+        _user_line = request_one_liner or _fallback_summary
         detailed_turn_log = {
             "turn_number": turn,
-            "user_prompt_summary": (
-                human_message[:200] + "..."
-                if len(human_message) > 200
-                else human_message
-            ),
+            "user_prompt_summary": _user_line,
+            "request_one_liner": request_one_liner,
+            "problem_in_turn": problem_in_turn,
+            "user_request_in_turn": user_request_in_turn,
+            "carry_forward": carry_forward,
             "prompt_evaluation_details": {
                 "intent": final_intent,
                 "intent_types": intent_types,
                 "unified_intent": unified_intent,
                 "intent_confidence": intent_confidence,
+                "intent_cot": intent_cot,
+                "problem_in_turn": problem_in_turn,
+                "user_request_in_turn": user_request_in_turn,
+                "request_one_liner": request_one_liner,
+                "carry_forward": carry_forward,
                 "score": turn_score,
                 # V3.0: rubric_breakdown(dict) + applied_rubrics(list) 사용
                 # V3.1: scoring_cot(Rn→근거 문장) Redis/DB 동기 저장
@@ -998,12 +1021,8 @@ async def _evaluate_turn_sync(
             f"[Eval Turn Sync] 턴 {turn} 평가 저장 완료 - session_id: {session_id}, score: {turn_score}"
         )
 
-        # 평가 결과 반환 (요약 정보 포함; V2.2: 다음 턴에서 previous_turns_summary로 사용)
-        user_prompt_summary = (
-            human_message[:200] + "..."
-            if len(human_message) > 200
-            else human_message
-        )
+        # 평가 결과 반환 (V3.2: request_one_liner → 다음 턴 previous_turns_summary)
+        user_prompt_summary = request_one_liner or _fallback_summary
         llm_answer_summary = result.get("answer_summary", "") or answer_summary
         return {
             "intent_type": final_intent,
@@ -1014,6 +1033,10 @@ async def _evaluate_turn_sync(
             "comprehensive_reasoning": comprehensive_reasoning or answer_summary,
             "answer_summary": answer_summary,
             "user_prompt_summary": user_prompt_summary,
+            "request_one_liner": request_one_liner,
+            "problem_in_turn": problem_in_turn,
+            "user_request_in_turn": user_request_in_turn,
+            "carry_forward": carry_forward,
             "llm_answer_summary": llm_answer_summary,
         }
 

@@ -6,10 +6,79 @@ from app.core.config import settings
 from app.domain.langgraph.nodes.eval.rubric_json_serializers import (
     build_correctness_details,
     build_performance_details,
+    build_reference_cc_summary,
+    build_tc_summary,
+)
+from app.domain.langgraph.nodes.eval.turn_evaluation_details import (
+    build_turn_evaluation_details,
 )
 from app.domain.langgraph.states import MainGraphState
 
 logger = logging.getLogger(__name__)
+
+
+async def _load_turn_evaluations_for_rubric(
+    db: Any,
+    postgres_session_id: int,
+    redis_session_id: str,
+) -> list:
+    """prompt_evaluations(TURN_EVAL) 행과 동일한 details → rubric_json.turn_evaluations."""
+    from sqlalchemy import select, text
+
+    from app.infrastructure.persistence.models.enums import EvaluationTypeEnum
+    from app.infrastructure.persistence.models.sessions import PromptEvaluation
+
+    query = (
+        select(PromptEvaluation)
+        .where(
+            PromptEvaluation.session_id == postgres_session_id,
+            text("prompt_evaluations.evaluation_type::text = :eval_type"),
+        )
+        .order_by(PromptEvaluation.turn)
+    )
+    result = await db.execute(
+        query.params(eval_type=EvaluationTypeEnum.TURN_EVAL.value)
+    )
+    rows = result.scalars().all()
+    if rows:
+        return [
+            {
+                "turn": row.turn,
+                "evaluation_type": EvaluationTypeEnum.TURN_EVAL.value,
+                "details": row.details if isinstance(row.details, dict) else {},
+            }
+            for row in rows
+            if row.turn is not None
+        ]
+
+    try:
+        from app.infrastructure.cache.redis_client import RedisClient
+
+        redis_client = RedisClient()
+        turn_logs = await redis_client.get_all_turn_logs(redis_session_id)
+    except Exception as e:
+        logger.warning(
+            f"[N9. Final Scores] turn_evaluations Redis 폴백 실패 - {e}"
+        )
+        return []
+
+    out = []
+    for turn_key in sorted(turn_logs.keys(), key=lambda k: int(k) if str(k).isdigit() else 0):
+        turn_log = turn_logs.get(turn_key)
+        if not isinstance(turn_log, dict):
+            continue
+        try:
+            turn_num = int(turn_key)
+        except (TypeError, ValueError):
+            continue
+        out.append(
+            {
+                "turn": turn_num,
+                "evaluation_type": EvaluationTypeEnum.TURN_EVAL.value,
+                "details": build_turn_evaluation_details(turn_log),
+            }
+        )
+    return out
 
 
 async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
@@ -185,6 +254,12 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         skip_performance = state.get("skip_performance", False)
         skip_reason = state.get("skip_reason")
         test_case_results = state.get("test_case_results")
+        tc_summary = build_tc_summary(
+            test_cases_passed=test_cases_passed,
+            test_cases_total=test_cases_total,
+            test_case_results=test_case_results,
+        )
+        reference_cc_summary = build_reference_cc_summary(code_quality_metrics)
 
         v21_summary = None
         if rubric_breakdown or code_quality_metrics:
@@ -222,6 +297,8 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                 skip_reason=skip_reason,
                 test_case_results=test_case_results,
             ),
+            "tc_summary": tc_summary,
+            "reference_cc_summary": reference_cc_summary,
         }
 
         feedback = {}
@@ -302,6 +379,12 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                         f"submission_id: {submission_id}, status: DONE"
                     )
 
+                    turn_evaluations = await _load_turn_evaluations_for_rubric(
+                        db,
+                        postgres_session_id,
+                        session_id,
+                    )
+
                     score = await submission_repo.create_or_update_score(
                         submission_id=submission_id,
                         prompt_score=Decimal(str(round(prompt_score, 2))),
@@ -326,6 +409,11 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                             "performance_details": final_scores.get(
                                 "performance_details"
                             ),
+                            "tc_summary": final_scores.get("tc_summary"),
+                            "reference_cc_summary": final_scores.get(
+                                "reference_cc_summary"
+                            ),
+                            "turn_evaluations": turn_evaluations,
                             "holistic_flow_analysis": holistic_flow_analysis,
                             "integrated_score": integrated_score,
                             "integrated_evaluation": integrated_evaluation,

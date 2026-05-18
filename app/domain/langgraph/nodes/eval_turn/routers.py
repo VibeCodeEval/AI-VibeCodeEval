@@ -1,6 +1,9 @@
 import logging
 from typing import Any
 
+from app.domain.langgraph.nodes.eval_turn.spec_paste_guard import (
+    is_spec_paste_only_turn,
+)
 from app.domain.langgraph.states import EvalTurnState
 
 logger = logging.getLogger(__name__)
@@ -27,6 +30,14 @@ def intent_router(state: EvalTurnState) -> list[str]:
     """
     session_id = state.get("session_id", "unknown")
     turn = state.get("turn", 0)
+
+    if is_spec_paste_only_turn(state):
+        logger.info(
+            f"[4.0.1 Intent Router] 스펙만 제시 가드레일 - session_id: {session_id}, "
+            f"turn: {turn} → eval_spec_paste_guard"
+        )
+        return ["eval_spec_paste_guard"]
+
     unified_intent = state.get("unified_intent", "")
     intent_types = state.get("intent_types", [])
 

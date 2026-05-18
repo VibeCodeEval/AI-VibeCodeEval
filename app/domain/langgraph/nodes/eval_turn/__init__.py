@@ -7,11 +7,14 @@ from app.domain.langgraph.nodes.eval_turn.evaluators import (
     eval_debugging, eval_exploration, eval_follow_up, eval_generation,
     eval_hint_query, eval_optimization, eval_rule_setting, eval_test_case)
 from app.domain.langgraph.nodes.eval_turn.routers import intent_router
+from app.domain.langgraph.nodes.eval_turn.spec_paste_guard import \
+    eval_spec_paste_guard
 from app.domain.langgraph.nodes.eval_turn.summary import summarize_answer
 
 __all__ = [
     "intent_analysis",
     "intent_router",
+    "eval_spec_paste_guard",
     "eval_system_prompt",
     "eval_rule_setting",
     "eval_generation",

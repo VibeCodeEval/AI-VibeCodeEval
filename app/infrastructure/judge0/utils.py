@@ -1,10 +1,61 @@
 """
 Judge0 유틸리티 함수
-코드 정리 및 형식 변환
+코드 정리, Base64 인코딩(전송), 디코딩(수신) — 저장·채점은 항상 원문(평문)
 """
 
+import base64
 import re
-from typing import Optional
+from typing import Any, Dict, Optional
+
+# POST submission 시 Base64로 보낼 필드
+JUDGE0_ENCODE_FIELDS = ("source_code", "stdin", "expected_output")
+
+# GET 결과에서 Base64 → 평문으로 복원할 필드
+JUDGE0_DECODE_FIELDS = (
+    "stdout",
+    "stderr",
+    "compile_output",
+    "message",
+    "expected_output",
+)
+
+
+def judge0_encode_text(text: Optional[str]) -> str:
+    """Judge0 POST용 UTF-8 → Base64 (빈 문자열은 '')."""
+    if not text:
+        return ""
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def judge0_decode_text(encoded: Optional[str]) -> str:
+    """Judge0 GET 응답 Base64 → UTF-8 평문 (깨진 바이트는 replace)."""
+    if not encoded:
+        return ""
+    try:
+        return base64.b64decode(encoded).decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def judge0_encode_submission_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """submission JSON 바디 — 텍스트 필드만 Base64 인코딩."""
+    out = dict(payload)
+    for key in JUDGE0_ENCODE_FIELDS:
+        if key in out and out[key] is not None:
+            out[key] = judge0_encode_text(str(out[key]))
+    return out
+
+
+def judge0_decode_submission_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Judge0 submission 결과 — stdout/stderr 등을 평문으로 복원 (DB·채점용)."""
+    if not result:
+        return result
+    out = dict(result)
+    for key in JUDGE0_DECODE_FIELDS:
+        val = out.get(key)
+        if val is not None and isinstance(val, str) and val:
+            out[key] = judge0_decode_text(val)
+    return out
 
 
 def clean_code(code: str) -> str:

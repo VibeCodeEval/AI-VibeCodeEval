@@ -80,12 +80,12 @@ async def test_tier3_rubrics_only_uses_legacy_adapter():
 
 
 def test_likert_to_final_mapping():
-    """환산표: 5→100, 4→80, 3→70, 2→50, 1→0."""
+    """환산표: Likert×20 — 5→100, 4→80, 3→60, 2→40, 1→20."""
     assert likert_to_final(5) == 100
     assert likert_to_final(4) == 80
-    assert likert_to_final(3) == 70
-    assert likert_to_final(2) == 50
-    assert likert_to_final(1) == 0
+    assert likert_to_final(3) == 60
+    assert likert_to_final(2) == 40
+    assert likert_to_final(1) == 20
 
 
 def test_evaluation_result_likert_optional_legacy_score():

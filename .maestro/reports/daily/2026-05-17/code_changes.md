@@ -11,3 +11,10 @@
 - `tests/test_rubric_json_serializers.py` 추가
 
 **의도**: 제출 결과 단일 조회 시 Judge0 TC별 입출력·실패 사유 확인. 턴 평가 본문은 기존 `prompt_evaluations` 유지.
+
+## intent_cot → prompt_evaluations 저장
+
+- `intent_analysis`가 `intent_cot`을 State에 반환 (첫 턴 FOLLOW_UP 보정 시 CoT에 보정 문구 추가)
+- Redis `prompt_evaluation_details.intent_cot`, PG `prompt_evaluations.details.intent_cot`
+- `evaluation_storage_service`, `eval_service` 백그라운드, `n4_eval_turn_guard` 동기 경로 반영
+- `tests/test_intent_cot_persistence.py`, `docs/프론트_평가결과_DTO_명세.md` (`intentCot`)

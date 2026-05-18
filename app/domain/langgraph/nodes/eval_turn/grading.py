@@ -2,8 +2,8 @@
 V2.1 Hybrid 평가 모델 — 1~5점 Likert 척도 및 Backend 환산
 
 - LLM은 1~5 정수(likert_score)와 진단 태그(diagnosis_profile)를 출력.
-- Backend는 Map {5:100, 4:90, 3:80, 2:60, 1:0}으로 최종 점수(final_score) 환산.
-- 가중치 산식은 사용하지 않음 (직관적 4점=우수/90점, 5점=탁월/100점).
+- Backend는 Likert×20으로 최종 점수(final_score) 환산 (1→20 … 5→100).
+- 가중치 산식은 사용하지 않음.
 
 V3.0 Rubric-Based 모델 (EvalTurnV30Output): 레거시 호환.
 V3.1 (EvalTurnV31LLMOutput): LLM은 scoring_cot + rubric_breakdown(Rn 키)만 출력.
@@ -14,28 +14,27 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-# 1~5 Likert → Backend 점수 (0~100) 매핑
-# 5: Excellence(탁월) 100, 4: Good(우수) 80, 3: Neutral(보통) 70, 2: Weak(미흡) 50, 1: Bad(나쁨) 0
+# 1~5 Likert → Backend 점수 (0~100): Likert × 20
+LIKERT_SCORE_MULTIPLIER = 20
 SCORE_MAPPING: Dict[int, int] = {
-    5: 100,
-    4: 80,
-    3: 70,
-    2: 50,
-    1: 0,
+    likert: likert * LIKERT_SCORE_MULTIPLIER for likert in range(1, 6)
 }
 
 
 def likert_to_final(likert_score: int) -> int:
     """
-    LLM이 부여한 1~5 Likert 점수를 Backend 최종 점수(0, 50, 70, 80, 100)로 환산.
+    LLM이 부여한 1~5 Likert 점수를 Backend 최종 점수(20~100)로 환산.
 
     Args:
         likert_score: 1, 2, 3, 4, 5 중 하나
 
     Returns:
-        0, 50, 70, 80, 100 중 하나. 범위 밖이면 0 반환.
+        20, 40, 60, 80, 100 중 하나. 범위 밖이면 0 반환.
     """
-    return SCORE_MAPPING.get(int(likert_score), 0)
+    s = int(likert_score)
+    if 1 <= s <= 5:
+        return s * LIKERT_SCORE_MULTIPLIER
+    return 0
 
 
 def final_to_likert(final_score: int) -> int:
@@ -241,7 +240,7 @@ class EvaluationResult(BaseModel):
     likert_score: Optional[int] = Field(
         None, ge=1, le=5, description="LLM 출력값 1~5 (Legacy일 땐 없음)"
     )
-    final_score: int = Field(..., description="Backend 환산값 0, 60, 80, 90, 100 (항상 채움)")
+    final_score: int = Field(..., description="Backend 환산값 20, 40, 60, 80, 100 (항상 채움)")
     diagnosis_profile: Dict[str, Any] = Field(
         default_factory=lambda: dict(DEFAULT_DIAGNOSIS_PROFILE),
         description="진단 태그 (피드백용)",

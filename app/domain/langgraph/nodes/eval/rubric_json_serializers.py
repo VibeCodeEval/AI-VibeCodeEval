@@ -139,3 +139,101 @@ def build_performance_details(
         ],
     }
     return details
+
+
+def build_tc_summary(
+    *,
+    test_cases_passed: Optional[int],
+    test_cases_total: Optional[int],
+    test_case_results: Optional[List[Dict[str, Any]]],
+) -> Optional[Dict[str, Any]]:
+    """
+    N5 Judge0 TC 집계 — rubric_json.tc_summary.
+
+    - average_pass_rate: 통과 TC / 전체 TC (%)
+    - average_time_sec / average_memory_mb: **통과한 TC만** 평균 (없으면 null)
+    """
+    has_results = bool(test_case_results)
+    if test_cases_total is None and not has_results:
+        return None
+
+    tcs = [tc for tc in (test_case_results or []) if isinstance(tc, dict)]
+    passed_tcs = [tc for tc in tcs if tc.get("passed")]
+
+    if test_cases_total is not None:
+        total = int(test_cases_total)
+        passed = int(test_cases_passed or 0)
+    else:
+        total = len(tcs)
+        passed = len(passed_tcs)
+
+    if total <= 0 and not has_results:
+        return None
+
+    pass_rate = round((passed / total * 100) if total > 0 else 0.0, 2)
+
+    times: List[float] = []
+    memories: List[float] = []
+    for tc in passed_tcs:
+        time_sec = _parse_judge_time_seconds(tc.get("time"))
+        memory_mb = _parse_judge_memory_mb(tc.get("memory"))
+        if time_sec is not None:
+            times.append(time_sec)
+        if memory_mb is not None:
+            memories.append(memory_mb)
+
+    return {
+        "average_pass_rate": pass_rate,
+        "average_time_sec": round(sum(times) / len(times), 4) if times else None,
+        "average_memory_mb": round(sum(memories) / len(memories), 4)
+        if memories
+        else None,
+        "test_cases_passed": passed,
+        "test_cases_total": total,
+    }
+
+
+def build_reference_cc_summary(
+    code_quality_metrics: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """
+    N6 reference_code 대비 제출 코드 Radon CC 상승률 — rubric_json.reference_cc_summary.
+
+    ΔCC(%) = (submission_avg_cc - reference_avg_cc) / max(reference_avg_cc, 0.01) × 100
+    (compute_delta_cc / N6 delta_cc_vs_reference 와 동일)
+    """
+    if not code_quality_metrics or not isinstance(code_quality_metrics, dict):
+        return None
+    if not code_quality_metrics.get("has_reference_code"):
+        return None
+
+    ref_radon = code_quality_metrics.get("reference_radon_cc") or {}
+    sub_radon = code_quality_metrics.get("radon_cc") or {}
+    delta_ref = code_quality_metrics.get("delta_cc_vs_reference") or {}
+
+    if not isinstance(ref_radon, dict):
+        ref_radon = {}
+    if not isinstance(sub_radon, dict):
+        sub_radon = {}
+    if not isinstance(delta_ref, dict):
+        delta_ref = {}
+
+    ref_avg = ref_radon.get("avg_cc")
+    sub_avg = sub_radon.get("avg_cc")
+    if ref_avg is None and sub_avg is None and not delta_ref:
+        return None
+
+    delta_pct = delta_ref.get("delta_cc_pct")
+    if delta_pct is None and ref_avg is not None and sub_avg is not None:
+        base = max(float(ref_avg), 0.01)
+        delta_pct = round((float(sub_avg) - float(ref_avg)) / base * 100.0, 2)
+
+    return {
+        "has_reference_code": True,
+        "reference_avg_cc": ref_radon.get("avg_cc"),
+        "reference_max_cc": ref_radon.get("max_cc"),
+        "submission_avg_cc": sub_radon.get("avg_cc"),
+        "submission_max_cc": sub_radon.get("max_cc"),
+        "delta_cc_pct": delta_pct,
+        "delta_cc_vs_reference": delta_ref if delta_ref else None,
+    }

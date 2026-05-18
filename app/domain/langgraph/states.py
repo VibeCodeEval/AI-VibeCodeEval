@@ -212,6 +212,13 @@ class EvalTurnState(TypedDict):
     intent_types: Optional[list[str]]  # CodeIntentType 목록
     intent_confidence: float
     unified_intent: Optional[str]  # v2.3 6대 통합 의도 (SETTING/CREATION/REFINEMENT/DEBUGGING/EXPLORATION/FOLLOW_UP)
+    intent_cot: Optional[str]  # 의도 분류 CoT (eval_intent_disambiguation, prompt_evaluations 저장용)
+    # 턴 내용 분해 (문제 스펙 vs 사용자 요청, 2026-05-18)
+    problem_in_turn: Optional[str]  # FULL_SPEC | PARTIAL | NONE
+    user_request_in_turn: Optional[str]  # NONE | CODE_CREATE | CODE_FIX | ...
+    request_one_liner: Optional[str]  # 다음 턴·DB용 한줄평
+    carry_forward: Optional[str]  # 누적 요약용 짧은 문장
+    spec_paste_guardrail_applied: Optional[bool]  # FULL_SPEC+NONE 고정 30점
 
     # 8가지 의도별 평가 결과
     system_prompt_eval: Optional[Dict[str, Any]]  # 신규 추가
@@ -280,6 +287,22 @@ class IntentTurnLLMOutput(BaseModel):
     intent_cot: str = Field(
         ...,
         description="한국어 1~4문장, 왜 이 라벨인지 근거",
+    )
+    problem_in_turn: str = Field(
+        ...,
+        description="FULL_SPEC | PARTIAL | NONE — 이번 턴 본문에 과제 스펙·문제지 붙여넣기 포함 여부",
+    )
+    user_request_in_turn: str = Field(
+        ...,
+        description="NONE | CODE_CREATE | CODE_FIX | EXPLAIN | SETTING | OTHER — 이번 턴에서 AI에게 한 행동 요청",
+    )
+    request_one_liner: str = Field(
+        ...,
+        description="한국어 1문장. 사용자가 이번 턴에 한 행동만 (스펙 전문 재인용 금지)",
+    )
+    carry_forward: str = Field(
+        default="",
+        description="다음 턴 Context용 짧은 문장 (예: 문제 스펙 제시됨. 사용자 요청: 코드 작성)",
     )
 
 

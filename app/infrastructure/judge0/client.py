@@ -11,8 +11,15 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.core.config import settings
+from app.infrastructure.judge0.utils import (
+    judge0_decode_submission_result,
+    judge0_encode_submission_payload,
+)
 
 logger = logging.getLogger(__name__)
+
+# Judge0 CE: 제어 문자·JSON 깨짐 방지 — 전송/수신 모두 Base64, 앱 내부·DB는 평문
+_BASE64_PARAMS = {"base64_encoded": "true"}
 
 # Judge0 status_id: 1=In Queue, 2=Processing, 3=Accepted, 4+=terminal errors
 _STATUS_IN_QUEUE = 1
@@ -129,9 +136,15 @@ class Judge0Client:
             "cpu_time_limit": cpu_time_limit,
             "memory_limit": memory_limit * 1024,  # MB -> KB
         }
-        if expected_output:
+        if expected_output is not None and expected_output != "":
             payload["expected_output"] = expected_output
         return payload
+
+    def _encode_payload_for_api(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return judge0_encode_submission_payload(payload)
+
+    def _decode_api_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        return judge0_decode_submission_result(result)
 
     def _map_judge0_result_to_test_case(
         self,
@@ -210,16 +223,18 @@ class Judge0Client:
         """
         language_id = self._get_language_id(language)
 
-        payload = self._build_submission_payload(
-            code=code,
-            language_id=language_id,
-            stdin=stdin,
-            expected_output=expected_output,
-            cpu_time_limit=cpu_time_limit,
-            memory_limit=memory_limit,
+        payload = self._encode_payload_for_api(
+            self._build_submission_payload(
+                code=code,
+                language_id=language_id,
+                stdin=stdin,
+                expected_output=expected_output,
+                cpu_time_limit=cpu_time_limit,
+                memory_limit=memory_limit,
+            )
         )
 
-        params = {"base64_encoded": "false", "wait": "true" if wait else "false"}
+        params = {**_BASE64_PARAMS, "wait": "true" if wait else "false"}
 
         try:
             response = await self.client.post(
@@ -231,7 +246,10 @@ class Judge0Client:
             response.raise_for_status()
 
             result = response.json()
-            token = result.get("token")
+            if wait and isinstance(result, dict):
+                result = self._decode_api_result(result)
+
+            token = result.get("token") if isinstance(result, dict) else None
 
             if not token:
                 raise ValueError(f"Judge0 API 응답에 token이 없습니다: {result}")
@@ -266,13 +284,15 @@ class Judge0Client:
         """
         language_id = self._get_language_id(language)
         submissions = [
-            self._build_submission_payload(
-                code=code,
-                language_id=language_id,
-                stdin=tc.get("input", "") or "",
-                expected_output=tc.get("expected") or None,
-                cpu_time_limit=cpu_time_limit,
-                memory_limit=memory_limit,
+            self._encode_payload_for_api(
+                self._build_submission_payload(
+                    code=code,
+                    language_id=language_id,
+                    stdin=tc.get("input", "") or "",
+                    expected_output=tc.get("expected") or None,
+                    cpu_time_limit=cpu_time_limit,
+                    memory_limit=memory_limit,
+                )
             )
             for tc in test_cases
         ]
@@ -281,7 +301,7 @@ class Judge0Client:
             response = await self.client.post(
                 f"{self.api_url}/submissions/batch",
                 json={"submissions": submissions},
-                params={"base64_encoded": "false"},
+                params=_BASE64_PARAMS,
                 headers=self._get_headers(),
             )
             response.raise_for_status()
@@ -329,8 +349,8 @@ class Judge0Client:
         )
         params = {
             "tokens": ",".join(tokens),
-            "base64_encoded": "false",
             "fields": fields,
+            **_BASE64_PARAMS,
         }
 
         response = await self.client.get(
@@ -348,7 +368,7 @@ class Judge0Client:
         by_token: Dict[str, Dict[str, Any]] = {}
         for item in submissions:
             if isinstance(item, dict) and item.get("token"):
-                by_token[str(item["token"])] = item
+                by_token[str(item["token"])] = self._decode_api_result(item)
         return by_token
 
     async def wait_for_batch_results(
@@ -401,29 +421,20 @@ class Judge0Client:
 
         return results_by_token
 
-    async def get_result(
-        self, token: str, base64_encoded: bool = False
-    ) -> Dict[str, Any]:
+    async def get_result(self, token: str) -> Dict[str, Any]:
         """
-        실행 결과 조회
-
-        Args:
-            token: submission token
-            base64_encoded: 결과가 base64 인코딩되어 있는지 여부
-
-        Returns:
-            실행 결과 딕셔너리
+        실행 결과 조회 (항상 base64_encoded=true, 반환값은 평문 디코딩됨).
         """
         try:
             response = await self.client.get(
                 f"{self.api_url}/submissions/{token}",
-                params={"base64_encoded": "true" if base64_encoded else "false"},
+                params=_BASE64_PARAMS,
                 headers=self._get_headers(),
             )
             response.raise_for_status()
 
             result = response.json()
-            return result
+            return self._decode_api_result(result) if isinstance(result, dict) else result
 
         except httpx.HTTPStatusError as e:
             logger.error(
