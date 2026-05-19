@@ -96,6 +96,14 @@ class EvaluationStorageService:
                 # 메시지 존재 여부로 저장을 막지 않습니다. (export / 감사용 TURN_EVAL)
                 from sqlalchemy import text
 
+                from app.infrastructure.persistence.models.enums import \
+                    PromptRoleEnum
+                from app.infrastructure.repositories.session_repository import \
+                    conversation_turn_to_storage_slot
+
+                user_storage_turn = conversation_turn_to_storage_slot(
+                    int(turn), PromptRoleEnum.USER
+                )
                 message_query = text(
                     """
                     SELECT id
@@ -105,7 +113,8 @@ class EvaluationStorageService:
                 """
                 )
                 chk = await self.db.execute(
-                    message_query, {"session_id": session_id, "turn": turn}
+                    message_query,
+                    {"session_id": session_id, "turn": user_storage_turn},
                 )
                 if chk.first() is None:
                     logger.warning(

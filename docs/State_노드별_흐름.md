@@ -69,7 +69,7 @@ LangGraph는 노드가 `Dict[str, Any]`를 반환하면 **현재 State에 얕은
 **LLM 출력 (`IntentAnalysisResult` — Pydantic 구조화)**:
 ```
 status           : "SAFE" | "BLOCKED"
-block_reason     : "DIRECT_ANSWER" | "JAILBREAK" | "OFF_TOPIC" | None
+block_reason     : "OFF_TOPIC" | "INAPPROPRIATE" | "JAILBREAK" | "DIRECT_ANSWER"(레거시) | None
 request_type     : "CHAT" | "SUBMISSION"
 guide_strategy   : "SYNTAX_GUIDE" | "LOGIC_HINT" | "ROADMAP" | "GENERATION" | "FULL_CODE_ALLOWED" | None
 keywords         : List[str]
@@ -85,8 +85,11 @@ reasoning        : str
 | 필드 | 값 |
 |------|----|
 | `intent_status` | `"PASSED_HINT"` / `"PASSED_SUBMIT"` / `"FAILED_GUARDRAIL"` / `"FAILED_RATE_LIMIT"` |
-| `is_guardrail_failed` | `not guardrail_passed` |
-| `guardrail_message` | `violation_message` |
+| `is_guardrail_failed` | `not guardrail_passed` (현재 턴만; N1에서 다음 턴 시 False로 리셋) |
+| `guardrail_message` | BLOCKED 시 통일 prefix + `violation_message` |
+| `guardrail_flag_turns` | BLOCKED 시 `current_turn` 등록 (N1에서 **리셋하지 않음**) |
+| `guardrail_turn_reasons` | `{ "1": "OFF_TOPIC", ... }` (export·DB meta용) |
+| `block_reason` | BLOCKED 시 분류 코드 |
 | `is_submitted` | `is_submission_request` |
 | `guide_strategy` | LLM이 결정한 전략 |
 | `keywords` | 핵심 키워드 리스트 |
@@ -151,18 +154,27 @@ reasoning        : str
 | `current_turn` | 평가 대상 턴 범위 결정 (`1 ~ current_turn-1`) |
 | `messages` | 전체 대화에서 턴별 (human, ai) 메시지 쌍 추출 |
 | `problem_context` | 각 턴 평가 시 EvalTurnState에 전달 |
-| `is_guardrail_failed`, `guardrail_message` | 각 턴 EvalTurnState에 전달 |
+| `guardrail_flag_turns` | 채팅 N2에서 등록된 가드레일 **conversation turn** 목록 (제출 시 0점·eval 스킵 SoT) |
+| `guardrail_turn_reasons` | 턴별 `block_reason` |
+
+### 가드레일 턴 처리 (제출 시)
+
+- `turn in guardrail_flag_turns` → eval_turn subgraph **미호출**, Redis에 0점·`GUARDRAIL_BLOCKED` 저장
+- `previous_turns_summaries`·`prev_user_content`에 가드레일 턴 **미포함** (이후 턴 맥락 = **평가된 턴만**)
+- 목록 없을 때만 assistant 거절 문구(prefix) **fallback**
+- `spec_paste_guard`는 별도 트랙(기존 30점 로직), `guardrail_flag_turns`에 넣지 않음
+- N9 추가 감점 없음; prompt 평균에는 0점 턴 **포함**
 
 ### LLM 호출
 
-직접 호출 없음. **eval_turn_subgraph**를 내부에서 동기적으로 순회 실행.  
+직접 호출 없음. **eval_turn_subgraph**를 가드레일이 아닌 턴에만 동기 순회 실행.  
 각 턴별로 `EvalTurnState`를 구성하고 서브그래프 (8종 평가 노드) 실행:
 
 ```
 EvalTurnState 입력:
   session_id, turn, human_message, ai_message
-  problem_context, is_guardrail_failed, guardrail_message
-  previous_turns_summary (이전 턴 요약)
+  problem_context
+  previous_turns_summary (평가 완료된 이전 턴만 누적)
   intent_types, unified_intent (의도 분류)
 ```
 
@@ -298,8 +310,10 @@ score_adjustment_note : 학점 산정 시 정성적 패널티/가산점 의견
 **추가로 Redis에서 직접 읽음**:
 ```
 redis_client.get_all_turn_logs(session_id)
+  → filter_turn_logs_for_debate(logs, state)  # guardrail_flag_turns·GUARDRAIL_BLOCKED 제외
   → turn_logs: {turn_key: {user_prompt_summary, llm_answer_summary, prompt_evaluation_details}}
 ```
+`turn_scores` 집계는 0점 가드레일 턴 **포함** (N9 prompt 평균과 동일).
 
 ### LLM에 넘기는 것 (subgraph_debate.py 내부, 총 7회)
 

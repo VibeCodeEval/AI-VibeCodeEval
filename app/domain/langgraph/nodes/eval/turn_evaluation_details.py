@@ -95,6 +95,8 @@ def build_turn_evaluation_details(turn_log: Dict[str, Any]) -> Dict[str, Any]:
         "turn_score": 0.0 if is_guardrail_failed else turn_log.get("turn_score"),
         "is_guardrail_failed": is_guardrail_failed,
         "guardrail_message": turn_log.get("guardrail_message"),
+        "block_reason": prompt_eval_details.get("block_reason")
+        or turn_log.get("block_reason"),
         "ai_summary": ai_summary,
         "user_prompt_summary": turn_log.get("user_prompt_summary"),
         "llm_answer_summary": turn_log.get("llm_answer_summary"),

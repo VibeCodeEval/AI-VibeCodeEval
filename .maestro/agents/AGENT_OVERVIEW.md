@@ -99,6 +99,8 @@
 | **평가 파이프라인 (먼저 볼 것)** | `.maestro/docs/평가_파이프라인_플로우.md` | N4~N9 노드·입출력·N8·N9 공식 한 장 |
 | 문서 참조 가이드 | `.maestro/DOCS_REFERENCE.md` | docs/ 파일별 설명/참조 시점 |
 | Maestro docs 목차 | `.maestro/docs/README.md` | `.maestro/docs/` 먼저 볼 문서 순서 |
+| DB·meta·turn 점검 | `.maestro/docs/DB_Save_Path_Audit.md` | 가드레일 meta, storage↔conv turn (2026-05-19) |
+| 일일 변경 (가드레일) | `.maestro/reports/daily/2026-05-19/` | code/api/plan_changes |
 | 기록 관리 가이드 | `.maestro/REPORTING_GUIDE.md` | 리포트 작성 규칙 |
 | 변경 이력 | `.maestro/docs/V2.1_Change_Log.md` | V2.1 변경 기록 |
 | 평가 구조 (레거시 보조) | `.maestro/docs/V2.1_Evaluation_And_Score_Structure.md` | V2.1 점수/학점 구조 참고 |
