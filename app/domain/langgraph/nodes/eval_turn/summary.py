@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.domain.langgraph.nodes.eval_turn.utils import get_llm
+from app.domain.langgraph.nodes.eval_turn.utils import get_llm_summary
 from app.domain.langgraph.states import EvalTurnState
 from app.domain.langgraph.utils.token_tracking import (accumulate_tokens,
                                                        extract_token_usage)
@@ -56,7 +56,7 @@ async def summarize_answer(state: EvalTurnState) -> Dict[str, Any]:
             latest_turn=latest_turn,
         )
 
-        llm = get_llm()
+        llm = get_llm_summary()
         llm_response = await llm.ainvoke(
             [
                 SystemMessage(content=system_prompt),

@@ -5,6 +5,8 @@ import os
 
 # 앱 설정 로드 전에 적용: 기본 Vertex 대신 테스트는 AI Studio(GEMINI_API_KEY) 경로 사용
 os.environ.setdefault("USE_VERTEX_AI", "false")
+# n2_intent_analyzer 등 모듈 import 시점 LLM 생성용 (실 API 호출 없음)
+os.environ.setdefault("GEMINI_API_KEY", "test-api-key")
 
 import pytest
 import sys

@@ -39,8 +39,10 @@ async def eval_code_agent(state: MainGraphState) -> Dict[str, Any]:
     code_quality_metrics = state.get("code_quality_metrics", {})
     problem_context = state.get("problem_context", {})
     
-    if not code_content:
-        logger.warning(f"[N7] 코드 내용이 없습니다. 평가 스킵.")
+    from app.infrastructure.judge0.utils import is_blank_submission_code
+
+    if is_blank_submission_code(code_content):
+        logger.warning("[N7] 코드 없음 또는 공백만. 리뷰 스킵.")
         return {"code_eval_report": None}
 
     # N5 -> N7 전달값 검증 로그 (Judge0 지표 누락 원인 추적용)

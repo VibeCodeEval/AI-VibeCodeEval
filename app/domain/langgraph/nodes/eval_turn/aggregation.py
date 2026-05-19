@@ -116,6 +116,12 @@ async def aggregate_turn_log(state: EvalTurnState) -> Dict[str, Any]:
         logger.warning(
             f"[4.4 턴 로그 집계] 가드레일 위반 - session_id: {session_id}, turn: {turn}, 점수: 0점"
         )
+    elif state.get("spec_paste_guardrail_applied"):
+        turn_score = float(state.get("turn_score") or 30.0)
+        logger.info(
+            f"[4.4 턴 로그 집계] 스펙만 제시 가드레일 - session_id: {session_id}, "
+            f"turn: {turn}, 고정 점수: {turn_score:.2f}"
+        )
     else:
         turn_score = sum(all_scores) / len(all_scores) if all_scores else 0
 
@@ -180,6 +186,12 @@ async def aggregate_turn_log(state: EvalTurnState) -> Dict[str, Any]:
         "intent_types": intent_types,  # 전체 의도 리스트
         "unified_intent": unified_intent,  # v2.3 6대 통합 의도
         "intent_confidence": state.get("intent_confidence"),
+        "intent_cot": state.get("intent_cot"),
+        "problem_in_turn": state.get("problem_in_turn"),
+        "user_request_in_turn": state.get("user_request_in_turn"),
+        "request_one_liner": state.get("request_one_liner"),
+        "carry_forward": state.get("carry_forward"),
+        "spec_paste_guardrail_applied": state.get("spec_paste_guardrail_applied"),
         "is_guardrail_failed": is_guardrail_failed,
         "guardrail_message": state.get("guardrail_message"),
         "evaluations": eval_results,  # 전체 평가 결과 (상세 정보 포함)

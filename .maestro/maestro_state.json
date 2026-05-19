@@ -1,8 +1,8 @@
 {
   "project": "AI-VibeCodeEval",
   "maestro_version": "1.2.0",
-  "last_updated": "2026-04-05T12:00:00Z",
-  "current_focus": "rubric_v3_phase_b_completed_validation_pending",
+  "last_updated": "2026-05-17T00:00:00Z",
+  "current_focus": "eval_submission_timeout_e2e_n5_per_tc_perf",
   
   "phases": {
     "phase1": {
@@ -427,6 +427,14 @@
     {
       "timestamp": "2026-04-05T00:00:00Z",
       "content": "4대 루브릭 V3.0 Phase B 전체 완료. 변경 파일 5개: (1) eval_turn.yaml V2.2→V3.0 — R1~R4 루브릭 정의, Intent-Rubric 게이트 매트릭스(CREATION/SETTING/REFINEMENT/DEBUGGING/EXPLORATION/FOLLOW_UP), DEBUGGING R2 가중치 2배, Context 보정 규칙 통합, 출력 형식 변경(likert_score+diagnosis_profile → turn_score+rubric_breakdown+applied_rubrics). (2) grading.py — EvalTurnV30Output Pydantic 모델 추가(레거시 EvalTurnV21Output 유지). (3) evaluators.py — _evaluate_turn 파싱 EvalTurnV30Output으로 교체, chain_result에 rubric_breakdown/applied_rubrics 반환. (4) n4_eval_turn_guard.py — detailed_turn_log.prompt_evaluation_details에서 rubrics(old list)+weights 제거, rubric_breakdown(dict)+applied_rubrics(list) 저장으로 변경. (5) debate_agents.yaml v1.1→v1.2 — verdict 시스템 프롬프트 R4 글로벌 채점 기준 강화(turn_logs 순서 읽기, rubric_breakdown 참조, 반복 실수 감점 명시). Phase C(검증) 미완료 — 각 의도별 단일 턴 테스트 필요."
+    },
+    {
+      "timestamp": "2026-05-17T00:00:00Z",
+      "content": "Judge0: TC≥2 Batched Submissions (client.py). LLM: ChatVertexAI→ChatGoogleGenerativeAI+Vertex(SA JSON), langchain-google-vertexai 제거. N5: CODE_CORRECTNESS_MAX_POINTS=100, Performance TC별 passed만 raw 합산. 문서: Judge0_Batch_And_Genai_Vertex.md, reports/daily/2026-05-17/."
+    },
+    {
+      "timestamp": "2026-05-17T12:00:00Z",
+      "content": "제출 평가 E2E: EVAL_SUBMISSION_TIMEOUT_SEC=600, eval_timeout_tracking, graph 노드 래퍼, session wait_for+ai-evaluation-timeout[노드]. 문서: .maestro/docs/Eval_Submission_Timeout.md."
     }
   ]
 }

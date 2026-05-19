@@ -1031,6 +1031,7 @@ class EvalService:
                     "unified_intent": result.get("unified_intent")
                     or turn_log_data.get("unified_intent"),  # v2.1 4대 통합 의도
                     "intent_confidence": main_state.get("intent_confidence", 0.0),
+                    "intent_cot": result.get("intent_cot"),
                     "score": turn_score,
                     "rubrics": detailed_rubrics,  # 상세 루브릭 정보 (name, score, reasoning 포함) - 중복 제거
                     "rubric_breakdown": _rb_bg,

@@ -22,6 +22,12 @@ logger = logging.getLogger(__name__)
 # app/core/vertex_auth.py → 프로젝트 루트
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+# SA JSON을 코드에서 직접 로드할 때 scope 미지정 시 invalid_scope 발생 (genai/Vertex).
+# GOOGLE_APPLICATION_CREDENTIALS(ADC)는 런타임이 scope를 붙이지만, from_service_account_info는 명시 필요.
+VERTEX_OAUTH_SCOPES = (
+    "https://www.googleapis.com/auth/cloud-platform",
+)
+
 
 def resolve_vertex_project_id(settings: Optional["Settings"] = None) -> Optional[str]:
     """
@@ -45,7 +51,7 @@ def resolve_vertex_project_id(settings: Optional["Settings"] = None) -> Optional
 
 def load_vertex_credentials(settings: Optional["Settings"] = None) -> Any:
     """
-    Vertex `ChatVertexAI(..., credentials=...)`에 넘길 Credentials.
+    Vertex `ChatGoogleGenerativeAI(..., credentials=...)`에 넘길 Credentials.
     서비스 계정 정보가 없으면 None (ADC 사용).
     """
     from google.oauth2 import service_account
@@ -56,7 +62,10 @@ def load_vertex_credentials(settings: Optional["Settings"] = None) -> Any:
     info = _load_service_account_dict(s)
     if info is None:
         return None
-    return service_account.Credentials.from_service_account_info(info)
+    return service_account.Credentials.from_service_account_info(
+        info,
+        scopes=VERTEX_OAUTH_SCOPES,
+    )
 
 
 def _load_service_account_dict(s: "Settings") -> Optional[dict]:

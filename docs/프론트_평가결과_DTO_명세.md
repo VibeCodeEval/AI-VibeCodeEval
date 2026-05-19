@@ -51,7 +51,12 @@ WHERE submission_id = :submissionId
 LIMIT 1;
 ```
 
-### 2) 턴별 프롬프트 평가 (`prompt_evaluations`)
+### 2) 턴별 프롬프트 평가
+
+**권장 (단일 조회)**: `scores.rubric_json.turn_evaluations[]` — N9 저장 시 `prompt_evaluations.details`와 동일한 스냅샷.
+
+**대안 (레거시·감사)**: `prompt_evaluations` 테이블 직접 조회.
+
 - 조건:
   - `prompt_evaluations.session_id = :sessionId`
   - `prompt_evaluations.evaluation_type = 'TURN_EVAL'`
@@ -142,34 +147,79 @@ export interface TurnEvaluationItemDto {
   rubricBreakdown: Record<string, number>;
   analysis: string | null;
   scoringCot: Record<string, string>;
+  intentCot: string | null;
   userPromptSummary: string | null;
   llmAnswerSummary: string | null;
   createdAt: string; // ISO datetime
 }
 ```
 
-매핑 (`prompt_evaluations.details` 기준):
-- `turn` <- `prompt_evaluations.turn`
+매핑 (`details` 기준 — 출처는 아래 둘 중 하나):
+
+| 출처 | 경로 |
+|------|------|
+| **권장** | `scores.rubric_json.turn_evaluations[]` → 각 항목의 `details` |
+| 대안 | `prompt_evaluations` 행 → `details` |
+
+- `turn` <- `turn_evaluations[].turn` 또는 `prompt_evaluations.turn`
 - `turnScore` <- `details.turn_score`
 - `unifiedIntent` <- `details.unified_intent`
 - `appliedRubrics` <- `details.applied_rubrics` (없으면 `[]`)
 - `rubricBreakdown` <- `details.rubric_breakdown` (없으면 `{}`)
 - `analysis` <- `details.analysis`
 - `scoringCot` <- `details.scoring_cot` (없으면 `{}`)
+- `intentCot` <- `details.intent_cot` (의도 분류 CoT, 없으면 `null`)
 - `userPromptSummary` <- `details.user_prompt_summary`
 - `llmAnswerSummary` <- `details.llm_answer_summary`
-- `createdAt` <- `prompt_evaluations.created_at`
+- `createdAt` <- `prompt_evaluations.created_at` (`rubric_json` 경로만 쓸 때는 `scores.created_at` 또는 `null`)
 
 ### 4) 코드 평가 내용 DTO
 ```ts
+/** N5 Judge0 TC 집계 (rubric_json.tc_summary). 통과 TC만 시간·메모리 평균 */
+export interface TcSummaryDto {
+  averagePassRate: number;       // passed / total × 100 (%)
+  averageTimeSec: number | null; // passed TC만 평균
+  averageMemoryMb: number | null;
+  testCasesPassed: number;
+  testCasesTotal: number;
+}
+
+/** N6 reference_code 대비 제출 Radon CC 상승률 (rubric_json.reference_cc_summary) */
+export interface ReferenceCcSummaryDto {
+  referenceAvgCc: number | null;
+  referenceMaxCc: number | null;
+  submissionAvgCc: number | null;
+  submissionMaxCc: number | null;
+  /** reference 대비 submission CC 상승률(%) — N6 delta_cc_vs_reference.delta_cc_pct */
+  deltaCcPct: number | null;
+}
+
 export interface CodeEvaluationDto {
   correctnessScore: number;
   performanceScore: number;
+  /** N5 TC 요약. Judge0 미실행 시 null */
+  tcSummary: TcSummaryDto | null;
+  /** reference_code 있을 때만. 없으면 null */
+  referenceCcSummary: ReferenceCcSummaryDto | null;
   correctnessDetails: {
     testCasesPassed?: number;
     testCasesTotal?: number;
     passRate?: number;
     correctnessReasoning?: string | null;
+    /** Judge0 TC별 상세 (N5 → rubric_json). 실패·타임아웃 시 `[]` */
+    testCases?: Array<{
+      index: number;
+      input: string;
+      expected: string;
+      actual: string;
+      passed: boolean;
+      statusId?: number | null;
+      statusDescription?: string | null;
+      timeSec?: number | null;
+      memoryMb?: number | null;
+      stderr?: string | null;
+      compileOutput?: string | null;
+    }>;
   } | null;
   performanceDetails: {
     executionTime?: number | null;
@@ -178,6 +228,14 @@ export interface CodeEvaluationDto {
     memoryLimitMb?: number | null;
     skipPerformance?: boolean;
     skipReason?: string | null;
+    /** TC별 실행 시간·메모리·raw 성능 점수 (passed TC만 raw > 0) */
+    testCases?: Array<{
+      index: number;
+      passed: boolean;
+      timeSec?: number | null;
+      memoryMb?: number | null;
+      rawPerformanceScore?: number | null;
+    }>;
   } | null;
   codeEvalReport: {
     overallSummary?: string;
@@ -192,8 +250,20 @@ export interface CodeEvaluationDto {
 매핑 (`scores` + `scores.rubric_json`):
 - `correctnessScore` <- `scores.correctness_score`
 - `performanceScore` <- `scores.perf_score`
-- `correctnessDetails` <- `rubric_json.correctness_details`
-- `performanceDetails` <- `rubric_json.performance_details`
+- `tcSummary` <- `rubric_json.tc_summary` (snake_case → camelCase)
+
+  | DTO | rubric_json |
+  |-----|-------------|
+  | `averagePassRate` | `average_pass_rate` |
+  | `averageTimeSec` | `average_time_sec` |
+  | `averageMemoryMb` | `average_memory_mb` |
+  | `testCasesPassed` | `test_cases_passed` |
+  | `testCasesTotal` | `test_cases_total` |
+
+- `referenceCcSummary` <- `rubric_json.reference_cc_summary` (`deltaCcPct` <- `delta_cc_pct`, reference/submission avg·max CC)
+
+- `correctnessDetails` <- `rubric_json.correctness_details` (`testCases` <- `test_cases`)
+- `performanceDetails` <- `rubric_json.performance_details` (`testCases` <- `test_cases`)
 - `codeEvalReport` <- `rubric_json.code_eval_report`
 
 ### 5) 전체 평가 내용 DTO
@@ -221,6 +291,49 @@ export interface OverallEvaluationDto {
 ---
 
 ## 구현 메모 (백엔드)
-- `scores.rubric_json`에 대부분의 종합 정보가 포함되어 있으므로, 최종 결과 화면은 `scores` 1건 조회로 대부분 구성 가능하다.
-- 턴별 섹션만 `prompt_evaluations(TURN_EVAL)` 추가 조회가 필요하다.
+
+### `scores.rubric_json` 추가 필드 (2026-05-18~)
+
+```json
+{
+  "tc_summary": {
+    "average_pass_rate": 100.0,
+    "average_time_sec": 0.045,
+    "average_memory_mb": 3.38,
+    "test_cases_passed": 10,
+    "test_cases_total": 10
+  },
+  "turn_evaluations": [
+    {
+      "turn": 1,
+      "evaluation_type": "TURN_EVAL",
+      "details": { "...": "prompt_evaluations.details 와 동일 스키마" }
+    }
+  ],
+  "reference_cc_summary": {
+    "has_reference_code": true,
+    "reference_avg_cc": 5.0,
+    "reference_max_cc": 6,
+    "submission_avg_cc": 7.0,
+    "submission_max_cc": 8,
+    "delta_cc_pct": 40.0,
+    "delta_cc_vs_reference": {
+      "delta_cc_pct": 40.0,
+      "v1_avg_cc": 5.0,
+      "v2_avg_cc": 7.0,
+      "v1_max_cc": 6,
+      "v2_max_cc": 8
+    }
+  }
+}
+```
+
+- `reference_cc_summary`: N6 `checker_json.reference_code` 대비 제출 코드 Radon CC. `delta_cc_pct` = 상승률(%). reference 없으면 필드 자체가 `null`.
+- 상세 원본은 `code_quality_metrics.reference_radon_cc` / `delta_cc_vs_reference`에도 유지.
+- `tc_summary.average_time_sec` / `average_memory_mb`: **통과(passed) TC만** 평균. 해당 TC가 없으면 `null`.
+- `turn_evaluations`: N4 저장 시점의 `prompt_evaluations.details` 스냅샷. 제출 시점 단일 조회용.
+
+### 조회 전략
+- **권장**: `scores` 1건 조회만으로 최종 점수·Holistic·코드 평가·**턴별 평가**까지 구성 가능 (`rubric_json.turn_evaluations`).
+- **대안**: 턴별 `created_at`·행 `id`가 필요하면 `prompt_evaluations(TURN_EVAL)` 추가 조회.
 - `rubrics` 배열은 최신 구조에서 비어 있을 수 있으므로, 프론트는 `rubric_breakdown`/`applied_rubrics`를 우선 사용한다.

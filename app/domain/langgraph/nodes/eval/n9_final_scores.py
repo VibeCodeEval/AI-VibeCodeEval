@@ -1,11 +1,109 @@
 import logging
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.core.config import settings
+from app.domain.langgraph.nodes.eval.rubric_json_serializers import (
+    build_correctness_details,
+    build_performance_details,
+    build_reference_cc_summary,
+    build_tc_summary,
+)
+from app.domain.langgraph.nodes.eval.turn_evaluation_details import (
+    build_turn_evaluation_details,
+)
 from app.domain.langgraph.states import MainGraphState
 
 logger = logging.getLogger(__name__)
+
+
+def _submission_avg_cc(code_quality_metrics: Optional[Dict[str, Any]]) -> float:
+    """N6 code_quality_metrics에서 제출 코드 avg_cc (레거시 v2_metrics 경로 폴백)."""
+    if not code_quality_metrics:
+        return 0.0
+    radon = code_quality_metrics.get("radon_cc")
+    if isinstance(radon, dict) and radon.get("avg_cc") is not None:
+        try:
+            return float(radon["avg_cc"])
+        except (TypeError, ValueError):
+            pass
+    legacy = (code_quality_metrics.get("v2_metrics") or {}).get("radon_cc")
+    if isinstance(legacy, dict) and legacy.get("avg_cc") is not None:
+        try:
+            return float(legacy["avg_cc"])
+        except (TypeError, ValueError):
+            pass
+    delta = code_quality_metrics.get("delta_cc") or {}
+    if delta.get("v2_avg_cc") is not None:
+        try:
+            return float(delta["v2_avg_cc"])
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
+async def _load_turn_evaluations_for_rubric(
+    db: Any,
+    postgres_session_id: int,
+    redis_session_id: str,
+) -> list:
+    """prompt_evaluations(TURN_EVAL) 행과 동일한 details → rubric_json.turn_evaluations."""
+    from sqlalchemy import select, text
+
+    from app.infrastructure.persistence.models.enums import EvaluationTypeEnum
+    from app.infrastructure.persistence.models.sessions import PromptEvaluation
+
+    query = (
+        select(PromptEvaluation)
+        .where(
+            PromptEvaluation.session_id == postgres_session_id,
+            text("prompt_evaluations.evaluation_type::text = :eval_type"),
+        )
+        .order_by(PromptEvaluation.turn)
+    )
+    result = await db.execute(
+        query.params(eval_type=EvaluationTypeEnum.TURN_EVAL.value)
+    )
+    rows = result.scalars().all()
+    if rows:
+        return [
+            {
+                "turn": row.turn,
+                "evaluation_type": EvaluationTypeEnum.TURN_EVAL.value,
+                "details": row.details if isinstance(row.details, dict) else {},
+            }
+            for row in rows
+            if row.turn is not None
+        ]
+
+    try:
+        from app.infrastructure.cache.redis_client import RedisClient
+
+        redis_client = RedisClient()
+        turn_logs = await redis_client.get_all_turn_logs(redis_session_id)
+    except Exception as e:
+        logger.warning(
+            f"[N9. Final Scores] turn_evaluations Redis 폴백 실패 - {e}"
+        )
+        return []
+
+    out = []
+    for turn_key in sorted(turn_logs.keys(), key=lambda k: int(k) if str(k).isdigit() else 0):
+        turn_log = turn_logs.get(turn_key)
+        if not isinstance(turn_log, dict):
+            continue
+        try:
+            turn_num = int(turn_key)
+        except (TypeError, ValueError):
+            continue
+        out.append(
+            {
+                "turn": turn_num,
+                "evaluation_type": EvaluationTypeEnum.TURN_EVAL.value,
+                "details": build_turn_evaluation_details(turn_log),
+            }
+        )
+    return out
 
 
 async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
@@ -41,7 +139,7 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             )
         except (TypeError, ValueError):
             correctness_raw_pre = 0.0
-        # 구버전 N5(0~100) 체크포인트: 값이 만점(30)을 넘으면 이미 0~100 스케일로 간주
+        # 구버전 N5(0~100) 체크포인트: 값이 CODE_CORRECTNESS_MAX_POINTS를 넘으면 이미 0~100 스케일로 간주
         if correctness_raw_pre > cc_max + 1e-6:
             correctness_normalized_pre = min(100.0, correctness_raw_pre)
         else:
@@ -105,12 +203,6 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         else:
             correctness_score = correctness_raw_pre
 
-        total_score = (
-            prompt_score * weights["prompt"]
-            + correctness_normalized * weights["correctness"]
-            + perf_score * weights["performance"]
-        )
-
         # legacy 호환성 (구조 변경 전 N5에서 올라온 데이터)
         if not code_quality_metrics:
             code_quality_metrics = (
@@ -118,7 +210,7 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                 if isinstance(integrated_evaluation, dict)
                 else None
             )
-            
+
         rubric_breakdown = (
             (integrated_evaluation or {}).get("rubric_breakdown")
             if isinstance(integrated_evaluation, dict)
@@ -135,8 +227,7 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             ast_ok = code_quality_metrics.get("ast_pattern_matched", False)
             ast_applicable = code_quality_metrics.get("ast_applicable", False)
             junior_grade = code_quality_metrics.get("junior_grade", False)
-            v2_avg_cc = (code_quality_metrics.get("v2_metrics") or {}).get("radon_cc") or {}
-            avg_cc = (v2_avg_cc if isinstance(v2_avg_cc, dict) else {}).get("avg_cc", 0) or 0.0
+            avg_cc = _submission_avg_cc(code_quality_metrics)
 
         if code_quality_metrics is not None and perf_score > 0:
             cc_bonus = (
@@ -145,6 +236,12 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                 else (0.6 if avg_cc <= 8 else 0.2)
             )
             perf_score = round(perf_score * (0.8 + 0.2 * cc_bonus), 2)
+
+        total_score = (
+            prompt_score * weights["prompt"]
+            + correctness_normalized * weights["correctness"]
+            + perf_score * weights["performance"]
+        )
 
         if correctness_normalized < 100:
             grade = "F" if correctness_normalized < 60 else "D"
@@ -180,6 +277,13 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         memory_limit_mb = state.get("memory_limit_mb")
         skip_performance = state.get("skip_performance", False)
         skip_reason = state.get("skip_reason")
+        test_case_results = state.get("test_case_results")
+        tc_summary = build_tc_summary(
+            test_cases_passed=test_cases_passed,
+            test_cases_total=test_cases_total,
+            test_case_results=test_case_results,
+        )
+        reference_cc_summary = build_reference_cc_summary(code_quality_metrics)
 
         v21_summary = None
         if rubric_breakdown or code_quality_metrics:
@@ -202,35 +306,23 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             "total_score": round(total_score, 2),
             "grade": grade,
             "v21_summary": v21_summary,
-            "correctness_details": (
-                {
-                    "test_cases_passed": test_cases_passed,
-                    "test_cases_total": test_cases_total,
-                    "pass_rate": round(
-                        (
-                            (test_cases_passed / test_cases_total * 100)
-                            if test_cases_total and test_cases_total > 0
-                            else 0
-                        ),
-                        1,
-                    ),
-                    "correctness_reasoning": state.get("correctness_reasoning"),
-                }
-                if test_cases_total is not None
-                else None
+            "correctness_details": build_correctness_details(
+                test_cases_passed=test_cases_passed,
+                test_cases_total=test_cases_total,
+                correctness_reasoning=state.get("correctness_reasoning"),
+                test_case_results=test_case_results,
             ),
-            "performance_details": (
-                {
-                    "execution_time": execution_time,
-                    "memory_used_mb": memory_used_mb,
-                    "time_limit_sec": time_limit_sec,
-                    "memory_limit_mb": memory_limit_mb,
-                    "skip_performance": skip_performance,
-                    "skip_reason": skip_reason,
-                }
-                if not skip_performance or execution_time is not None
-                else None
+            "performance_details": build_performance_details(
+                execution_time=execution_time,
+                memory_used_mb=memory_used_mb,
+                time_limit_sec=time_limit_sec,
+                memory_limit_mb=memory_limit_mb,
+                skip_performance=bool(skip_performance),
+                skip_reason=skip_reason,
+                test_case_results=test_case_results,
             ),
+            "tc_summary": tc_summary,
+            "reference_cc_summary": reference_cc_summary,
         }
 
         feedback = {}
@@ -311,6 +403,12 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                         f"submission_id: {submission_id}, status: DONE"
                     )
 
+                    turn_evaluations = await _load_turn_evaluations_for_rubric(
+                        db,
+                        postgres_session_id,
+                        session_id,
+                    )
+
                     score = await submission_repo.create_or_update_score(
                         submission_id=submission_id,
                         prompt_score=Decimal(str(round(prompt_score, 2))),
@@ -335,6 +433,11 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                             "performance_details": final_scores.get(
                                 "performance_details"
                             ),
+                            "tc_summary": final_scores.get("tc_summary"),
+                            "reference_cc_summary": final_scores.get(
+                                "reference_cc_summary"
+                            ),
+                            "turn_evaluations": turn_evaluations,
                             "holistic_flow_analysis": holistic_flow_analysis,
                             "integrated_score": integrated_score,
                             "integrated_evaluation": integrated_evaluation,

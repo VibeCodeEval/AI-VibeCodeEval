@@ -19,6 +19,8 @@ from typing import Any, Dict, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.langgraph.nodes.eval.turn_evaluation_details import \
+    build_turn_evaluation_details
 from app.infrastructure.persistence.models.enums import EvaluationTypeEnum
 from app.infrastructure.persistence.models.sessions import (PromptEvaluation,
                                                             PromptMessage)
@@ -59,97 +61,8 @@ class EvaluationStorageService:
             생성된 PromptEvaluation 또는 None (실패 시)
         """
         try:
-            # turn_log에서 평가 정보 추출
-            prompt_eval_details = turn_log.get("prompt_evaluation_details", {})
-            score = prompt_eval_details.get("score")
-            is_guardrail_failed = bool(turn_log.get("is_guardrail_failed", False))
-            if is_guardrail_failed:
-                # 가드레일 위반 턴은 저장 점수를 강제로 0점 처리
-                score = 0.0
-            analysis = turn_log.get(
-                "comprehensive_reasoning"
-            ) or prompt_eval_details.get("final_reasoning")
-
-            # 상세 루브릭 정보 추출 (name, score, reasoning 포함)
-            rubrics = prompt_eval_details.get("rubrics", [])
-            detailed_rubrics = []
-            for rubric in rubrics:
-                if isinstance(rubric, dict):
-                    detailed_rubrics.append(
-                        {
-                            "name": rubric.get("name", rubric.get("criterion", "")),
-                            "score": rubric.get("score", 0.0),
-                            "reasoning": rubric.get(
-                                "reasoning", rubric.get("reason", "평가 없음")
-                            ),
-                            "criterion": rubric.get(
-                                "criterion", rubric.get("name", "")
-                            ),  # 호환성 유지
-                        }
-                    )
-
-            # intent가 "UNKNOWN"이면 intent_types[0] 사용
-            intent = prompt_eval_details.get("intent", "UNKNOWN")
-            intent_types = turn_log.get("intent_types", [])
-            if intent == "UNKNOWN" and intent_types:
-                intent = intent_types[0]
-
-            # AI 응답 요약 추출 (6번 Node에서 Chaining 전략 평가에 사용)
-            ai_summary = (
-                turn_log.get("llm_answer_summary")
-                or turn_log.get("answer_summary")
-                or ""
-            )
-
-            # V3.0: rubric_breakdown / applied_rubrics (리스트 rubrics와 병행 저장)
-            # V3.1: scoring_cot (Rn별 CoT 근거)
-            rubric_breakdown = prompt_eval_details.get("rubric_breakdown")
-            applied_rubrics = prompt_eval_details.get("applied_rubrics")
-            scoring_cot = prompt_eval_details.get("scoring_cot")
-            if not detailed_rubrics and isinstance(applied_rubrics, list):
-                for rubric in applied_rubrics:
-                    if isinstance(rubric, dict):
-                        detailed_rubrics.append(
-                            {
-                                "name": rubric.get("name", rubric.get("criterion", "")),
-                                "score": rubric.get("score", 0.0),
-                                "reasoning": rubric.get(
-                                    "reasoning", rubric.get("reason", "평가 없음")
-                                ),
-                                "criterion": rubric.get(
-                                    "criterion", rubric.get("name", "")
-                                ),
-                            }
-                        )
-
-            # details에 모든 평가 데이터 포함 (상세 정보, 중복 최소화)
-            details = {
-                "score": score,  # 점수
-                "analysis": analysis,  # 분석 내용 (종합 평가 근거)
-                "intent": intent,  # UNKNOWN 대신 실제 intent 사용
-                "intent_types": intent_types,
-                "unified_intent": turn_log.get("unified_intent")
-                or prompt_eval_details.get("unified_intent"),  # v2.1 4대 통합 의도
-                "intent_confidence": turn_log.get(
-                    "intent_confidence",
-                    prompt_eval_details.get("intent_confidence", 0.0),
-                ),  # 의도 신뢰도
-                "rubrics": detailed_rubrics,  # 상세 루브릭 정보 (name, score, reasoning 포함) - 중복 제거
-                "rubric_breakdown": rubric_breakdown,
-                "applied_rubrics": applied_rubrics,
-                "scoring_cot": scoring_cot,
-                "weights": prompt_eval_details.get("weights", {}),  # 가중치 정보
-                "turn_score": 0.0 if is_guardrail_failed else turn_log.get("turn_score"),
-                "is_guardrail_failed": is_guardrail_failed,
-                "guardrail_message": turn_log.get("guardrail_message"),
-                "ai_summary": ai_summary,  # AI 응답 요약 (6번 Node에서 Chaining 전략 평가에 사용)
-                "user_prompt_summary": turn_log.get("user_prompt_summary"),
-                "llm_answer_summary": turn_log.get("llm_answer_summary"),
-                "llm_answer_reasoning": turn_log.get("llm_answer_reasoning"),
-                # 참고용: 상세 정보는 필요시에만 포함 (중복 방지)
-                # "evaluations": turn_log.get("evaluations", {}),  # 주석 처리: rubrics와 중복
-                # "detailed_feedback": turn_log.get("detailed_feedback", []),  # 주석 처리: rubrics와 중복
-            }
+            details = build_turn_evaluation_details(turn_log)
+            score = details.get("score")
 
             # 기존 평가 결과 확인 (중복 방지)
             existing = await self._get_existing_evaluation(

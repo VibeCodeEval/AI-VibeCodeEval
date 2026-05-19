@@ -24,6 +24,46 @@ from app.domain.langgraph.utils.token_tracking import (accumulate_tokens,
 logger = logging.getLogger(__name__)
 
 
+def _build_turn_content_section(state: Dict[str, Any]) -> str:
+    """Intent 단계 산출: 문제/요청 분해 → eval 프롬프트 블록."""
+    problem = (state.get("problem_in_turn") or "NONE").strip()
+    request = (state.get("user_request_in_turn") or "NONE").strip()
+    one_liner = (state.get("request_one_liner") or "").strip() or "(없음)"
+    carry = (state.get("carry_forward") or "").strip()
+    lines = [
+        f"- problem_in_turn: {problem}",
+        f"- user_request_in_turn: {request}",
+        f"- request_one_liner: {one_liner}",
+    ]
+    if carry:
+        lines.append(f"- carry_forward: {carry}")
+    has_spec = problem in ("FULL_SPEC", "PARTIAL")
+    mixed = has_spec and request not in ("NONE", "")
+
+    if has_spec:
+        lines.append(
+            "- **R1 (스펙 상세성)**: 본문에 붙은 문제·과제 스펙이 얼마나 완전·구체적인지 "
+            "(제약, 예제, 입출력, 규칙 누락 여부)."
+        )
+        lines.append(
+            "- **R2 (요청 명확성)**: user_request_in_turn이 NONE이면 요청 없음 → R2는 1~2점. "
+            "CODE_CREATE 등이면 **요청 문장/구간만** 보고 명확·완전한지 평가."
+        )
+        if mixed and request == "CODE_CREATE":
+            lines.append(
+                "- **혼합 턴**: R1은 스펙 블록, R2·R3는 요청 구간. "
+                "scoring_cot에 구간별 근거 명시."
+            )
+    elif request == "CODE_CREATE" and problem == "NONE":
+        lines.append(
+            "- **R1·R2**: 이번 턴 요청 본문의 구체성·명확성. Context·이전 턴 스펙 보정 금지."
+        )
+        lines.append(
+            "- **R2 (요청 명확성)**: 짧은 후속이면 3 이하를 먼저 검토."
+        )
+    return "\n".join(lines)
+
+
 def prepare_evaluation_input_internal(
     inputs: Dict[str, Any], eval_type: str, criteria: str
 ) -> Dict[str, Any]:
@@ -90,13 +130,20 @@ def prepare_evaluation_input_internal(
 **참고**: 위 메트릭은 객관적 측정값입니다. LLM 평가 시 이 메트릭을 참고하되, 맥락과 의미를 종합적으로 고려하여 평가하세요.
 """
 
+    turn_content_section = _build_turn_content_section(state)
+    request_one_liner = (state.get("request_one_liner") or "").strip()
+    if not request_one_liner:
+        request_one_liner = "(Intent 단계 request_one_liner 없음 — 본문과 턴 내용 분해만으로 판단)"
+
     # YAML 템플릿에서 시스템 프롬프트 렌더링 (V2.2: previous_turns_summary 포함)
     system_prompt = render_prompt(
         "eval_turn",
         eval_type=eval_type,
         criteria=criteria,
+        request_one_liner=request_one_liner,
         problem_info_section=problem_info_section,
         metrics_section=metrics_section,
+        turn_content_section=turn_content_section,
         algorithms_display=algorithms_display,
         word_count=metrics["word_count"],
         sentence_count=metrics["sentence_count"],

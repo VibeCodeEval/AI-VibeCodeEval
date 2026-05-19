@@ -68,7 +68,7 @@ def get_llm():
     """LLM 인스턴스 생성 (Vertex AI 또는 AI Studio — llm_factory 단일 경로)"""
     from app.domain.langgraph.utils.llm_factory import create_gemini_llm
 
-    return create_gemini_llm(temperature=0.3)
+    return create_gemini_llm(temperature=settings.LLM_TEMPERATURE_INTENT)
 
 
 # Layer 1: 키워드 기반 빠른 검증 (정답 관련)

@@ -59,6 +59,7 @@ class RedisQueueAdapter(QueueAdapter):
             "exit_code": result.exit_code,
             "passed_test_cases": result.passed_test_cases,
             "total_test_cases": result.total_test_cases,
+            "test_case_results": result.test_case_results,
         }
 
     def _dict_to_result(self, data: dict) -> JudgeResult:
@@ -73,6 +74,7 @@ class RedisQueueAdapter(QueueAdapter):
             exit_code=data.get("exit_code", 0),
             passed_test_cases=data.get("passed_test_cases"),
             total_test_cases=data.get("total_test_cases"),
+            test_case_results=data.get("test_case_results"),
         )
 
     async def enqueue(self, task: JudgeTask) -> str:

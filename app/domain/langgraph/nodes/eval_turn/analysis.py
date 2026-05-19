@@ -4,7 +4,7 @@ from typing import Any, Dict, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.domain.langgraph.nodes.eval_turn.utils import get_llm
+from app.domain.langgraph.nodes.eval_turn.utils import get_llm_intent
 from app.domain.langgraph.states import EvalTurnState, IntentTurnLLMOutput
 from app.domain.langgraph.utils.structured_output_parser import \
     parse_structured_output_async
@@ -47,7 +47,7 @@ async def _classify_intent_single_llm(
     """6대 통합 의도 단일 LLM (predicted_intent + intent_cot)."""
     from app.domain.langgraph.prompts import render_prompt
 
-    llm = get_llm()
+    llm = get_llm_intent()
     structured_llm = llm.with_structured_output(IntentTurnLLMOutput)
 
     first_turn_note = (
@@ -64,7 +64,10 @@ async def _classify_intent_single_llm(
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(
-            content="위 지시에 따라 predicted_intent와 intent_cot만 담은 JSON을 출력하세요."
+            content=(
+                "위 지시에 따라 predicted_intent, intent_cot, problem_in_turn, "
+                "user_request_in_turn, request_one_liner, carry_forward를 담은 JSON을 출력하세요."
+            )
         ),
     ]
 
@@ -112,7 +115,8 @@ async def intent_analysis(state: EvalTurnState) -> Dict[str, Any]:
 
         unified_enum, path = _parse_predicted_intent(parsed.predicted_intent)
         confidence = 0.9
-        reasoning = f"{path};{parsed.intent_cot}"
+        intent_cot = (parsed.intent_cot or "").strip()
+        reasoning = f"{path};{intent_cot}"
 
         unified = unified_enum.value
         intent_values = [unified]
@@ -125,10 +129,20 @@ async def intent_analysis(state: EvalTurnState) -> Dict[str, Any]:
                 unified = UnifiedIntentType.SETTING.value
                 intent_values = [unified]
                 reasoning = f"{reasoning};first_turn_override_setting"
+                intent_cot = (
+                    f"{intent_cot}\n[시스템 보정] 첫 턴 FOLLOW_UP 불가 → SETTING으로 라우팅."
+                    if intent_cot
+                    else "[시스템 보정] 첫 턴 FOLLOW_UP 불가 → SETTING으로 라우팅."
+                )
             else:
                 unified = UnifiedIntentType.CREATION.value
                 intent_values = [unified]
                 reasoning = f"{reasoning};first_turn_override_creation"
+                intent_cot = (
+                    f"{intent_cot}\n[시스템 보정] 첫 턴 FOLLOW_UP 불가 → CREATION으로 라우팅."
+                    if intent_cot
+                    else "[시스템 보정] 첫 턴 FOLLOW_UP 불가 → CREATION으로 라우팅."
+                )
             confidence = min(confidence, 0.85)
 
         logger.info(
@@ -136,10 +150,20 @@ async def intent_analysis(state: EvalTurnState) -> Dict[str, Any]:
             f"의도: {intent_values}, unified_intent: {unified}, 신뢰도: {confidence:.2f}, 경로: {reasoning[:200]}"
         )
 
+        problem_in_turn = (parsed.problem_in_turn or "NONE").strip().upper()
+        user_request_in_turn = (parsed.user_request_in_turn or "NONE").strip().upper()
+        request_one_liner = (parsed.request_one_liner or "").strip()
+        carry_forward = (parsed.carry_forward or "").strip() or request_one_liner
+
         result: Dict[str, Any] = {
             "intent_types": intent_values,
             "intent_confidence": confidence,
             "unified_intent": unified,
+            "intent_cot": intent_cot or None,
+            "problem_in_turn": problem_in_turn,
+            "user_request_in_turn": user_request_in_turn,
+            "request_one_liner": request_one_liner or None,
+            "carry_forward": carry_forward or None,
         }
 
         if "eval_tokens" in state:
@@ -152,8 +176,14 @@ async def intent_analysis(state: EvalTurnState) -> Dict[str, Any]:
             f"[4.0 Intent Analysis] 오류 - session_id: {session_id}, turn: {turn}, error: {str(e)}",
             exc_info=True,
         )
+        preview = (human_message[:80] + "…") if len(human_message) > 80 else human_message
         return {
             "intent_types": [UnifiedIntentType.DEBUGGING.value],
             "intent_confidence": 0.0,
             "unified_intent": UnifiedIntentType.DEBUGGING.value,
+            "intent_cot": None,
+            "problem_in_turn": "NONE",
+            "user_request_in_turn": "OTHER",
+            "request_one_liner": preview or None,
+            "carry_forward": preview or None,
         }

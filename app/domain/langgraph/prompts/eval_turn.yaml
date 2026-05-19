@@ -1,17 +1,18 @@
 # Node 2 — evaluate_turn (LangGraph Turn_eval)
 # system + user 단일 template. Placeholders: ${previous_turns_summary}, ${eval_type}(의도), ${text}, ${ai_message}
 # turn_score: LLM이 내지 않음 → intent_rubric_gates 산식은 백엔드(grading.compute_turn_score_v31)에서 계산.
-version: "3.1"
+version: "3.3"
 name: eval_turn
 description: >
-  V3.1 Rubric-Based. LLM은 scoring_cot + rubric_breakdown(Rn)만 출력.
-  turn_score 가중 평균은 eval_turn.yaml intent_rubric_gates 주석과 동일하게 서버에서 산출.
+  V3.3 Rubric-Based + 턴 내용 분해. Intent의 request_one_liner 선독 후 루브릭 채점.
 
 variables:
   - eval_type
   - criteria
+  - request_one_liner
   - problem_info_section
   - metrics_section
+  - turn_content_section
   - word_count
   - has_examples
   - xml_tag_count
@@ -20,6 +21,7 @@ variables:
   - ai_message
 
 # Intent-Rubric Applicability Matrix + turn_score 산식 (백엔드와 동기 유지)
+# 최종 0~100 점수: 의도별 (R1~R4) 평균 → Likert 1~5 → Likert×20 (1→20 … 5→100)
 intent_rubric_gates:
   CREATION:    {R1: 1, R2: 1, R3: 1, R4: 0}   # turn_score = (R1+R2+R3)/3
   SETTING:     {R1: 0, R2: 1, R3: 1, R4: 0}   # turn_score = (R2+R3)/2
@@ -31,10 +33,28 @@ intent_rubric_gates:
 template: |
   당신은 깐깐한 시니어 프롬프트 감사관입니다. 주어진 의도에 해당하는 루브릭만 채점합니다. 엄격함은 인색한 저점이 아니라, 앵커를 정밀하게 적용하는 것입니다.
 
+  ### [필독] 이번 턴 사용자 행동 요약 (Intent 분류 단계 산출)
+
+  **아래 한 줄을 먼저 읽고**, 이 턴에서 사용자가 **실제로 무엇을 했는지**를 고정한 뒤에만 본문·루브릭 채점을 진행하십시오.
+  본문이 길거나 스펙이 섞여 있어도, 이 요약과 **모순되는 해석**으로 R1~R3를 올리지 마십시오.
+
+  > ${request_one_liner}
+
+  - `request_one_liner`는 **채점 본문이 아닙니다.** 「무엇을 평가할지」 정하는 앵커입니다.
+  - 요약에 「요청 없음」「코드 작성 요청」 등이 있으면, 아래 **턴 내용 분해**·루브릭 규칙과 함께 적용하십시오.
+  - 채점을 시작하기 전에 `scoring_cot` 첫 문장에 이 요약을 한 번 인용하십시오.
+
+  ---
+
   ### 이전 대화 요약 (Context Summary)
-  (평가 대상 본문이 아님. R4 팩트 체크 및 R2 Context 보정 전용.)
+  (평가 대상 본문이 아님. R4 팩트 체크·짧은 후속 턴 판단용. **R1~R3 점수 보정에 스펙 전문 사용 금지**.)
 
   ${previous_turns_summary}
+
+  ---
+
+  ### 이번 턴 내용 분해 (Intent 단계 산출)
+  ${turn_content_section}
 
   ---
 
@@ -68,6 +88,16 @@ template: |
   - **R4:** **5점**은 **여러 이전 턴을 종합**해 정교한 요청·수정을 할 때만 고려합니다. **직전 턴**에 대한 짧은 승인·단순 후속·최소 응답은 **3 이하**가 자연스럽습니다. 단순 후속에 5를 주지 마십시오.
   - **일관성:** 동일 본문에 대해 근거가 바뀌지 않았다면 **R2·R3 등에서 무분별한 ±1 출렁**을 만들지 마십시오. 앵커에 명시된 결함이 있을 때만 단계를 바꿉니다.
 
+  ### 턴 내용 분해 기반 채점 (V3.3)
+
+  - **FULL_SPEC + NONE**: 서버 가드레일(30점 고정) — 이 프롬프트는 해당 턴에 호출되지 않음.
+  - **스펙이 본문에 있는 턴** (`problem_in_turn` FULL_SPEC 또는 PARTIAL):
+    - **R1 = 스펙 상세성**: 붙여넣은 과제 정의의 완전성·구체성(제약, 예제, 규칙).
+    - **R2 = 요청 명확성**: `user_request_in_turn`이 NONE이면 **1~2점**. CODE_CREATE 등이면 **요청 문장만** 평가.
+    - **R3**: 요청 구간의 출력 형식·예시 지시(없으면 1~2).
+  - **FULL_SPEC + CODE_CREATE** (혼합): R1은 스펙 블록, R2·R3는 요청 구간만. scoring_cot에 구간 구분 명시.
+  - **NONE + CODE_CREATE** (이전 턴 스펙만): R1·R2는 **이번 턴 요청**의 구체성·명확성. Context 스펙 보정 **금지**.
+
   - **5 — Excellent**: 해당 루브릭 기준을 거의 완벽히 충족.
   - **4 — Good**: 대체로 충족, 사소한 보완 여지.
   - **3 — Adequate**: 최소한 이해·수행 가능, 모호함·누락이 남아 **mid-tier**에 더 가까움.
@@ -77,6 +107,7 @@ template: |
   ---
 
   ## R1 — 논리·구체성·제약조건 (Logic, Specificity & Constraints)
+  - **스펙이 본문에 있으면**: R1 = **스펙 상세성**(과제 정의·제약·예제의 완전성). 요청 문장 품질로 R1을 올리지 마십시오.
   - 5점: 자료구조·복잡도·라이브러리/스택·행동 제약 등 **구체적 제약조건**과 그 이유(Why)가 모두 명시
   - 4점: 기술적 제약, 함수 시그니처, 스키마, 라이브러리, 버전, 동작 요구사항 등 **작업 범위를 선명하게 좁히는 구체 조건**이 명시
   - 3점: 목표·의도는 분명하나 구체적 제약조건이나 기술적 한정이 부족
@@ -85,12 +116,14 @@ template: |
   - EXPLORATION 특례: R1을 "질문 범위의 명확성·구체성"으로 해석
 
   ## R2 — 명확성·완전성 (Clarity & Completeness)
+  - **스펙이 본문에 있고 요청이 있으면**: R2 = **요청 명확성**(요청 구간만). 스펙 완전성으로 R2 보정 금지.
+  - **요청이 NONE이면**: R2 ≤ 2 (행동 요청 없음).
   - 5점: 에러 Traceback·재현 코드·입출력 예시 모두 포함
   - 4점: 에러 메시지 또는 구체적 조건 제시
   - 3점: 의도 명확하나 구체적 조건 중 하나 이상 (Context로 보완 가능)
   - 2점: 두루뭉술 + Context에도 대상 없음
   - 1점: 정보 전무
-  - Context 보정: [Context Summary]에 대상 코드·에러가 있으면 4점 인정, 감점 금지.
+  - Context 보정 (제한): **DEBUGGING**·수정 요청이고 Context에 **에러·Traceback·재현 코드**가 있을 때만 R2 보완 가능. `user_request_in_turn=CODE_CREATE`이고 본문이 짧은 후속이면 **Context 보정 금지**. FULL_SPEC+CODE_CREATE 혼합 턴에서 스펙으로 R2 상향 **금지**.
   - Verbosity Penalty: 50%+ 장황함이면 선행 점수에서 -1~-2 (최소 1점), scoring_cot에 사유 명시.
 
   ## R3 — 구조·예시 (Structure & Examples)
