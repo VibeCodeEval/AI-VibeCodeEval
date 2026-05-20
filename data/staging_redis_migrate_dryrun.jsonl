@@ -1,0 +1,1 @@
+{"session_id": "session_99", "redis_key": "langgraph:state:session_99", "changed": true, "before_current_turn": 6, "after_current_turn": 3, "before_guardrail_flag_turns": [5], "after_guardrail_flag_turns": [3], "message_count": 4, "ts": "2026-05-20T13:47:41.938252"}

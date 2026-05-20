@@ -385,6 +385,8 @@ def get_initial_state(
         debate_log=None,
         debate_initial_opinions=None,
         debate_rebuttals=None,
+        guardrail_flag_turns=None,
+        guardrail_turn_reasons=None,
         # v2.1 Snapshot·평가 (제출 플로우에서 채워짐)
         v1_code=None,
         v2_code=None,

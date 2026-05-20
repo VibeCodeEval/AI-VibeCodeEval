@@ -1,8 +1,9 @@
 {
   "project": "AI-VibeCodeEval",
   "maestro_version": "1.2.0",
-  "last_updated": "2026-05-17T00:00:00Z",
-  "current_focus": "eval_submission_timeout_e2e_n5_per_tc_perf",
+  "last_updated": "2026-05-19T12:00:00Z",
+  "current_focus": "guardrail_flag_turns_n4_n8_meta_sync",
+  "active_branch": "35-fixn2-가드레일-증설-guardrail_flag_turn-추가-후-n4-평가에-반영",
   
   "phases": {
     "phase1": {
@@ -435,6 +436,10 @@
     {
       "timestamp": "2026-05-17T12:00:00Z",
       "content": "제출 평가 E2E: EVAL_SUBMISSION_TIMEOUT_SEC=600, eval_timeout_tracking, graph 노드 래퍼, session wait_for+ai-evaluation-timeout[노드]. 문서: .maestro/docs/Eval_Submission_Timeout.md."
+    },
+    {
+      "timestamp": "2026-05-19T12:00:00Z",
+      "content": "가드레일 턴 정책: guardrail_flag_turns/reasons, N2 INAPPROPRIATE·JAILBREAK, N4 0점·eval 스킵·맥락 제외, N8 filter_turn_logs_for_debate, meta 백필(sync_guardrail_meta_to_db), guardrail_flag_count 제거. PR36 리뷰: prev_user_content, normalize_state_turn_fields, migrate_redis_state_conversation_turn.py. E2E V1-V3 미실행."
     }
   ]
 }

@@ -11,20 +11,27 @@ from typing import Any, Dict, List, Optional
 from app.domain.langgraph.nodes.eval.eval_turn_targets import \
     eval_target_turn_numbers
 from app.domain.langgraph.states import MainGraphState
+from app.domain.langgraph.utils.guardrail_turns import (
+    get_guardrail_turn_reasons,
+    is_guardrail_blocked_response_text,
+    is_guardrail_turn,
+)
+from app.domain.langgraph.utils.turn_messages import resolve_turn_pair_for_eval
 from app.infrastructure.cache.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
 
-def _is_guardrail_blocked_response(ai_message: str) -> bool:
-    """Writer 가드레일 거절 응답 패턴 감지."""
-    if not ai_message:
-        return False
-    text = ai_message.strip()
-    return (
-        "해당 요청은 시험 규정상 답변할 수 없습니다" in text
-        or "시험 규정상 답변할 수 없습니다" in text
-    )
+def _resolve_turn_guardrail(
+    state: MainGraphState, turn: int, ai_message: str
+) -> tuple[bool, Optional[str]]:
+    """채팅 N2 등록 목록 우선, 없으면 assistant 문구 fallback."""
+    if is_guardrail_turn(state, turn):
+        reasons = get_guardrail_turn_reasons(state)
+        return True, reasons.get(str(int(turn)))
+    if is_guardrail_blocked_response_text(ai_message):
+        return True, None
+    return False, None
 
 
 async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
@@ -90,7 +97,6 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
             logger.info("")
             return {
                 "turn_scores": {},
-                "guardrail_flag_count": 0,
                 "updated_at": datetime.utcnow().isoformat(),
             }
 
@@ -98,7 +104,6 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
         # V2.2 Context-Integrated: 이전 턴 요약 누적 후 다음 턴 평가 시 전달
         prev_user_content: Optional[str] = None
         previous_turns_summaries: List[str] = []
-        guardrail_flag_count = 0
         logger.info("-" * 80)
         for idx, turn in enumerate(turns_to_evaluate, 1):
             logger.info("")
@@ -107,69 +112,23 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
             )
             logger.info("")
 
-            human_msg = None
-            ai_msg = None
-
-            # State의 messages에서 turn 정보로 직접 검색
-            # dict 형태 또는 LangChain BaseMessage 객체 모두 지원
-            for msg in messages:
-                # turn 정보 추출
-                msg_turn = None
-                msg_role = None
-                msg_content = None
-
-                if isinstance(msg, dict):
-                    msg_turn = msg.get("turn")
-                    msg_role = msg.get("role") or msg.get(
-                        "type"
-                    )  # role 우선, 없으면 type
-                    msg_content = msg.get("content")
-                else:
-                    # LangChain BaseMessage 객체
-                    msg_turn = getattr(msg, "turn", None)
-                    # role 속성 사용 (writer.py에서 role 속성을 추가함)
-                    msg_role = getattr(msg, "role", None)
-                    # content 추출
-                    if hasattr(msg, "content"):
-                        msg_content = msg.content
-                    else:
-                        msg_content = str(msg)
-
-                # 디버깅: 메시지 정보 로깅
-                logger.debug(
-                    f"[4. Eval Turn Guard] 메시지 확인 - turn: {msg_turn}, role: {msg_role}, content_len: {len(msg_content) if msg_content else 0}"
-                )
-
-                # 해당 턴의 메시지인지 확인
-                # turn이 None이면 메시지 순서로 추론 (인덱스 0,1 = turn 1, 인덱스 2,3 = turn 2, ...)
-                msg_idx = messages.index(msg) if msg in messages else -1
-                inferred_turn = (msg_idx // 2) + 1 if msg_idx >= 0 else None
-
-                # turn이 일치하거나, turn이 None이고 추론된 turn이 일치하는 경우
-                if msg_turn == turn or (msg_turn is None and inferred_turn == turn):
-                    # role 매핑: "user"/"human" -> human, "assistant"/"ai" -> ai
-                    if msg_role in ["user", "human"]:
-                        human_msg = msg_content
-                        logger.debug(
-                            f"[4. Eval Turn Guard] 턴 {turn} Human 메시지 발견 (turn: {msg_turn}, 추론: {inferred_turn})"
-                        )
-                    elif msg_role in ["assistant", "ai"]:
-                        ai_msg = msg_content
-                        logger.debug(
-                            f"[4. Eval Turn Guard] 턴 {turn} AI 메시지 발견 (turn: {msg_turn}, 추론: {inferred_turn})"
-                        )
-
-                    # 둘 다 찾았으면 중단
-                    if human_msg and ai_msg:
-                        break
+            human_msg, ai_msg, msg_source = await resolve_turn_pair_for_eval(
+                messages, session_id, turn
+            )
 
             if human_msg and ai_msg:
                 logger.info(
-                    f"[4. Eval Turn Guard] 턴 {turn} 메시지 추출 성공 - State에서 직접 조회"
+                    "[4. Eval Turn Guard] 턴 %s 메시지 추출 성공 — source=%s",
+                    turn,
+                    msg_source,
                 )
             else:
                 logger.warning(
-                    f"[4. Eval Turn Guard] 턴 {turn} - State에서 메시지 찾기 실패 (human: {bool(human_msg)}, ai: {bool(ai_msg)})"
+                    "[4. Eval Turn Guard] 턴 %s 메시지 추출 실패 (human=%s, ai=%s, source=%s)",
+                    turn,
+                    bool(human_msg),
+                    bool(ai_msg),
+                    msg_source,
                 )
 
             # SAVE 등 체크포인트 키워드 턴은 평가 제외 (Phase 1 확정 신호이지 코드 생성 프롬프트가 아님)
@@ -187,29 +146,46 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                 and str(prev_user_content).strip().upper() == "SAVE"
             )
 
+            guardrail_failed_for_turn, guardrail_block_reason = _resolve_turn_guardrail(
+                state, turn, ai_msg or ""
+            )
+
             # 평가 실행
             if human_msg and ai_msg:
+                if guardrail_failed_for_turn:
+                    logger.info(
+                        "[4. Eval Turn Guard] 턴 %s 가드레일 — eval 스킵·0점 (reason=%s)",
+                        turn,
+                        guardrail_block_reason,
+                    )
+                    await _evaluate_turn_sync(
+                        session_id=session_id,
+                        turn=turn,
+                        human_message=human_msg,
+                        ai_message=ai_msg,
+                        problem_context=state.get("problem_context"),
+                        is_phase2_first_turn=False,
+                        previous_turns_summary=None,
+                        is_guardrail_failed=True,
+                        guardrail_block_reason=guardrail_block_reason,
+                    )
+                    # SAVE 턴과 동일: 다음 턴 Phase2 판정용 직전 user 갱신
+                    if human_msg is not None:
+                        prev_user_content = human_msg
+                    logger.info("")
+                    continue
+
                 logger.info(f"[4. Eval Turn Guard] ===== 턴 {turn} 평가 시작 =====")
                 logger.info(f"[4. Eval Turn Guard] 사용자 메시지: {human_msg[:100]}...")
                 logger.info(f"[4. Eval Turn Guard] AI 응답: {ai_msg[:100]}...")
                 logger.info("")
 
-                # 이전 턴 요약 문자열 (V2.2: 턴 N 평가 시 1~N-1 요약 전달)
+                # 이전 턴 요약 문자열 (평가 완료된 턴만 누적)
                 previous_turns_summary_str = (
                     "\n\n".join(previous_turns_summaries)
                     if previous_turns_summaries
                     else None
                 )
-
-                # 해당 턴 가드레일 플래그 감지 (감점은 아직 적용하지 않고 횟수만 저장)
-                guardrail_failed_for_turn = _is_guardrail_blocked_response(ai_msg)
-                if guardrail_failed_for_turn:
-                    guardrail_flag_count += 1
-                    logger.info(
-                        "[4. Eval Turn Guard] 턴 %s 가드레일 플래그 감지 - 누적 횟수: %s",
-                        turn,
-                        guardrail_flag_count,
-                    )
 
                 # 평가 실행 및 결과 받기
                 eval_result = await _evaluate_turn_sync(
@@ -220,7 +196,7 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                     problem_context=state.get("problem_context"),
                     is_phase2_first_turn=is_phase2_first_turn,
                     previous_turns_summary=previous_turns_summary_str,
-                    is_guardrail_failed=guardrail_failed_for_turn,
+                    is_guardrail_failed=False,
                 )
 
                 # 평가 결과 요약 출력
@@ -334,7 +310,6 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
 
         return {
             "turn_scores": turn_scores,
-            "guardrail_flag_count": guardrail_flag_count,
             "updated_at": datetime.utcnow().isoformat(),
         }
 
@@ -360,6 +335,7 @@ async def _evaluate_turn_sync(
     is_phase2_first_turn: bool = False,
     previous_turns_summary: Optional[str] = None,
     is_guardrail_failed: bool = False,
+    guardrail_block_reason: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     특정 턴을 동기적으로 평가
@@ -383,6 +359,7 @@ async def _evaluate_turn_sync(
                 else None
             )
 
+            reason_text = guardrail_block_reason or "GUARDRAIL_BLOCKED"
             guardrail_turn_log = {
                 "prompt_evaluation_details": {
                     "intent": "GUARDRAIL_BLOCKED",
@@ -390,6 +367,7 @@ async def _evaluate_turn_sync(
                     "unified_intent": "GUARDRAIL_BLOCKED",
                     "intent_confidence": 1.0,
                     "score": 0.0,
+                    "block_reason": reason_text,
                     "rubric_breakdown": {},
                     "applied_rubrics": [],
                     "scoring_cot": {},
@@ -404,7 +382,8 @@ async def _evaluate_turn_sync(
                 "detailed_feedback": [],
                 "turn_score": 0.0,
                 "is_guardrail_failed": True,
-                "guardrail_message": "가드레일 위반 응답 감지",
+                "guardrail_message": reason_text,
+                "block_reason": reason_text,
                 "user_prompt_summary": (
                     human_message[:200] + "..."
                     if len(human_message) > 200
@@ -415,6 +394,8 @@ async def _evaluate_turn_sync(
                 ),
                 "llm_answer_reasoning": "가드레일 위반 턴으로 평가를 건너뛰고 0점 처리",
             }
+
+            await redis_client.save_turn_log(session_id, turn, guardrail_turn_log)
 
             if postgres_session_id:
                 async with get_db_context() as db:
