@@ -439,7 +439,7 @@
     },
     {
       "timestamp": "2026-05-19T12:00:00Z",
-      "content": "가드레일 턴 정책: guardrail_flag_turns/reasons, N2 INAPPROPRIATE·JAILBREAK, N4 0점·eval 스킵·맥락 제외, N8 filter_turn_logs_for_debate, meta 백필(sync_guardrail_meta_to_db), guardrail_flag_count 제거. 문서: reports/daily/2026-05-19/, DB_Save_Path_Audit.md, State_노드별_흐름.md. E2E V1-V3 미실행."
+      "content": "가드레일 턴 정책: guardrail_flag_turns/reasons, N2 INAPPROPRIATE·JAILBREAK, N4 0점·eval 스킵·맥락 제외, N8 filter_turn_logs_for_debate, meta 백필(sync_guardrail_meta_to_db), guardrail_flag_count 제거. PR36 리뷰: prev_user_content, normalize_state_turn_fields, migrate_redis_state_conversation_turn.py. E2E V1-V3 미실행."
     }
   ]
 }

@@ -19,7 +19,7 @@
 | 파일 | 변경 |
 |------|------|
 | `app/domain/langgraph/utils/guardrail_turns.py` | 등록·판별·거절 문구·N8 `filter_turn_logs_for_debate`·storage↔conversation turn·`build_guardrail_meta_patch` |
-| `app/domain/langgraph/utils/turn_messages.py` | Redis `messages` Human+AI+`turn` 쌍 정규화 (`handle_failure` 경로) |
+| `app/domain/langgraph/utils/turn_messages.py` | Human+AI 쌍 빌드; N4용 `api_turn` 매칭 → 인덱스 fallback → PG `prompt_messages` fallback (`resolve_turn_pair_for_eval`) |
 
 ### 채팅 (N2 / Writer / system)
 
@@ -33,7 +33,7 @@
 
 | 파일 | 변경 |
 |------|------|
-| `app/domain/langgraph/nodes/eval/n4_eval_turn_guard.py` | 목록 우선 0점·eval 스킵; `previous_turns_summaries`·`prev_user_content` 제외; assistant prefix fallback |
+| `app/domain/langgraph/nodes/eval/n4_eval_turn_guard.py` | 목록 우선 0점·eval 스킵; 메시지 추출 `resolve_turn_pair_for_eval`; `previous_turns_summaries`·`prev_user_content` 제외 |
 | `app/domain/langgraph/nodes/eval/n8_code_execution.py` | `filter_turn_logs_for_debate` |
 | `app/domain/langgraph/nodes/eval/n8_holistic_debate.py` | 동일 |
 | `app/domain/langgraph/nodes/eval/turn_evaluation_details.py` | export `block_reason` |
@@ -98,6 +98,19 @@ tests/test_chains.py            — guardrail 거절 문구
 
 - `scripts/_analyze_export_guardrail.py`
 - `scripts/_check_pm_order.py`
+
+---
+
+## PR #36 리뷰 반영 (ydking0911)
+
+| # | 조치 |
+|---|------|
+| N4 `prev_user_content` | 가드레일 `continue` 전 SAVE와 동일 갱신 |
+| `graph.py` | `guardrail_flag_turns/reasons` 기본값 `None` |
+| turn 정규화 | `normalize_state_turn_fields` — `get_state`/`save_state`/`_update_redis_checkpoint` |
+| Redis 마이그레이션 | `scripts/migrate_redis_state_conversation_turn.py` (`--dry-run` / `--apply`) |
+
+- pytest `test_guardrail_turns.py`: 17 passed (정규화·Phase2 회귀 포함)
 
 ---
 

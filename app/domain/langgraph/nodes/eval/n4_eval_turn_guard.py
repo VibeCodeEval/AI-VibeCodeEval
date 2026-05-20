@@ -16,6 +16,7 @@ from app.domain.langgraph.utils.guardrail_turns import (
     is_guardrail_blocked_response_text,
     is_guardrail_turn,
 )
+from app.domain.langgraph.utils.turn_messages import resolve_turn_pair_for_eval
 from app.infrastructure.cache.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
@@ -111,69 +112,23 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
             )
             logger.info("")
 
-            human_msg = None
-            ai_msg = None
-
-            # State의 messages에서 turn 정보로 직접 검색
-            # dict 형태 또는 LangChain BaseMessage 객체 모두 지원
-            for msg in messages:
-                # turn 정보 추출
-                msg_turn = None
-                msg_role = None
-                msg_content = None
-
-                if isinstance(msg, dict):
-                    msg_turn = msg.get("turn")
-                    msg_role = msg.get("role") or msg.get(
-                        "type"
-                    )  # role 우선, 없으면 type
-                    msg_content = msg.get("content")
-                else:
-                    # LangChain BaseMessage 객체
-                    msg_turn = getattr(msg, "turn", None)
-                    # role 속성 사용 (writer.py에서 role 속성을 추가함)
-                    msg_role = getattr(msg, "role", None)
-                    # content 추출
-                    if hasattr(msg, "content"):
-                        msg_content = msg.content
-                    else:
-                        msg_content = str(msg)
-
-                # 디버깅: 메시지 정보 로깅
-                logger.debug(
-                    f"[4. Eval Turn Guard] 메시지 확인 - turn: {msg_turn}, role: {msg_role}, content_len: {len(msg_content) if msg_content else 0}"
-                )
-
-                # 해당 턴의 메시지인지 확인
-                # turn이 None이면 메시지 순서로 추론 (인덱스 0,1 = turn 1, 인덱스 2,3 = turn 2, ...)
-                msg_idx = messages.index(msg) if msg in messages else -1
-                inferred_turn = (msg_idx // 2) + 1 if msg_idx >= 0 else None
-
-                # turn이 일치하거나, turn이 None이고 추론된 turn이 일치하는 경우
-                if msg_turn == turn or (msg_turn is None and inferred_turn == turn):
-                    # role 매핑: "user"/"human" -> human, "assistant"/"ai" -> ai
-                    if msg_role in ["user", "human"]:
-                        human_msg = msg_content
-                        logger.debug(
-                            f"[4. Eval Turn Guard] 턴 {turn} Human 메시지 발견 (turn: {msg_turn}, 추론: {inferred_turn})"
-                        )
-                    elif msg_role in ["assistant", "ai"]:
-                        ai_msg = msg_content
-                        logger.debug(
-                            f"[4. Eval Turn Guard] 턴 {turn} AI 메시지 발견 (turn: {msg_turn}, 추론: {inferred_turn})"
-                        )
-
-                    # 둘 다 찾았으면 중단
-                    if human_msg and ai_msg:
-                        break
+            human_msg, ai_msg, msg_source = await resolve_turn_pair_for_eval(
+                messages, session_id, turn
+            )
 
             if human_msg and ai_msg:
                 logger.info(
-                    f"[4. Eval Turn Guard] 턴 {turn} 메시지 추출 성공 - State에서 직접 조회"
+                    "[4. Eval Turn Guard] 턴 %s 메시지 추출 성공 — source=%s",
+                    turn,
+                    msg_source,
                 )
             else:
                 logger.warning(
-                    f"[4. Eval Turn Guard] 턴 {turn} - State에서 메시지 찾기 실패 (human: {bool(human_msg)}, ai: {bool(ai_msg)})"
+                    "[4. Eval Turn Guard] 턴 %s 메시지 추출 실패 (human=%s, ai=%s, source=%s)",
+                    turn,
+                    bool(human_msg),
+                    bool(ai_msg),
+                    msg_source,
                 )
 
             # SAVE 등 체크포인트 키워드 턴은 평가 제외 (Phase 1 확정 신호이지 코드 생성 프롬프트가 아님)
@@ -214,6 +169,9 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                         is_guardrail_failed=True,
                         guardrail_block_reason=guardrail_block_reason,
                     )
+                    # SAVE 턴과 동일: 다음 턴 Phase2 판정용 직전 user 갱신
+                    if human_msg is not None:
+                        prev_user_content = human_msg
                     logger.info("")
                     continue
 

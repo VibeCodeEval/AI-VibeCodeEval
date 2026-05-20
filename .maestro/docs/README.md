@@ -29,7 +29,7 @@ V2.1 단계별 작업 지시는 `V2.1_Step_*.md`, 변경 이력은 `V2.1_Change_
 | [Judge0_Batch_And_Genai_Vertex.md](./Judge0_Batch_And_Genai_Vertex.md) | Judge0 Batched Submissions(TC≥2), ChatGoogleGenerativeAI+Vertex, N5 TC별 Performance |
 | [Eval_Submission_Timeout.md](./Eval_Submission_Timeout.md) | `EVAL_SUBMISSION_TIMEOUT_SEC`, 백그라운드 E2E, 노드 추적·타임아웃 로그 |
 | [Submit_테스트_ENV_평가덤프_가이드.md](./Submit_테스트_ENV_평가덤프_가이드.md) | Submit 테스트 절차, `test_ids.json`, `.env` 관련 변수, 평가 JSON·Redis 토론 덤프 사용법 |
-| [DB_Save_Path_Audit.md](./DB_Save_Path_Audit.md) | PG/Redis 저장 순서, conversation vs storage turn, 가드레일 meta·백필 |
+| [DB_Save_Path_Audit.md](./DB_Save_Path_Audit.md) | PG/Redis 저장 순서, turn 정규화, Redis 마이그레이션 스크립트 |
 | [../agents/submit_test_agent.md](../agents/submit_test_agent.md) | 위 주제를 코드·문서로 유지보수하는 Maestro 에이전트 시스템 프롬프트 |
 
 업데이트 시기: 코드·스크립트 동작이 바뀌면 해당 가이드의 날짜·절차를 함께 수정합니다. **평가 노드 구조**가 바뀌면 `평가_파이프라인_플로우.md`를 루트 `docs/` 사본과 함께 갱신합니다.

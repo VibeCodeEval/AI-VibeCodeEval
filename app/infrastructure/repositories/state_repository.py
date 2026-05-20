@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from app.core.config import settings
+from app.domain.langgraph.utils.guardrail_turns import normalize_state_turn_fields
 from app.infrastructure.cache.redis_client import RedisClient
 
 
@@ -55,6 +56,7 @@ class StateRepository:
         """그래프 상태 저장"""
         # messages 직렬화
         state_copy = {**state}
+        normalize_state_turn_fields(state_copy)
         if "messages" in state_copy and isinstance(state_copy["messages"], list):
             state_copy["messages"] = self._serialize_messages(state_copy["messages"])
 
@@ -127,6 +129,8 @@ class StateRepository:
 
         if state is None:
             return None
+
+        normalize_state_turn_fields(state)
 
         # messages 역직렬화 (dict → LangChain BaseMessage 객체)
         if "messages" in state and isinstance(state["messages"], list):

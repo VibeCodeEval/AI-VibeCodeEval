@@ -9,6 +9,11 @@ from app.domain.langgraph.nodes.chat.n2_intent_analyzer import (
     _merge_guardrail_turn_state,
     process_output,
 )
+from app.domain.langgraph.utils.turn_messages import (
+    extract_turn_pair_from_state_messages,
+    message_matches_conversation_turn,
+    resolve_turn_pair_for_eval,
+)
 from app.domain.langgraph.utils.guardrail_turns import (
     GUARDRAIL_USER_MESSAGE_PREFIX,
     api_turn_to_conversation_turn,
@@ -17,8 +22,10 @@ from app.domain.langgraph.utils.guardrail_turns import (
     format_guardrail_user_message,
     is_guardrail_blocked_response_text,
     is_guardrail_turn,
+    normalize_state_turn_fields,
     register_guardrail_turn,
     resolve_conversation_turn_for_guardrail,
+    storage_slot_to_conversation_turn,
 )
 
 
@@ -33,6 +40,49 @@ def test_register_guardrail_turn_appends():
     patch_out = register_guardrail_turn(state, block_reason="INAPPROPRIATE")
     assert patch_out["guardrail_flag_turns"] == [2]
     assert patch_out["guardrail_turn_reasons"]["2"] == "INAPPROPRIATE"
+
+
+def test_normalize_state_legacy_storage_current_turn():
+    """대화 3턴 legacy: current_turn=6(storage), messages turn 5/6 등."""
+    state = {
+        "current_turn": 6,
+        "turn": 6,
+        "guardrail_flag_turns": [5],
+        "guardrail_turn_reasons": {"5": "OFF_TOPIC"},
+        "messages": [
+            {"role": "user", "turn": 1, "content": "a"},
+            {"role": "assistant", "turn": 2, "content": "b"},
+            {"role": "user", "turn": 3, "content": "c"},
+            {"role": "assistant", "turn": 4, "content": "d"},
+            {"role": "user", "turn": 5, "content": "gr"},
+            {"role": "assistant", "turn": 6, "content": format_guardrail_user_message()},
+        ],
+    }
+    normalize_state_turn_fields(state)
+    assert state["current_turn"] == 3
+    assert state["guardrail_flag_turns"] == [3]
+    assert state["messages"][-2]["turn"] == 3
+    assert state["messages"][-2].get("storage_turn") == 5
+
+
+def test_normalize_state_preserves_already_conversation_turns():
+    state = {
+        "current_turn": 2,
+        "messages": [
+            {"role": "user", "turn": 1, "storage_turn": 1, "content": "x"},
+            {"role": "assistant", "turn": 1, "storage_turn": 2, "content": "y"},
+        ],
+        "guardrail_flag_turns": [1],
+    }
+    normalize_state_turn_fields(state)
+    assert state["current_turn"] == 2
+    assert state["messages"][0]["turn"] == 1
+    assert state["messages"][1]["turn"] == 1
+
+
+def test_storage_slot_to_conversation_turn():
+    assert storage_slot_to_conversation_turn(10) == 5
+    assert storage_slot_to_conversation_turn(9) == 5
 
 
 def test_format_guardrail_user_message_prefix():
@@ -71,6 +121,50 @@ def test_api_turn_to_conversation_turn_storage_slots():
     assert api_turn_to_conversation_turn(1, "user") == 1
     assert api_turn_to_conversation_turn(2, "assistant") == 1
     assert api_turn_to_conversation_turn(5, "USER") == 3
+
+
+def test_message_matches_conversation_turn_storage_slot():
+    assert message_matches_conversation_turn(3, "user", 0, 2)
+    assert message_matches_conversation_turn(4, "assistant", 0, 2)
+    assert not message_matches_conversation_turn(3, "assistant", 0, 2)
+
+
+def test_extract_turn_pair_mismatched_tags_uses_index_fallback():
+    """session_6 유형: user turn=2, ai turn=3 (conv 2) — strict 매칭만으로는 AI 누락."""
+    messages = [
+        {"role": "user", "turn": 1, "content": "t1u"},
+        {"role": "assistant", "turn": 1, "content": "t1a"},
+        {"role": "user", "turn": 2, "content": "t2u"},
+        {"role": "assistant", "turn": 3, "content": "t2a"},
+        {"role": "user", "turn": 4, "content": "t3u"},
+        {"role": "assistant", "turn": 5, "content": "t3a"},
+    ]
+    human, ai, src = extract_turn_pair_from_state_messages(messages, 2)
+    assert src == "state_index"
+    assert human == "t2u"
+    assert ai == "t2a"
+
+    human3, ai3, src3 = extract_turn_pair_from_state_messages(messages, 3)
+    assert src3 == "state_index"
+    assert human3 == "t3u"
+    assert ai3 == "t3a"
+
+
+@pytest.mark.asyncio
+async def test_resolve_turn_pair_pg_fallback_when_state_empty():
+    from app.domain.langgraph.utils import turn_messages as tm
+
+    with patch.object(
+        tm,
+        "fetch_turn_pair_from_prompt_messages",
+        new_callable=AsyncMock,
+        return_value=("pg_human", "pg_ai"),
+    ):
+        human, ai, src = await resolve_turn_pair_for_eval([], "session_6", 2)
+
+    assert src == "pg"
+    assert human == "pg_human"
+    assert ai == "pg_ai"
 
 
 def test_build_guardrail_meta_patch_from_ai_content():
@@ -160,6 +254,51 @@ async def test_n4_skips_llm_eval_for_guardrail_turn():
     assert llm_eval_turns == [2]
     assert result["turn_scores"]["1"]["turn_score"] == 0
     assert result["turn_scores"]["2"]["turn_score"] == 80
+
+
+@pytest.mark.asyncio
+async def test_n4_phase2_not_triggered_after_save_then_guardrail():
+    """SAVE → GR → normal: 3번째 턴 is_phase2_first_turn=False (리뷰 #1)."""
+    from app.domain.langgraph.nodes.eval import n4_eval_turn_guard as n4
+
+    state = {
+        "session_id": "session_1",
+        "current_turn": 4,
+        "guardrail_flag_turns": [2],
+        "guardrail_turn_reasons": {"2": "OFF_TOPIC"},
+        "messages": [
+            {"role": "user", "turn": 1, "content": "SAVE"},
+            {"role": "assistant", "turn": 1, "content": "saved"},
+            {"role": "user", "turn": 2, "content": "bad"},
+            {"role": "assistant", "turn": 2, "content": format_guardrail_user_message()},
+            {"role": "user", "turn": 3, "content": "normal q"},
+            {"role": "assistant", "turn": 3, "content": "normal a"},
+        ],
+        "problem_context": {},
+    }
+
+    phase2_flags = []
+
+    async def fake_eval_sync(*args, **kwargs):
+        if kwargs.get("is_guardrail_failed"):
+            return {"turn_score": 0.0, "intent_type": "GUARDRAIL_BLOCKED"}
+        phase2_flags.append((kwargs["turn"], kwargs.get("is_phase2_first_turn")))
+        return {
+            "turn_score": 70.0,
+            "intent_type": "CREATION",
+            "request_one_liner": "n",
+            "llm_answer_summary": "a",
+        }
+
+    with patch.object(n4, "_evaluate_turn_sync", side_effect=fake_eval_sync):
+        with patch.object(
+            n4.redis_client, "get_all_turn_logs", new_callable=AsyncMock, return_value={}
+        ):
+            await n4.eval_turn_submit_guard(state)
+
+    assert 2 not in [t for t, _ in phase2_flags]
+    turn3 = next((p2 for t, p2 in phase2_flags if t == 3), None)
+    assert turn3 is False
 
 
 @pytest.mark.asyncio

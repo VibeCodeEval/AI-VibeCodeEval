@@ -287,10 +287,13 @@ class MessageStorageService:
             message_data["guardrail"] = gr_meta
 
         state["messages"].append(message_data)
-        state["turn"] = max(state.get("turn", 0), conv_turn)
-        state["current_turn"] = max(state.get("current_turn", 0), conv_turn)
+        from app.domain.langgraph.utils.guardrail_turns import (
+            normalize_state_turn_fields,
+        )
 
-        # 상태 저장
+        normalize_state_turn_fields(state)
+
+        # 상태 저장 (save_state 내부에서도 정규화)
         await self.state_repo.save_state(redis_session_id, state)
 
     async def save_messages_batch(

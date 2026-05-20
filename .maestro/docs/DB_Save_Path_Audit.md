@@ -1,7 +1,6 @@
 # DB 저장 경로 점검 — 가드레일 meta 유사 오류
 
-> 작성: 2026-05-20  
-> **작성**: 2026-05-19  
+> **작성·갱신**: 2026-05-19 (가드레일 meta), 2026-05-20 (turn 정규화·Redis 마이그레이션)  
 > 배경: V3(`prompt_messages.meta` 가드레일 필드) 미저장 이슈 조사 중, 동일 패턴이 다른 저장 경로에도 있는지 점검.
 
 ---
@@ -95,8 +94,10 @@ ORDER BY turn;
 
 | 항목 | 내용 |
 |------|------|
-| **전제** | Redis `state.messages`에 턴 쌍(HUMAN+AI) 필요 |
-| **리스크** | Spring만 `save-message`, LangGraph state 비어 있으면 N4 실패 |
+| **전제** | 턴당 Human+AI 본문 필요 |
+| **추출 순서** | `resolve_turn_pair_for_eval`: (1) Redis `messages` + `api_turn_to_conversation_turn` (2) `[u,a,u,a…]` 인덱스 fallback (3) PG `prompt_messages` storage slot |
+| **리스크** | `msg_turn == conv`만 쓰면 user=2·ai=3 같은 혼재 태그에서 쌍 누락 (session_6 유형) |
+| **로그** | `source=state_turn \| state_index \| pg` |
 
 ---
 
@@ -121,8 +122,45 @@ ORDER BY turn;
 |------|------|
 | `message_storage_service.py` | conv turn 정규화, 가드레일 백필, Redis `current_turn` 수정, batch 동일화 |
 | `eval_service.py` | `sync_guardrail_meta_to_db` 호출, `turn_analysis` conv turn |
-| `guardrail_turns.py` | `api_turn_to_conversation_turn`, `build_guardrail_meta_patch` |
+| `guardrail_turns.py` | `api_turn_to_conversation_turn`, `build_guardrail_meta_patch`, **`normalize_state_turn_fields`** |
 | `evaluation_storage_service.py` | prompt_messages 존재 체크 시 storage turn |
+| `state_repository.py` | `get_state` / `save_state` 시 turn 정규화 |
+| `n4_eval_turn_guard.py` | 가드레일 `continue` 전 `prev_user_content` 갱신 |
+| `graph.py` | `guardrail_flag_turns/reasons` 기본값 `None` |
+
+---
+
+## Redis turn 정규화 (코드 3-A + 마이그레이션 3-B)
+
+### 런타임 (3-A)
+
+`normalize_state_turn_fields(state)` (`guardrail_turns.py`):
+
+- `messages[].turn` → **conversation turn**, legacy storage 값은 `storage_turn`에 보존
+- `current_turn` / `turn` → messages 최대 conv와 legacy storage `current_turn` 중 정합 값
+- `guardrail_flag_turns` → storage로 보이는 큰 번호는 conv로 변환
+
+**호출**: `StateRepository.get_state`, `save_state`, `MessageStorageService._update_redis_checkpoint`
+
+### 일회성 마이그레이션 (3-B)
+
+스크립트: `scripts/migrate_redis_state_conversation_turn.py`
+
+| 옵션 | 설명 |
+|------|------|
+| (기본) | `--dry-run` — 변경 없음, `data/redis_migrate_*.jsonl` 리포트 |
+| `--apply` | Redis `langgraph:state:session_*` 덮어쓰기 (TTL 유지) |
+| `--session-id 42` | 단일 세션 |
+
+**권장 순서**
+
+1. 스테이징 `uv run python scripts/migrate_redis_state_conversation_turn.py`
+2. 리포트에서 `changed` 세션 수 확인
+3. 스테이징 `--apply` → Worker 재시작 → 제출 E2E 1건
+4. 프로덕 Redis 백업 후 `--apply`
+5. Worker 재시작
+
+배포만 하고 B를 안 해도 **다음 read/write부터 3-A가 점진 보정**하지만, 배포 직후 첫 제출 전 고착 state가 남을 수 있어 **진행 중 시험**은 B 권장.
 
 ---
 
