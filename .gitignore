@@ -101,6 +101,7 @@ test_tsp_ids.json
 test_chat_session.json
 test_chat_sessions.json
 data/*.json
+data/*.xlsx
 chat_diff.txt
 
 # Cursor IDE

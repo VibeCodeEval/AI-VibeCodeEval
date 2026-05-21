@@ -200,6 +200,9 @@ class EvalTurnState(TypedDict):
     # 이전 턴 대화 요약 (V2.2 Context-Integrated: 턴 N 평가 시 1~N-1 요약)
     previous_turns_summary: Optional[str]
 
+    # 이전 턴 USER/AI 본문 발췌 (V3.4.5: 턴 N 평가 시 1~N-1 대화 — Rn 해석용)
+    previous_turn_dialogue: Optional[str]
+
     # Phase 2 첫 지시 여부 (SAVE 직후 턴 → 문맥 감점 없음)
     is_phase2_first_turn: Optional[bool]
 

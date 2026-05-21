@@ -1,9 +1,9 @@
 {
   "project": "AI-VibeCodeEval",
   "maestro_version": "1.2.0",
-  "last_updated": "2026-05-19T12:00:00Z",
-  "current_focus": "guardrail_flag_turns_n4_n8_meta_sync",
-  "active_branch": "35-fixn2-가드레일-증설-guardrail_flag_turn-추가-후-n4-평가에-반영",
+  "last_updated": "2026-05-21T12:00:00Z",
+  "current_focus": "n9_grade_from_total_score_eval_calibration",
+  "active_branch": "37-fix-관리자-평가-상세-runs-미반영-testcase-persist-연결-필요",
   
   "phases": {
     "phase1": {
@@ -440,6 +440,10 @@
     {
       "timestamp": "2026-05-19T12:00:00Z",
       "content": "가드레일 턴 정책: guardrail_flag_turns/reasons, N2 INAPPROPRIATE·JAILBREAK, N4 0점·eval 스킵·맥락 제외, N8 filter_turn_logs_for_debate, meta 백필(sync_guardrail_meta_to_db), guardrail_flag_count 제거. PR36 리뷰: prev_user_content, normalize_state_turn_fields, migrate_redis_state_conversation_turn.py. E2E V1-V3 미실행."
+    },
+    {
+      "timestamp": "2026-05-21T12:00:00Z",
+      "content": "N9 grade SoT: total_score 구간(90/80/70/60→A/B/C/D/F). correctness<100 시 D/F 고정 제거. n9_final_scores._grade_from_total_score, test_n9_perf_total_order. 문서: reports/daily/2026-05-21/, V2.1_Change_Log, V2.1_Evaluation §2.4, docs/점수_계산_로직 §4.4. 사례: exam1 P4 total 82→B (구 dump grade D)."
     }
   ]
 }
