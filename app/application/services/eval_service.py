@@ -623,6 +623,10 @@ class EvalService:
             response["final_scores"] = result.get("final_scores")
             response["turn_scores"] = result.get("turn_scores")
             response["submission_id"] = result.get("submission_id")
+        if result.get("be_scoring_callback"):
+            response["be_scoring_callback"] = result.get("be_scoring_callback")
+        if result.get("test_case_results") is not None:
+            response["test_case_results"] = result.get("test_case_results")
 
         return response
 

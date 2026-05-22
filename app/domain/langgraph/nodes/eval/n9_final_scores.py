@@ -9,6 +9,9 @@ from app.domain.langgraph.nodes.eval.rubric_json_serializers import (
     build_reference_cc_summary,
     build_tc_summary,
 )
+from app.application.services.scoring_callback_mapper import (
+    build_be_scoring_result_body,
+)
 from app.domain.langgraph.nodes.eval.turn_evaluation_details import (
     build_turn_evaluation_details,
 )
@@ -260,7 +263,17 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
             + perf_score * weights["performance"]
         )
 
-        grade = _grade_from_total_score(total_score)
+        # 등급: total_score 구간만 사용 (TC 미만점 시 D 상한 분기 제거)
+        if total_score >= 90:
+            grade = "A"
+        elif total_score >= 80:
+            grade = "B"
+        elif total_score >= 70:
+            grade = "C"
+        elif total_score >= 60:
+            grade = "D"
+        else:
+            grade = "F"
 
         holistic_flow_analysis = state.get("holistic_flow_analysis")
 
@@ -335,22 +348,17 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
         logger.info(f"[N9. Final Scores] Grade: {grade}")
 
         submission_id = state.get("submission_id")
-        exam_id = state.get("exam_id")
-        participant_id = state.get("participant_id")
-        spec_id = state.get("spec_id")
-        code_content = state.get("code_content")
+
+        be_scoring_callback: Optional[Dict[str, Any]] = None
 
         try:
-            import hashlib
-            from decimal import Decimal
-
-            from app.infrastructure.persistence.models.enums import \
-                SubmissionStatusEnum
             from app.infrastructure.persistence.session import get_db_context
-            from app.infrastructure.repositories.session_repository import \
-                SessionRepository
-            from app.infrastructure.repositories.submission_repository import \
-                SubmissionRepository
+            from app.infrastructure.repositories.session_repository import (
+                SessionRepository,
+            )
+            from app.infrastructure.repositories.submission_repository import (
+                SubmissionRepository,
+            )
 
             postgres_session_id = (
                 int(session_id.replace("session_", ""))
@@ -358,59 +366,26 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                 else None
             )
 
-            if (
-                postgres_session_id
-                and exam_id
-                and participant_id
-                and spec_id
-                and code_content
-            ):
+            if postgres_session_id and submission_id:
                 async with get_db_context() as db:
                     submission_repo = SubmissionRepository(db)
                     session_repo = SessionRepository(db)
-
-                    if not submission_id:
-                        logger.error(
-                            f"[N9. Final Scores] Submission ID가 없습니다 - "
-                            f"exam_id: {exam_id}, participant_id: {participant_id}"
-                        )
-                        raise ValueError(
-                            "Submission ID is required. BE에서 생성한 submission ID가 전달되어야 합니다."
-                        )
 
                     submission = await submission_repo.get_submission_by_id(
                         submission_id
                     )
                     if not submission:
                         logger.error(
-                            f"[N9. Final Scores] Submission을 찾을 수 없습니다 - "
-                            f"submission_id: {submission_id}, exam_id: {exam_id}, participant_id: {participant_id}"
+                            "[N9. Final Scores] Submission 없음 submission_id=%s",
+                            submission_id,
                         )
-                        raise ValueError(
-                            f"Submission not found: submission_id={submission_id}"
+                    else:
+                        turn_evaluations = await _load_turn_evaluations_for_rubric(
+                            db,
+                            postgres_session_id,
+                            session_id,
                         )
-
-                    await submission_repo.update_submission_status(
-                        submission_id=submission_id, status=SubmissionStatusEnum.DONE
-                    )
-                    logger.info(
-                        f"[N9. Final Scores] Submission 상태 업데이트 완료 - "
-                        f"submission_id: {submission_id}, status: DONE"
-                    )
-
-                    turn_evaluations = await _load_turn_evaluations_for_rubric(
-                        db,
-                        postgres_session_id,
-                        session_id,
-                    )
-
-                    score = await submission_repo.create_or_update_score(
-                        submission_id=submission_id,
-                        prompt_score=Decimal(str(round(prompt_score, 2))),
-                        perf_score=Decimal(str(round(perf_score, 2))),
-                        correctness_score=Decimal(str(round(correctness_score, 2))),
-                        total_score=Decimal(str(round(total_score, 2))),
-                        rubric_json={
+                        rubric_dict = {
                             "prompt_score": round(prompt_score, 2),
                             "performance_score": round(perf_score, 2),
                             "correctness_score": round(correctness_score, 2),
@@ -439,37 +414,42 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
                             "code_quality_metrics": code_quality_metrics,
                             "code_eval_report": code_eval_report,
                             "session_id": postgres_session_id,
-                            # 토론·턴별 맥락 (Debate 결론 해석용 — DB 단일 조회로 추적 가능)
                             "debate_log": state.get("debate_log"),
                             "debate_initial_opinions": state.get(
                                 "debate_initial_opinions"
                             ),
                             "debate_rebuttals": state.get("debate_rebuttals"),
                             "turn_scores": state.get("turn_scores"),
-                        },
-                    )
-                    logger.info(
-                        f"[N9. Final Scores] Score 저장 완료 - "
-                        f"submission_id: {submission_id}, total_score: {total_score:.2f}"
-                    )
+                        }
+                        be_scoring_callback = build_be_scoring_result_body(
+                            status="DONE",
+                            test_case_results=test_case_results,
+                            prompt_score=prompt_score,
+                            perf_score=perf_score,
+                            correctness_score=correctness_score,
+                            rubric_dict=rubric_dict,
+                        )
+                        logger.info(
+                            "[N9. Final Scores] BE result payload 준비 — "
+                            "submission_id=%s testCases=%s",
+                            submission_id,
+                            len(be_scoring_callback.get("testCases") or []),
+                        )
 
                     await session_repo.end_session(postgres_session_id)
-
                     await db.commit()
                     logger.info(
-                        f"[N9. Final Scores] 세션 종료 완료 - "
-                        f"session_id: {postgres_session_id}, ended_at 설정됨"
+                        "[N9. Final Scores] 세션 종료 — session_id=%s",
+                        postgres_session_id,
                     )
-            else:
+            elif not submission_id:
                 logger.warning(
-                    f"[N9. Final Scores] Submission/Score 저장 건너뜀 - "
-                    f"필수 정보 부족: postgres_session_id={postgres_session_id}, "
-                    f"exam_id={exam_id}, participant_id={participant_id}, spec_id={spec_id}, code_content={'있음' if code_content else '없음'}"
+                    "[N9. Final Scores] submission_id 없음 — BE result 콜백 생략"
                 )
         except Exception as e:
             logger.warning(
-                f"[N9. Final Scores] Submission/Score 저장 실패 (평가는 완료됨) - "
-                f"session_id: {session_id}, error: {str(e)}",
+                "[N9. Final Scores] 세션 종료/BE payload 실패 (평가는 완료) — %s",
+                e,
                 exc_info=True,
             )
 
@@ -480,6 +460,8 @@ async def aggregate_final_scores(state: MainGraphState) -> Dict[str, Any]:
 
         if submission_id:
             result["submission_id"] = submission_id
+        if be_scoring_callback is not None:
+            result["be_scoring_callback"] = be_scoring_callback
 
         if feedback:
             result["feedback"] = feedback

@@ -368,6 +368,7 @@ def get_initial_state(
         test_case_results=None,
         correctness_reasoning=None,
         final_scores=None,
+        be_scoring_callback=None,
         memory_summary=None,
         error_message=None,
         retry_count=0,

@@ -1,8 +1,8 @@
 # AI 채점 콜백 연동 명세 (BE ↔ AI Worker)
 
-> **상태:** 계획 (구현 예정)  
-> **관련 이슈:** AI-VibeCodeEval #37 (`runs[]` 빈 배열)  
-> **목적:** AI Worker가 N9 이후 BE에 채점 결과를 전달해 `submission_runs`, `scores`를 저장하고 SSE를 발행한다.
+> **상태:** BE **PR #67** 반영 (검증·runs replace·SSE `scoring_complete`) — **AI Worker 연동·사전 검증** (2026-05)  
+> **관련 이슈:** AI-VibeCodeEval #37 (`runs[]` 빈 배열) · BE repo `docs/integration/ai-callback-scoring.md` (SoT)  
+> **목적:** 채점 **데이터(TC + 점수)** 는 `POST /api/callbacks/ai/submissions/{submissionId}/result` 한 번으로 BE에 넘기고, `analysis`는 **진행/실패 알림만**. **`DONE`은 result URL에만** 보낸다.
 
 ---
 
@@ -10,7 +10,7 @@
 
 | 구분 | 변경 전 | 변경 후 |
 |------|---------|---------|
-| 채점 완료 (TC + 점수 + `DONE`) | `POST /api/internal/submissions/{id}/result` (AI 미연동) | **`POST /api/callbacks/ai/result`** |
+| 채점 완료 (TC + 점수 + `DONE`) | `POST /api/internal/submissions/{id}/result` (deprecated) | **`POST /api/callbacks/ai/submissions/{submissionId}/result`** |
 | 진행/실패 알림 | `POST /api/callbacks/ai/analysis` (`DONE` 위주) | **유지** — `RUNNING` / `FAILED`만 ( **`DONE`은 `result`만** ) |
 | BE 저장 로직 | `ReceiveScoringResultUseCase` | **동일 UseCase 재사용** |
 | `internal/.../result` | 존재 | **deprecated → 제거 예정** |
@@ -20,35 +20,33 @@
 ```
 (선택) POST /api/callbacks/ai/analysis   { status: "RUNNING" }
          … LangGraph N4 → N5 → … → N9 …
-(필수) POST /api/callbacks/ai/result    { status: "DONE", testCases[], score }
+(필수) POST /api/callbacks/ai/submissions/{submissionId}/result
+         Body: { status: "DONE", testCases[], score }
 ```
 
 ---
 
 ## 2. BE 변경 사항
 
-### 2.1 신규 API
+### 2.1 채점 결과 API (PR #67 기준)
 
-**`POST /api/callbacks/ai/result`**
+**`POST /api/callbacks/ai/submissions/{submissionId}/result`**
 
 | 항목 | 내용 |
 |------|------|
-| Controller | `AICallbackController` (예정) |
+| Controller | `AICallbackController` |
 | UseCase | `ReceiveScoringResultUseCase` |
-| 인증 | `application.yml` — `POST /api/callbacks/ai/**` permitAll (기존, 추가 설정 없음) |
+| Body | `ScoringResultRequest` — `status`, `testCases`, `score` (`submissionId`는 **path**) |
+| Validation | `@Valid` — `DONE` + `testCases` **비어 있음** → **400** |
+| 인증 | `POST /api/callbacks/ai/**` permitAll |
 | Response | `BaseResponse<Void>` (200) |
 
-**Request DTO (예정):** `AIScoringResultCallbackRequest`
-
-- `submissionId` (Long, 필수)
-- `ScoringResultRequest`와 동일 필드: `status`, `testCases`, `score`
-
-**처리 순서 (트랜잭션 1회):**
+**처리 순서 (트랜잭션 1회, PR #67):**
 
 1. `submissions.status` ← `request.status()`
-2. `testCases[]` 각 항목 → `submission_runs` INSERT
-3. `score` 있으면 → `scores` INSERT + `calculateTotalScore()`
-4. 커밋 후 → `ScoringResultSseEvent` → SSE (`case_result`, `final_score`)
+2. 기존 `submission_runs` **DELETE** 후 `testCases[]` **INSERT** (재콜백 replace)
+3. `score` 있으면 → `scores` **upsert** + `calculateTotalScore()`
+4. 커밋 후 SSE: `case_result`(×N, **`group` 포함**) → **`scoring_complete`** → `final_score`(optional) → `complete`
 
 ### 2.2 유지 API
 
@@ -81,14 +79,23 @@
 - 동작은 신규 `result`와 동일했으나 JWT 필요, AI 미사용
 - deprecated 후 제거
 
-### 2.4 BE 작업 체크리스트
+### 2.4 BE 작업 체크리스트 (PR #67)
 
-- [ ] `POST /api/callbacks/ai/result` 엔드포인트
-- [ ] `AIScoringResultCallbackRequest` + validation
-- [ ] `ReceiveScoringResultUseCase` 연결
-- [ ] Swagger (`AICallbackApi`)
-- [ ] `InternalSubmissionController` deprecated
-- [ ] (선택) 재콜백 idempotent (unique 충돌 방지)
+- [x] `POST /api/callbacks/ai/submissions/{submissionId}/result`
+- [x] `ScoringResultRequest` + validation (`DONE` 시 TC ≥ 1)
+- [x] `ReceiveScoringResultUseCase` — runs delete+replace, scores upsert
+- [x] SSE `scoring_complete`, `case_result.group`
+- [x] `InternalSubmissionController` deprecated
+- [ ] BE PR #67 **배포 후** AI↔BE E2E (`runs[]` non-empty)
+
+### 2.5 BE 검증 규칙 (AI가 맞출 payload)
+
+| 규칙 | BE 응답 | AI 대응 |
+|------|---------|---------|
+| `status=DONE` + `testCases` 빈 배열 | **400** | `validate_be_scoring_body` — 전송 전 차단 |
+| `group` 오타 (`sample` 등) | **400** | 기본 `SAMPLE`; checker에 group 넣을 때만 주의 |
+| `verdict` enum 외 | **400** | `judge_status_to_verdict` + 사전 검증 |
+| 재콜백 (동일 submission result 2회) | **200** (덮어쓰기) | 권장: 제출당 **result 1회**만 |
 
 ---
 
@@ -99,18 +106,19 @@
 | 환경 변수 예 | 값 |
 |--------------|-----|
 | `BE_BASE_URL` | `http://localhost:8080` |
-| 채점 완료 | `{BE_BASE_URL}/api/callbacks/ai/result` |
+| 채점 완료 | `{BE_BASE_URL}/api/callbacks/ai/submissions/{submissionId}/result` |
 | 진행 알림 | `{BE_BASE_URL}/api/callbacks/ai/analysis` |
 
 **Content-Type:** `application/json`
 
-### 3.2 `POST /api/callbacks/ai/result` — Request 전체 예시
+### 3.2 `POST /api/callbacks/ai/submissions/{submissionId}/result` — Request 예시
 
-**성공 (N9 직후 1회):**
+**URL:** `POST {BE_BASE}/api/callbacks/ai/submissions/88001/result`
+
+**성공 (N9 직후 1회) — body (`ScoringResultRequest`만, submissionId는 path):**
 
 ```json
 {
-  "submissionId": 88001,
   "status": "DONE",
   "testCases": [
     {
@@ -145,7 +153,6 @@
 
 ```json
 {
-  "submissionId": 88001,
   "status": "FAILED",
   "testCases": [],
   "score": null
@@ -191,18 +198,22 @@
 | Accepted (예: 3) + 통과 | `AC` |
 | Wrong answer (예: 4) 또는 출력 불일치 | `WA` |
 | TLE (예: 5) | `TLE` |
-| Memory limit (예: 6, 7 등) | `MLE` |
+| Compilation Error (**6**, Judge0) | **`RE`** |
+| Runtime Error NS (**7**, Judge0) | `MLE` |
 | 그 외 / 런타임 오류 | `RE` |
 | `passed == false` & AC id | `WA` |
 
+> Judge0 표: [`docs/Judge0_가이드.md`](Judge0_가이드.md). AI 매퍼: `scoring_callback_mapper.judge_status_to_verdict`.
+
 ### 3.5 AI Worker 작업 체크리스트
 
-- [ ] N9 직후 `result` 1회 호출 (`DONE` + `testCases` + `score`)
-- [ ] verdict / group / bytes 매핑 함수
-- [ ] `rubricJson` 문자열 직렬화
-- [ ] `analysis`에서 `DONE` 제거 (`RUNNING`/`FAILED`만)
-- [ ] (권장) N9 DB 직접 `scores` / `submission_runs` write 중단 — BE SoT
-- [ ] 콜백 URL 환경변수 정리
+- [x] N9 직후 `result` 1회 호출 (`session.py` ← `be_scoring_callback`)
+- [x] `scoring_callback_mapper.py` — verdict, group, bytes, `rubricJson` 문자열
+- [x] `analysis`에서 `DONE` 제거 (`RUNNING`/`FAILED`만)
+- [x] N9 DB 직접 `scores` / `submissions.status` write 중단 — BE SoT (`end_session`만 유지)
+- [x] `BE_BASE_URL` + `CallbackService.send_scoring_result`
+- [x] `validate_be_scoring_body` — `DONE`+빈 TC 전송 차단 (`session.py`)
+- [x] BE 400 응답 body `error` 로그 (`callback_service.py`)
 
 ### 3.6 AI SoT 권장
 
@@ -261,8 +272,8 @@ UNIQUE (submission_id, case_index)
 | 주의 | 내용 |
 |------|------|
 | `group`은 unique에 **포함되지 않음** | 같은 `caseIndex`에 다른 `group` 불가 — caseIndex만 유일 |
-| 재콜백 | 동일 `(submission_id, case_index)` 재INSERT → **DB 오류** (현재 UseCase는 upsert 없음) |
-| `DONE` 시 | `testCases` **비어 있으면** `submission_runs` **행 없음** → 관리자 `runs[]` 빈 상태 유지 |
+| 재콜백 (PR #67) | 기존 runs **DELETE 후 INSERT**, score **upsert** → **200** |
+| `DONE` + 빈 `testCases` | BE **400** (저장 안 함) — AI는 전송 전 검증으로 방지 |
 
 **`RunGroup` (`group`) — 정확히 대문자:**
 
@@ -299,7 +310,7 @@ PRIMARY KEY (submission_id)
 
 | 주의 | 내용 |
 |------|------|
-| 재콜백 | 이미 score 행 있으면 `save()` 시 **충돌/에러** 가능 (JPA insert 기준) — idempotent 미구현 |
+| 재콜백 (PR #67) | `scores` **upsert** — 동일 submission 재전송 시 **200** |
 | `score: null` | UseCase에서 score 저장·SSE `final_score` **스킵** |
 | `rubricJson` | Python `dict`를 그대로 보내지 말 것 — **반드시 string** |
 
@@ -308,29 +319,37 @@ PRIMARY KEY (submission_id)
 ### 4.4 저장 흐름 다이어그램
 
 ```
-POST /api/callbacks/ai/result
+POST .../submissions/{id}/result
         │
-        ├─► submissions.status  (DONE | FAILED | …)
-        │
-        ├─► submission_runs     (testCases[] 각 1 row)
-        │       UNIQUE (submission_id, case_index)
-        │
-        ├─► scores              (score 객체 1 row, PK = submission_id)
-        │       total_score = sum(3 scores)
-        │
-        └─► (after commit) SSE  case_result × N, final_score × 1
+        ├─► submissions.status
+        ├─► submission_runs  (DELETE 기존 → INSERT testCases[])
+        ├─► scores           (upsert)
+        └─► SSE: case_result* → scoring_complete → final_score? → complete
 ```
 
 ---
 
-## 5. 에러·검증 (AI 참고)
+## 5. HTTP·검증 (AI 참고)
 
 | HTTP | 원인 |
 |------|------|
-| 200 | 성공 |
-| 400 | 잘못된 `status` / `group` / `verdict`, validation 실패 |
+| 200 | 성공 (재콜백 replace 포함) |
+| 400 | 잘못된 `status` / `group` / `verdict`; **`DONE` + `testCases: []`**; `@Valid` 실패 |
 | 404 | `submissionId` 없음 |
-| 500 | unique/PK 중복, DB 기타 (재콜백 등) |
+| 500 | DB 기타 (드묾) |
+
+**AI 클라이언트:** `status=DONE`이면 `testCases` **1건 이상** 필수. N5 TC 0건·Judge0 미실행 시 `be_body` 없거나 빈 TC → **result 미전송** + warning 로그.
+
+### 5.1 SSE (BE 발행, AI 코드 변경 없음)
+
+| 이벤트 | 비고 |
+|--------|------|
+| `case_result` | TC별; **`group`** 필드 추가 (PR #67) |
+| `scoring_complete` | `score` 없어도 **항상** 발송 |
+| `final_score` | `score` 객체 있을 때 (optional) |
+| `complete` | 세션/제출 완료 알림 |
+
+순서: `case_result` → `scoring_complete` → `final_score`(optional) → `complete`. FE는 BE PR #67 배포 후 구독 로직 확인.
 
 ---
 
@@ -341,7 +360,7 @@ POST /api/callbacks/ai/result
 | `submission_runs` | `SELECT * FROM submission_runs WHERE submission_id = ?` |
 | 관리자 API | `GET /api/admin/...` 상세의 `runs[]` non-empty |
 | `scores` | `scores` 행 존재, `total_score` = 세 항목 합 |
-| SSE | 클라이언트 연결 시 `case_result`, `final_score` |
+| SSE | `case_result`, `scoring_complete`, `final_score`(optional), `complete` |
 | Issue #37 | rubric에만 TC 있고 `runs[]` 빈 현상 해소 |
 
 ---
@@ -369,9 +388,9 @@ Issue #37 · `docs/ai-callback-scoring.md` 구현 시 AI-VibeCodeEval 저장소�
 | 항목 | 현재 | 목표 |
 |------|------|------|
 | `send_submission_status` | `POST .../api/callbacks/ai/analysis`, `{ submissionId, status }` | 유지 — **`DONE` 호출 제거** |
-| 신규 메서드 | 없음 | `send_scoring_result(...)` → `POST .../api/callbacks/ai/result` |
-| URL 설정 | `SPRING_CALLBACK_URL` + path replace | `BE_BASE_URL` 또는 동일 env + `/api/callbacks/ai/result` 명시 |
-| payload | status만 | `submissionId`, `status`, `testCases[]`, `score` (§3.2) |
+| 신규 메서드 | 없음 | `send_scoring_result(...)` → `POST .../submissions/{id}/result` |
+| URL 설정 | `SPRING_CALLBACK_URL` + path replace | `BE_BASE_URL` + path (§3.1) |
+| payload | status만 | body: `status`, `testCases[]`, `score` (§3.2) |
 | `rubricJson` | — | N9 dict → **`json.dumps(..., ensure_ascii=False)`** 문자열 |
 
 ### 8.2 `app/domain/langgraph/nodes/eval/n9_final_scores.py`
@@ -398,21 +417,33 @@ Issue #37 · `docs/ai-callback-scoring.md` 구현 시 AI-VibeCodeEval 저장소�
 |-----------|------|
 | `app/domain/langgraph/nodes/eval/scoring_callback_mapper.py` (또는 `app/application/services/scoring_callback_mapper.py`) | `test_case_results` → BE `testCases[]`; Judge0 `status_id` + `passed` → `verdict`; `group` 기본 `"SAMPLE"`; `time`/`memory` → `timeMs`/`memKb`; `stdoutBytes`/`stderrBytes` |
 
-**Judge0 → `verdict` (§3.4):** Accepted(3)+통과 → `AC`; WA(4) 또는 출력 불일치 → `WA`; TLE(5) → `TLE`; MLE(6,7 등) → `MLE`; 그 외 → `RE`.
+**Judge0 → `verdict` (§3.4):** 3+통과 → `AC`; 4/불일치 → `WA`; 5 → `TLE`; **6 → `RE`**; **7 → `MLE`**; 그 외 → `RE`.
 
 ### 8.5 설정·문서·검증
 
 - [ ] `env.example` / `.env`: `BE_BASE_URL` 또는 `SPRING_CALLBACK_URL` 정리
 - [ ] `docs/API_변경_이력.md` — `result` 콜백·`analysis` `DONE` 제거 기록
 - [ ] `.maestro/docs/DB_Save_Path_Audit.md` — submission_runs SoT BE로 한 줄
-- [ ] E2E: submit 1건 → BE `submission_runs` + 관리자 `runs[]` + `scores.total_score`
-- [ ] 재콜백: BE upsert 없음 — AI는 성공 응답 후 중복 POST 금지
+- [x] E2E (로컬): `result DONE` 200, `testCases=N`
+- [ ] E2E: **BE PR #67 배포 후** 관리자 `GET .../submissions/{id}` → `runs[]` non-empty
+- [x] 재콜백: BE replace/upsert — AI는 제출당 result 1회 권장
 
 ### 8.6 완료 조건 (BE·AI 공통)
 
-1. BE `POST /api/callbacks/ai/result` 배포  
-2. AI N9(또는 submit 백그라운드) 직후 `result` 1회  
-3. (권장) AI N9 direct write(`scores`, `submission_runs`, `submissions.status` 완료) 정리  
+1. BE **PR #67** 배포 (`validation`, runs replace, `scoring_complete` SSE)  
+2. [x] AI submit 백그라운드 직후 `result` 1회 + 사전 검증  
+3. [x] AI N9 direct write(`scores`, `submission_runs`) 정리  
+
+### 8.7 PR #38 Copilot 리뷰 대응 (Resolve용)
+
+| 코멘트 | 대응 |
+|--------|------|
+| `status_id` 6/7 → `MLE` | 6 → `RE`, 7 → `MLE` (`scoring_callback_mapper.py`) |
+| `BE_BASE_URL` | `env.example` + `CallbackService`; 레거시 URL은 레거시 메서드만 |
+| grade D/F 상한 (`correctness < 100`) | 의도 변경 — `total_score` 구간만 (`n9_final_scores`, `State_노드별_흐름.md`) |
+| 문서 URL `.../ai/result` | §2.1 `.../submissions/{id}/result`로 정정 |
+
+**PR 본문 한 줄:** BE PR #67 배포 필요 — 본 커밋으로 AI 계약·검증 동기화.
 
 ---
 
@@ -422,3 +453,5 @@ Issue #37 · `docs/ai-callback-scoring.md` 구현 시 AI-VibeCodeEval 저장소�
 |------|------|
 | 2026-05-20 | 초안 — 콜백 통합 계획 문서화 |
 | 2026-05-20 | §2.2 `analysis`+`DONE` BE 동작 명시; §8 AI repo diff 체크리스트 추가 |
+| 2026-05-20 | AI Worker — `scoring_callback_mapper`, `CallbackService.send_scoring_result`, N9/session 연동 |
+| 2026-05-20 | BE PR #67 — validation, replace, SSE; AI `validate_be_scoring_body`, verdict 6→RE |

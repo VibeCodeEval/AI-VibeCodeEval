@@ -91,6 +91,8 @@ class MainGraphState(TypedDict):
     test_case_results: Optional[List[Dict[str, Any]]]
     correctness_reasoning: Optional[str]
     final_scores: Optional[Dict[str, float]]
+    # N9 → submit 백그라운드 BE result 콜백 body (ScoringResultRequest)
+    be_scoring_callback: Optional[Dict[str, Any]]
 
     # 메모리 요약
     memory_summary: Optional[str]

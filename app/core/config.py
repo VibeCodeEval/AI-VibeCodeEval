@@ -113,6 +113,7 @@ class Settings(BaseSettings):
     ENABLE_JUDGE_WORKER: bool = True  # 서버 시작 시 Judge0 Worker 자동 실행
 
     # Spring Boot 콜백 설정
+    BE_BASE_URL: str = "http://localhost:8080"
     SPRING_CALLBACK_URL: str = "http://localhost:8080/api/ai/callback"
     SPRING_API_KEY: Optional[str] = None
 

@@ -180,6 +180,13 @@ ORDER BY turn;
 
 ---
 
+## 채점 SoT (2026-05-20)
+
+- `submission_runs`, `scores`(행·`total_score`): **Spring BE** — AI `POST .../submissions/{id}/result` 콜백. N9 Worker DB 직접 write 제거.
+- 계약: [`docs/ai-callback-scoring.md`](../../docs/ai-callback-scoring.md)
+
+---
+
 ## 관련 문서
 
 - [State_노드별_흐름.md](../../docs/State_노드별_흐름.md) — N2/N4 가드레일 정책

@@ -397,12 +397,12 @@ total_score = prompt_score    × 0.40
             + correctness     × 0.40
             + performance     × 0.20
 
-grade 결정:
-  correctness < 100 → "F"(< 60점) or "D"
-  correctness = 100 + code_quality_metrics 있을 때:
-    delta_cc_pct ≤ 10 AND ast_ok  → "A"
-    delta_cc_pct ≤ 30 AND avg_cc < 8 → "B"
-    그 외 → "C"
+grade 결정 (N9, total_score 구간):
+  total_score ≥ 90 → "A"
+  total_score ≥ 80 → "B"
+  total_score ≥ 70 → "C"
+  total_score ≥ 60 → "D"
+  그 외 → "F"
 ```
 
 ### State에 쓰는 값
