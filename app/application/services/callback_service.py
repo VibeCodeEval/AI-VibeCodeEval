@@ -243,7 +243,12 @@ class CallbackService:
                         url,
                     )
                     return True
-                logger.warning(
+                log_fn = (
+                    logger.error
+                    if response.status_code == 400
+                    else logger.warning
+                )
+                log_fn(
                     "콜백 전송 실패: status=%s body=%s url=%s",
                     response.status_code,
                     response.text,

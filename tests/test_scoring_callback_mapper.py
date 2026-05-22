@@ -1,9 +1,12 @@
 """BE ScoringResultRequest 매핑 단위 테스트."""
 
+import pytest
+
 from app.application.services.scoring_callback_mapper import (
     build_be_scoring_result_body,
     judge_status_to_verdict,
     map_test_case_to_be_dto,
+    validate_be_scoring_body,
 )
 
 
@@ -17,6 +20,14 @@ def test_judge_status_accepted_failed_stdout_wa():
 
 def test_judge_status_tle():
     assert judge_status_to_verdict({"status_id": 5, "passed": False}) == "TLE"
+
+
+def test_judge_status_compilation_error_re():
+    assert judge_status_to_verdict({"status_id": 6, "passed": False}) == "RE"
+
+
+def test_judge_status_runtime_error_ns_mle():
+    assert judge_status_to_verdict({"status_id": 7, "passed": False}) == "MLE"
 
 
 def test_map_test_case_time_ms_and_bytes():
@@ -69,3 +80,29 @@ def test_build_be_scoring_result_done_rubric_json_string():
     assert len(body["testCases"]) == 1
     assert isinstance(body["score"]["rubricJson"], str)
     assert '"grade"' in body["score"]["rubricJson"]
+
+
+def test_validate_be_scoring_body_done_empty_test_cases():
+    err = validate_be_scoring_body(
+        {"status": "DONE", "testCases": [], "score": {"promptScore": 0}}
+    )
+    assert err is not None
+    assert "1건 이상" in err
+
+
+def test_validate_be_scoring_body_done_ok():
+    assert (
+        validate_be_scoring_body(
+            {
+                "status": "DONE",
+                "testCases": [{"caseIndex": 0, "group": "SAMPLE", "verdict": "AC"}],
+                "score": None,
+            }
+        )
+        is None
+    )
+
+
+def test_build_be_scoring_result_done_empty_tc_raises():
+    with pytest.raises(ValueError, match="testCases"):
+        build_be_scoring_result_body(status="DONE", test_case_results=[])

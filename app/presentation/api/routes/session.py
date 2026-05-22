@@ -612,29 +612,44 @@ async def _run_submit_evaluation_background(
                 submission_id,
             )
         else:
-            try:
-                callback_service = CallbackService()
-                success = await callback_service.send_scoring_result(
-                    submission_id=submission_id,
-                    body=be_body,
-                )
-                if success:
-                    logger.info(
-                        "[SubmitCode Background] result DONE 전송 완료 — "
-                        "submissionId=%s testCases=%s",
-                        submission_id,
-                        len(be_body.get("testCases") or []),
-                    )
-                else:
-                    logger.warning(
-                        "[SubmitCode Background] result 전송 실패 — submissionId=%s",
-                        submission_id,
-                    )
-            except Exception as callback_error:
+            from app.application.services.scoring_callback_mapper import (
+                validate_be_scoring_body,
+            )
+
+            validation_err = validate_be_scoring_body(be_body)
+            if validation_err:
                 logger.warning(
-                    "[SubmitCode Background] result 콜백 오류: %s",
-                    callback_error,
+                    "[SubmitCode Background] result body 검증 실패 — "
+                    "전송 생략 submissionId=%s: %s testCases=%s",
+                    submission_id,
+                    validation_err,
+                    len(be_body.get("testCases") or []),
                 )
+            else:
+                try:
+                    callback_service = CallbackService()
+                    success = await callback_service.send_scoring_result(
+                        submission_id=submission_id,
+                        body=be_body,
+                    )
+                    if success:
+                        logger.info(
+                            "[SubmitCode Background] result DONE 전송 완료 — "
+                            "submissionId=%s testCases=%s",
+                            submission_id,
+                            len(be_body.get("testCases") or []),
+                        )
+                    else:
+                        logger.warning(
+                            "[SubmitCode Background] result 전송 실패 — "
+                            "submissionId=%s (BE 400이면 위 error 로그 참고)",
+                            submission_id,
+                        )
+                except Exception as callback_error:
+                    logger.warning(
+                        "[SubmitCode Background] result 콜백 오류: %s",
+                        callback_error,
+                    )
 
     except asyncio.TimeoutError:
         timed_out_node = log_evaluation_timeout(submission_id)

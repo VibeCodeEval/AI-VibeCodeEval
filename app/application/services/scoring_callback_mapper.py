@@ -7,7 +7,7 @@ docs/ai-callback-scoring.md §3.4 — rubric 직렬화(rubric_json_serializers)�
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from app.infrastructure.judge0.utils import (
     parse_judge_memory_kb,
@@ -17,7 +17,13 @@ from app.infrastructure.judge0.utils import (
 _JUDGE_STATUS_ACCEPTED = 3
 _JUDGE_STATUS_WRONG_ANSWER = 4
 _JUDGE_STATUS_TLE = 5
+_JUDGE_STATUS_COMPILATION_ERROR = 6
+# Judge0 CE: 7 Runtime Error (NS) — BE MLE과 구분
+_JUDGE_STATUS_RUNTIME_ERROR_NS = 7
+
 _DEFAULT_RUN_GROUP = "SAMPLE"
+_VALID_RUN_GROUPS: Set[str] = {"SAMPLE", "PUBLIC", "PRIVATE"}
+_VALID_VERDICTS: Set[str] = {"AC", "WA", "TLE", "MLE", "RE"}
 
 
 def _utf8_byte_len(value: Any) -> int:
@@ -44,7 +50,9 @@ def judge_status_to_verdict(tc: Dict[str, Any]) -> str:
         return "WA"
     if sid == _JUDGE_STATUS_TLE:
         return "TLE"
-    if sid in (6, 7):
+    if sid == _JUDGE_STATUS_COMPILATION_ERROR:
+        return "RE"
+    if sid == _JUDGE_STATUS_RUNTIME_ERROR_NS:
         return "MLE"
     if not passed:
         return "WA"
@@ -108,6 +116,42 @@ def build_be_score_payload(
     }
 
 
+def validate_be_scoring_body(body: Dict[str, Any]) -> Optional[str]:
+    """
+    BE ScoringResultRequest 사전 검증.
+
+    Returns:
+        None if valid, else human-readable error (BE 400과 동일 계약).
+    """
+    if not body or not isinstance(body, dict):
+        return "body가 비어 있습니다."
+
+    status = (body.get("status") or "").upper()
+    if status not in ("DONE", "FAILED", "QUEUED", "RUNNING"):
+        return f"잘못된 status: {body.get('status')}"
+
+    test_cases = body.get("testCases")
+    if test_cases is None:
+        test_cases = []
+    if not isinstance(test_cases, list):
+        return "testCases는 배열이어야 합니다."
+
+    if status == "DONE" and len(test_cases) < 1:
+        return "status=DONE일 때 testCases는 1건 이상 필요합니다 (BE 400)."
+
+    for idx, tc in enumerate(test_cases):
+        if not isinstance(tc, dict):
+            return f"testCases[{idx}]는 객체여야 합니다."
+        group = tc.get("group")
+        if group is not None and str(group) not in _VALID_RUN_GROUPS:
+            return f"testCases[{idx}].group={group!r} — SAMPLE|PUBLIC|PRIVATE만 허용"
+        verdict = tc.get("verdict")
+        if verdict is not None and str(verdict) not in _VALID_VERDICTS:
+            return f"testCases[{idx}].verdict={verdict!r} — AC|WA|TLE|MLE|RE만 허용"
+
+    return None
+
+
 def build_be_scoring_from_eval_result(
     eval_result: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
@@ -157,16 +201,20 @@ def build_be_scoring_result_body(
     test_cases = map_test_cases_to_be_dto(test_case_results)
 
     if status_upper == "FAILED":
-        return {
+        body = {
             "status": "FAILED",
             "testCases": [],
             "score": None,
         }
+        err = validate_be_scoring_body(body)
+        if err:
+            raise ValueError(err)
+        return body
 
     if rubric_dict is None:
         rubric_dict = {}
 
-    return {
+    body = {
         "status": status_upper,
         "testCases": test_cases,
         "score": build_be_score_payload(
@@ -176,3 +224,7 @@ def build_be_scoring_result_body(
             rubric_dict=rubric_dict,
         ),
     }
+    err = validate_be_scoring_body(body)
+    if err:
+        raise ValueError(err)
+    return body
