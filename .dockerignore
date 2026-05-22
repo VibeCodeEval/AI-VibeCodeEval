@@ -1,0 +1,14 @@
+secrets/
+.env
+.env.*
+.git
+.github
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+tests/
+*.md
