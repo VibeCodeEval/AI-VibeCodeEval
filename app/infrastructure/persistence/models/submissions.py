@@ -39,7 +39,7 @@ class Submission(Base):
         Enum(
             SubmissionStatusEnum,
             name="submission_status_enum",
-            schema="ai_vibe_coding_test",
+            schema="public",
         ),
         nullable=False,
         default=SubmissionStatusEnum.QUEUED,
@@ -82,7 +82,7 @@ class SubmissionRun(Base):
         nullable=False,
     )
     verdict: Mapped[VerdictEnum] = mapped_column(
-        Enum(VerdictEnum, name="verdict_enum", schema="ai_vibe_coding_test"),
+        Enum(VerdictEnum, name="verdict_enum", schema="public"),
         nullable=False,
         default=VerdictEnum.AC,
     )

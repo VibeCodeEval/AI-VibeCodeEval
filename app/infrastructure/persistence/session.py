@@ -19,7 +19,7 @@ engine = create_async_engine(
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True,
-    connect_args={"server_settings": {"search_path": "ai_vibe_coding_test"}},
+    connect_args={"server_settings": {"search_path": "public"}},
 )
 
 
@@ -28,7 +28,7 @@ async def _set_search_path(session: AsyncSession):
     """세션마다 search_path 설정 (ai_vibe_coding_test 스키마만 사용)"""
     from sqlalchemy import text
 
-    await session.execute(text("SET search_path TO ai_vibe_coding_test"))
+    await session.execute(text("SET search_path TO public"))
 
 
 # 세션 팩토리
@@ -83,7 +83,7 @@ async def init_db():
         # 연결 테스트만 수행
         await conn.execute(text("SELECT 1"))
         # search_path 설정 (ai_vibe_coding_test 스키마만 사용)
-        await conn.execute(text("SET search_path TO ai_vibe_coding_test"))
+        await conn.execute(text("SET search_path TO public"))
 
 
 async def close_db():
