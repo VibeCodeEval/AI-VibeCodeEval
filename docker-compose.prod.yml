@@ -28,7 +28,9 @@ services:
       - JUDGE0_RAPIDAPI_HOST=${JUDGE0_RAPIDAPI_HOST}
       - USE_REDIS_QUEUE=${USE_REDIS_QUEUE:-true}
       - ENABLE_JUDGE_WORKER=false
-      - GOOGLE_SERVICE_ACCOUNT_JSON=${GOOGLE_SERVICE_ACCOUNT_JSON}
+      - GOOGLE_SERVICE_ACCOUNT_JSON_PATH=${GOOGLE_SERVICE_ACCOUNT_JSON_PATH}
+    volumes:
+      - ./secrets/p-project-vertex_ex.json:/app/secrets/p-project-vertex_ex.json:ro
     ports:
       - "8001:8000"
     networks:
