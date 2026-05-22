@@ -104,6 +104,7 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
         # V2.2 Context-Integrated: 이전 턴 요약 누적 후 다음 턴 평가 시 전달
         prev_user_content: Optional[str] = None
         previous_turns_summaries: List[str] = []
+        previous_turn_pairs: List[tuple] = []
         logger.info("-" * 80)
         for idx, turn in enumerate(turns_to_evaluate, 1):
             logger.info("")
@@ -150,6 +151,14 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                 state, turn, ai_msg or ""
             )
 
+            from app.domain.langgraph.utils.turn_dialogue import (
+                format_previous_turn_dialogue,
+            )
+
+            previous_turn_dialogue_str = format_previous_turn_dialogue(
+                previous_turn_pairs
+            )
+
             # 평가 실행
             if human_msg and ai_msg:
                 if guardrail_failed_for_turn:
@@ -166,9 +175,11 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                         problem_context=state.get("problem_context"),
                         is_phase2_first_turn=False,
                         previous_turns_summary=None,
+                        previous_turn_dialogue=previous_turn_dialogue_str,
                         is_guardrail_failed=True,
                         guardrail_block_reason=guardrail_block_reason,
                     )
+                    previous_turn_pairs.append((int(turn), human_msg, ai_msg))
                     # SAVE 턴과 동일: 다음 턴 Phase2 판정용 직전 user 갱신
                     if human_msg is not None:
                         prev_user_content = human_msg
@@ -196,6 +207,7 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                     problem_context=state.get("problem_context"),
                     is_phase2_first_turn=is_phase2_first_turn,
                     previous_turns_summary=previous_turns_summary_str,
+                    previous_turn_dialogue=previous_turn_dialogue_str,
                     is_guardrail_failed=False,
                 )
 
@@ -267,6 +279,8 @@ async def eval_turn_submit_guard(state: MainGraphState) -> Dict[str, Any]:
                         f"[Turn {turn}] 사용자: {up_summary}\nAI 요약: {ai_summary}"
                     )
 
+                previous_turn_pairs.append((int(turn), human_msg, ai_msg))
+
                 # 다음 턴을 위해 직전 사용자 메시지 기록 (Phase 2 첫 지시 감지용)
                 if human_msg is not None:
                     prev_user_content = human_msg
@@ -334,6 +348,7 @@ async def _evaluate_turn_sync(
     problem_context: Optional[Dict[str, Any]] = None,
     is_phase2_first_turn: bool = False,
     previous_turns_summary: Optional[str] = None,
+    previous_turn_dialogue: Optional[str] = None,
     is_guardrail_failed: bool = False,
     guardrail_block_reason: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
@@ -434,6 +449,7 @@ async def _evaluate_turn_sync(
             "human_message": human_message,
             "ai_message": ai_message,
             "previous_turns_summary": previous_turns_summary or None,
+            "previous_turn_dialogue": previous_turn_dialogue or None,
             "is_phase2_first_turn": is_phase2_first_turn,
             "problem_context": problem_context,
             "is_guardrail_failed": False,

@@ -113,5 +113,5 @@ def test_prepare_evaluation_input_includes_turn_content_section():
     sp = prepared["system_prompt"]
     assert "앞서 제시한 문제에 대해 코드 작성을 요청했습니다." in sp
     assert "[필독]" in sp or "필독" in sp
-    assert "먼저 읽고" in sp or "먼저 읽" in sp
-    assert "Context" in sp or "보정 금지" in sp
+    assert "인용" in sp
+    assert "보정 금지" in sp or "상향" in sp

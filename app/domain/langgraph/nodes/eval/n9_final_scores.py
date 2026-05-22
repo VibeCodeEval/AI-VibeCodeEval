@@ -19,6 +19,23 @@ from app.domain.langgraph.states import MainGraphState
 
 logger = logging.getLogger(__name__)
 
+# total_score(0~100) → 등급. subgraph_debate._derive_grade(holistic_flow_score)와 동일 구간.
+_GRADE_FROM_TOTAL_THRESHOLDS: tuple[tuple[float, str], ...] = (
+    (90.0, "A"),
+    (80.0, "B"),
+    (70.0, "C"),
+    (60.0, "D"),
+)
+
+
+def _grade_from_total_score(total_score: float) -> str:
+    """가중 총점(0~100)만으로 최종 등급 산정."""
+    t = float(total_score)
+    for threshold, grade in _GRADE_FROM_TOTAL_THRESHOLDS:
+        if t >= threshold:
+            return grade
+    return "F"
+
 
 def _submission_avg_cc(code_quality_metrics: Optional[Dict[str, Any]]) -> float:
     """N6 code_quality_metrics에서 제출 코드 avg_cc (레거시 v2_metrics 경로 폴백)."""
