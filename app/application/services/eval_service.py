@@ -197,6 +197,31 @@ class EvalService:
             # 상태 저장
             await self.state_repo.save_state(session_id, result)
 
+            # 가드레일 턴 meta 백필 (Spring save-message가 그래프보다 먼저인 경우)
+            gr_turns = result.get("guardrail_flag_turns") or []
+            if gr_turns and not is_submission:
+                try:
+                    postgres_session_id = (
+                        int(session_id.replace("session_", ""))
+                        if session_id.startswith("session_")
+                        else None
+                    )
+                    if postgres_session_id:
+                        from app.application.services.message_storage_service import (
+                            MessageStorageService,
+                        )
+
+                        async with get_db_context() as db:
+                            storage = MessageStorageService(db, self.redis)
+                            await storage.sync_guardrail_meta_to_db(
+                                postgres_session_id, result
+                            )
+                except Exception as gr_meta_err:
+                    logger.warning(
+                        "[EvalService] 가드레일 meta DB 백필 실패 (응답은 정상) - %s",
+                        gr_meta_err,
+                    )
+
             # Phase 6B: TurnAnalysis를 PostgreSQL prompt_messages.meta에 저장
             turn_analysis = result.get("turn_analysis")
             if turn_analysis and not is_submission:
@@ -598,6 +623,10 @@ class EvalService:
             response["final_scores"] = result.get("final_scores")
             response["turn_scores"] = result.get("turn_scores")
             response["submission_id"] = result.get("submission_id")
+        if result.get("be_scoring_callback"):
+            response["be_scoring_callback"] = result.get("be_scoring_callback")
+        if result.get("test_case_results") is not None:
+            response["test_case_results"] = result.get("test_case_results")
 
         return response
 
@@ -646,15 +675,21 @@ class EvalService:
             async with get_db_context() as db:
                 session_repo = SessionRepository(db)
                 
+                from app.domain.langgraph.utils.guardrail_turns import (
+                    api_turn_to_conversation_turn,
+                )
+
+                conv_turn = api_turn_to_conversation_turn(turn, PromptRoleEnum.USER)
+
                 # USER 메시지의 meta에 turn_analysis 저장
                 updated_message = await session_repo.update_message_meta(
                     session_id=postgres_session_id,
-                    turn=turn,
+                    turn=conv_turn,
                     role=PromptRoleEnum.USER,
                     meta_update={"turn_analysis": turn_analysis},
                     merge=True,
                 )
-                
+
                 if updated_message:
                     await db.commit()
                     logger.info(
@@ -1031,6 +1066,7 @@ class EvalService:
                     "unified_intent": result.get("unified_intent")
                     or turn_log_data.get("unified_intent"),  # v2.1 4대 통합 의도
                     "intent_confidence": main_state.get("intent_confidence", 0.0),
+                    "intent_cot": result.get("intent_cot"),
                     "score": turn_score,
                     "rubrics": detailed_rubrics,  # 상세 루브릭 정보 (name, score, reasoning 포함) - 중복 제거
                     "rubric_breakdown": _rb_bg,

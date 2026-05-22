@@ -1,5 +1,7 @@
 # 2026-05-05 계획 메모 (Guardrail 점수 정책)
 
+> **⚠️ 2026-05-19 대체**: 본 메모의 `guardrail_flag_count`·TURN_EVAL 유지 정책은 폐기됨. 확정안은 [2026-05-19/plan_changes.md](../2026-05-19/plan_changes.md).
+
 ## 결정 사항 (임시 확정)
 
 - TURN_EVAL은 계속 수행/저장한다.

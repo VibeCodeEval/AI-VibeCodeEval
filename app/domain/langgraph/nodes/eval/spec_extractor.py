@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.domain.langgraph.states import MainGraphState
 from app.domain.langgraph.utils.llm_factory import get_llm
 from app.domain.langgraph.utils.token_tracking import (
@@ -308,7 +309,10 @@ async def spec_extractor(state: MainGraphState) -> Dict[str, Any]:
         )
         
         # LLM 호출
-        llm = get_llm(node_name="spec_extractor", temperature=0.2)  # 낮은 temperature로 일관된 분석
+        llm = get_llm(
+            node_name="spec_extractor",
+            temperature=settings.LLM_TEMPERATURE_SPEC,
+        )
         
         messages = [
             SystemMessage(content=system_prompt),

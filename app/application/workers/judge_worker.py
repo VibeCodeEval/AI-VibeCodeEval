@@ -12,6 +12,10 @@ from app.core.config import settings
 from app.domain.queue import JudgeResult, JudgeTask, create_queue_adapter
 from app.infrastructure.cache.redis_client import redis_client
 from app.infrastructure.judge0.client import Judge0Client
+from app.infrastructure.judge0.utils import (
+    parse_judge_memory_kb,
+    parse_judge_time_seconds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -176,9 +180,19 @@ class JudgeWorker:
                 passed_count = sum(1 for r in test_case_results if r["passed"])
                 total_count = len(test_case_results)
 
-                # 실행 시간 및 메모리 (최대값)
-                max_time = max(float(r.get("time", "0")) for r in test_case_results)
-                max_memory = max(int(r.get("memory", "0")) for r in test_case_results)
+                # 실행 시간·메모리 최대값 (컴파일 실패 등 time/memory=null TC는 제외)
+                parsed_times = [
+                    t
+                    for r in test_case_results
+                    if (t := parse_judge_time_seconds(r.get("time"))) is not None
+                ]
+                parsed_mem_kb = [
+                    m
+                    for r in test_case_results
+                    if (m := parse_judge_memory_kb(r.get("memory"))) is not None
+                ]
+                max_time = max(parsed_times) if parsed_times else 0.0
+                max_memory = max(parsed_mem_kb) if parsed_mem_kb else 0
 
                 # 상태 결정
                 if passed_count == total_count:
@@ -207,6 +221,7 @@ class JudgeWorker:
                     exit_code=0 if status == "success" else 1,
                     passed_test_cases=passed_count,
                     total_test_cases=total_count,
+                    test_case_results=test_case_results,
                 )
 
             else:

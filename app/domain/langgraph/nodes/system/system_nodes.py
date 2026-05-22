@@ -9,39 +9,19 @@ from typing import Any, Dict
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_google_vertexai import ChatVertexAI
 
 from app.core.config import settings
 from app.domain.langgraph.states import MainGraphState
+from app.domain.langgraph.utils.guardrail_turns import format_guardrail_user_message
+from app.domain.langgraph.utils.turn_messages import build_turn_message_pair
+from app.infrastructure.persistence.models.enums import IntentAnalyzerStatus
 
 
 def get_llm():
-    """LLM 인스턴스 생성 (Vertex AI 또는 AI Studio)"""
-    if settings.USE_VERTEX_AI:
-        # Vertex AI 사용 (GCP 크레딧 사용)
-        import json
+    """LLM 인스턴스 생성 (Vertex AI 또는 AI Studio — llm_factory 단일 경로)"""
+    from app.domain.langgraph.utils.llm_factory import create_gemini_llm
 
-        from google.oauth2 import service_account
-
-        credentials = None
-        if settings.GOOGLE_SERVICE_ACCOUNT_JSON:
-            service_account_info = json.loads(settings.GOOGLE_SERVICE_ACCOUNT_JSON)
-            credentials = service_account.Credentials.from_service_account_info(
-                service_account_info
-            )
-
-        return ChatVertexAI(
-            model=settings.DEFAULT_LLM_MODEL,
-            project=settings.GOOGLE_PROJECT_ID,
-            location=settings.GOOGLE_LOCATION,
-            credentials=credentials,
-            temperature=0.3,
-        )
-    else:
-        # AI Studio 사용 (API Key 방식, Free Tier)
-        from app.domain.langgraph.utils.llm_factory import create_gemini_llm
-        return create_gemini_llm(temperature=0.3)
+    return create_gemini_llm(temperature=settings.LLM_TEMPERATURE_SYSTEM)
 
 
 async def handle_failure(state: MainGraphState) -> Dict[str, Any]:
@@ -59,15 +39,19 @@ async def handle_failure(state: MainGraphState) -> Dict[str, Any]:
     guardrail_message = state.get("guardrail_message")
     retry_count = state.get("retry_count", 0)
 
-    # 가드레일 위반
-    if state.get("is_guardrail_failed") or intent_status == "FAILED_GUARDRAIL":
-        message = (
-            guardrail_message
-            or "요청이 가이드라인을 위반했습니다. 다른 방식으로 질문해 주세요."
+    # 가드레일 위반 — Writer와 동일하게 Human+AI·turn 태그로 Redis messages에 누적
+    if state.get("is_guardrail_failed") or intent_status == IntentAnalyzerStatus.FAILED_GUARDRAIL.value:
+        message = format_guardrail_user_message(guardrail_message)
+        current_turn = int(state.get("current_turn") or 0)
+        human_content = (state.get("human_message") or "").strip()
+        pair = build_turn_message_pair(
+            human_content=human_content,
+            ai_content=message,
+            current_turn=current_turn,
         )
         return {
             "ai_message": message,
-            "messages": [{"role": "assistant", "content": message}],
+            "messages": pair,
             "error_message": None,
             "updated_at": datetime.utcnow().isoformat(),
         }
@@ -207,8 +191,9 @@ async def summarize_memory(state: MainGraphState) -> Dict[str, Any]:
         # State를 포함한 입력 준비
         prepared_input = prepare_memory_summary_input({"state": state})
 
-        # LLM 호출
-        response = await get_llm().ainvoke(prepared_input["messages"])
+        # LLM 호출 (prepare 결과는 system_prompt/user_prompt — BaseMessage 리스트로 변환)
+        llm_messages = format_memory_messages(prepared_input)
+        response = await get_llm().ainvoke(llm_messages)
         new_summary = response.content
 
         return {

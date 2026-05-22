@@ -15,6 +15,7 @@ from app.domain.langgraph.nodes.eval_turn import (aggregate_turn_log,
                                                    eval_hint_query,
                                                    eval_optimization,
                                                    eval_rule_setting,
+                                                   eval_spec_paste_guard,
                                                    eval_test_case,
                                                    intent_analysis,
                                                    intent_router,
@@ -34,6 +35,7 @@ def create_eval_turn_subgraph() -> StateGraph:
 
     # 노드 추가 (8가지 의도)
     builder.add_node("intent_analysis", intent_analysis)
+    builder.add_node("eval_spec_paste_guard", eval_spec_paste_guard)
     builder.add_node("eval_system_prompt", eval_system_prompt)  # 신규 추가
     builder.add_node("eval_rule_setting", eval_rule_setting)
     builder.add_node("eval_generation", eval_generation)
@@ -55,6 +57,7 @@ def create_eval_turn_subgraph() -> StateGraph:
 
     # 각 평가 노드 -> Summarize Answer (8가지 의도)
     for node in [
+        "eval_spec_paste_guard",
         "eval_system_prompt",  # 신규 추가
         "eval_rule_setting",
         "eval_generation",

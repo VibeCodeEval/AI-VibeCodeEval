@@ -1,6 +1,6 @@
 # docs/ 문서 참조 가이드
 
-> **작성일**: 2026-03-27 | **최종 갱신**: 2026-04-05 (N5~N9 파이프라인 재설계, N8 다중 에이전트 토론, V3.0 루브릭 반영)  
+> **작성일**: 2026-03-27 | **최종 갱신**: 2026-05-19 (가드레일 턴·DB 저장 경로)  
 > **목적**: 작업 시 어떤 `docs/` 파일을 참조해야 하는지 빠르게 찾기 위한 가이드  
 > **총 문서 수**: 22개
 
@@ -202,3 +202,17 @@ Judge0 설정·API 연동·테스트 케이스 플로우·빠른 실행·트러�
 | **LLM 비용/성능 개선** | `LLM_성능_최적화.md` → `Node4_평가_가이드.md` |
 | **평가 플로우 다이어그램·노드 I/O 한 장** | `평가_파이프라인_플로우.md` |
 | **전체 그래프 흐름 파악** | `평가_파이프라인_플로우.md` → `State_흐름_및_DB_저장.md` (1.3절) → `app/domain/langgraph/graph.py` |
+| **가드레일 턴·meta·turn 혼동** | `.maestro/docs/DB_Save_Path_Audit.md` → `docs/State_노드별_흐름.md` → `.maestro/reports/daily/2026-05-19/` |
+
+---
+
+## `.maestro/docs/` 전용 (루트 `docs/` 외)
+
+### `DB_Save_Path_Audit.md`
+`prompt_messages`·Redis checkpoint·batch 저장의 **conversation vs storage turn**, 가드레일 **meta 백필**, V3 검증 SQL.  
+**참조 시점**: meta 미저장·턴 불일치·N4 메시지 추출 실패 디버깅 시.  
+**관련 코드**: `message_storage_service.py`, `eval_service.py`, `guardrail_turns.py`  
+**함께 보면 좋은 문서**: `docs/State_노드별_흐름.md`, `.maestro/docs/평가_파이프라인_플로우.md` (§5)
+
+### `평가_파이프라인_플로우.md` (Maestro 사본)
+루트 `docs/평가_파이프라인_플로우.md` 와 **동기화** 유지. 2026-05-19 §5 가드레일 턴 요약 포함.

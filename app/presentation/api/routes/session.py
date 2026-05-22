@@ -416,6 +416,74 @@ async def submit_code(
         return SubmitCodeResponse(submissionId=request.submissionId, status="failed")
 
 
+async def _fail_submission_evaluation_background(
+    submission_id: int,
+    submission_status_key: str,
+    *,
+    log_message: str,
+) -> None:
+    """평가 실패 시 Redis·Spring analysis/result 콜백을 FAILED로 맞춘다."""
+    from app.application.services.callback_service import CallbackService
+    from app.application.services.scoring_callback_mapper import (
+        build_be_scoring_result_body,
+    )
+    from app.infrastructure.cache.redis_client import redis_client
+
+    logger = logging.getLogger(__name__)
+    logger.error(
+        "[SubmitCode Background] %s - submissionId: %s",
+        log_message,
+        submission_id,
+    )
+
+    await redis_client.set(submission_status_key, "failed", ttl_seconds=3600)
+
+    callback_service = CallbackService()
+    failed_body = build_be_scoring_result_body(status="FAILED")
+
+    try:
+        ok = await callback_service.send_submission_status(
+            submission_id=submission_id,
+            status="FAILED",
+        )
+        if ok:
+            logger.info(
+                "[SubmitCode Background] analysis FAILED — submissionId=%s",
+                submission_id,
+            )
+        else:
+            logger.warning(
+                "[SubmitCode Background] analysis FAILED 전송 실패 — submissionId=%s",
+                submission_id,
+            )
+    except Exception as callback_error:
+        logger.warning(
+            "[SubmitCode Background] analysis 콜백 오류: %s",
+            callback_error,
+        )
+
+    try:
+        ok = await callback_service.send_scoring_result(
+            submission_id=submission_id,
+            body=failed_body,
+        )
+        if ok:
+            logger.info(
+                "[SubmitCode Background] result FAILED — submissionId=%s",
+                submission_id,
+            )
+        else:
+            logger.warning(
+                "[SubmitCode Background] result FAILED 전송 실패 — submissionId=%s",
+                submission_id,
+            )
+    except Exception as callback_error:
+        logger.warning(
+            "[SubmitCode Background] result 콜백 오류: %s",
+            callback_error,
+        )
+
+
 async def _run_submit_evaluation_background(
     eval_service: EvalService,
     session_id: str,
@@ -445,25 +513,52 @@ async def _run_submit_evaluation_background(
     import asyncio
 
     from app.application.services.callback_service import CallbackService
+    from app.core.config import settings
+    from app.domain.langgraph.eval_timeout_tracking import (
+        begin_eval_tracking,
+        end_eval_tracking,
+        log_evaluation_timeout,
+    )
     from app.infrastructure.cache.redis_client import redis_client
 
     logger = logging.getLogger(__name__)
     submission_status_key = f"submission_status:{submission_id}"
 
+    begin_eval_tracking(submission_id=submission_id, session_id=session_id)
     try:
         logger.info(
-            f"[SubmitCode Background] 평가 시작 - submissionId: {submission_id}"
+            f"[SubmitCode Background] 평가 시작 - submissionId: {submission_id}, "
+            f"timeout_sec={settings.EVAL_SUBMISSION_TIMEOUT_SEC}"
         )
 
-        # 평가 실행
-        result = await eval_service.submit_code(
-            session_id=session_id,
-            exam_id=exam_id,
-            participant_id=participant_id,
-            spec_id=spec_id,
-            code_content=code_content,
-            lang=lang,
-            submission_id=submission_id,
+        try:
+            callback_service = CallbackService()
+            running_ok = await callback_service.send_submission_status(
+                submission_id=submission_id,
+                status="RUNNING",
+            )
+            if running_ok:
+                logger.info(
+                    "[SubmitCode Background] analysis RUNNING — submissionId=%s",
+                    submission_id,
+                )
+        except Exception as running_err:
+            logger.warning(
+                "[SubmitCode Background] analysis RUNNING 스킵: %s",
+                running_err,
+            )
+
+        result = await asyncio.wait_for(
+            eval_service.submit_code(
+                session_id=session_id,
+                exam_id=exam_id,
+                participant_id=participant_id,
+                spec_id=spec_id,
+                code_content=code_content,
+                lang=lang,
+                submission_id=submission_id,
+            ),
+            timeout=settings.EVAL_SUBMISSION_TIMEOUT_SEC,
         )
 
         logger.info(
@@ -481,59 +576,11 @@ async def _run_submit_evaluation_background(
 
         if result.get("error") or result.get("error_message"):
             error_msg = result.get("error_message", "평가 실패")
-            logger.error(
-                f"[SubmitCode Background] 평가 실패 - "
-                f"submissionId: {submission_id}, error: {error_msg}"
+            await _fail_submission_evaluation_background(
+                submission_id,
+                submission_status_key,
+                log_message=f"평가 실패: {error_msg}",
             )
-
-            # 진행 상태 업데이트 (실패)
-            await redis_client.set(submission_status_key, "failed", ttl_seconds=3600)
-
-            # 실패 시 submission 상태 업데이트
-            try:
-                from app.infrastructure.persistence.models.enums import \
-                    SubmissionStatusEnum
-                from app.infrastructure.persistence.session import \
-                    get_db_context
-                from app.infrastructure.repositories.submission_repository import \
-                    SubmissionRepository
-
-                async with get_db_context() as db_context:
-                    submission_repo = SubmissionRepository(db_context)
-                    await submission_repo.update_submission_status(
-                        submission_id=submission_id, status=SubmissionStatusEnum.FAILED
-                    )
-                    await db_context.commit()
-                    logger.info(
-                        f"[SubmitCode Background] Submission 상태 업데이트 완료 - "
-                        f"submissionId: {submission_id}, status: FAILED"
-                    )
-            except Exception as update_error:
-                logger.warning(
-                    f"[SubmitCode Background] Submission 상태 업데이트 실패 - "
-                    f"submissionId: {submission_id}, error: {str(update_error)}"
-                )
-
-            # Spring Boot 콜백 전송 (실패)
-            try:
-                callback_service = CallbackService()
-                success = await callback_service.send_submission_status(
-                    submission_id=submission_id,
-                    status="FAILED",
-                )
-                if success:
-                    logger.info(
-                        f"[SubmitCode Background] 콜백 전송 완료 - submissionId: {submission_id}, status: FAILED"
-                    )
-                else:
-                    logger.warning(
-                        f"[SubmitCode Background] 콜백 전송 실패 - submissionId: {submission_id}"
-                    )
-            except Exception as callback_error:
-                logger.warning(
-                    f"[SubmitCode Background] 콜백 전송 실패: {str(callback_error)}"
-                )
-
             return
 
         # 진행 상태 업데이트 (완료)
@@ -544,102 +591,88 @@ async def _run_submit_evaluation_background(
             f"submissionId: {submission_id}, session_id: {postgres_session_id}"
         )
 
-        # Submission 상태 업데이트 (성공)
-        try:
-            from app.infrastructure.persistence.models.enums import \
-                SubmissionStatusEnum
-            from app.infrastructure.persistence.session import get_db_context
-            from app.infrastructure.repositories.submission_repository import \
-                SubmissionRepository
+        be_body = result.get("be_scoring_callback")
+        if not be_body:
+            from app.application.services.scoring_callback_mapper import (
+                build_be_scoring_from_eval_result,
+            )
 
-            async with get_db_context() as db_context:
-                submission_repo = SubmissionRepository(db_context)
-                await submission_repo.update_submission_status(
-                    submission_id=submission_id, status=SubmissionStatusEnum.DONE
-                )
-                await db_context.commit()
+            be_body = build_be_scoring_from_eval_result(result)
+            if be_body:
                 logger.info(
-                    f"[SubmitCode Background] Submission 상태 업데이트 완료 - "
-                    f"submissionId: {submission_id}, status: COMPLETED"
+                    "[SubmitCode Background] be_scoring_callback fallback 구성 — "
+                    "submissionId=%s testCases=%s",
+                    submission_id,
+                    len(be_body.get("testCases") or []),
                 )
-        except Exception as update_error:
+        if not be_body:
             logger.warning(
-                f"[SubmitCode Background] Submission 상태 업데이트 실패 - "
-                f"submissionId: {submission_id}, error: {str(update_error)}"
+                "[SubmitCode Background] be_scoring_callback 없음 — "
+                "submissionId=%s (BE runs[] 미반영 가능)",
+                submission_id,
+            )
+        else:
+            from app.application.services.scoring_callback_mapper import (
+                validate_be_scoring_body,
             )
 
-        # Spring Boot 콜백 전송 (성공)
-        try:
-            callback_service = CallbackService()
-            success = await callback_service.send_submission_status(
-                submission_id=submission_id,
-                status="DONE",
-            )
-            if success:
-                logger.info(
-                    f"[SubmitCode Background] 콜백 전송 완료 - submissionId: {submission_id}, status: DONE"
+            validation_err = validate_be_scoring_body(be_body)
+            if validation_err:
+                logger.warning(
+                    "[SubmitCode Background] result body 검증 실패 — "
+                    "전송 생략 submissionId=%s: %s testCases=%s",
+                    submission_id,
+                    validation_err,
+                    len(be_body.get("testCases") or []),
                 )
             else:
-                logger.warning(
-                    f"[SubmitCode Background] 콜백 전송 실패 (401 등) - submissionId: {submission_id}"
-                )
-        except Exception as callback_error:
-            logger.warning(
-                f"[SubmitCode Background] 콜백 전송 실패: {str(callback_error)}"
-            )
+                try:
+                    callback_service = CallbackService()
+                    success = await callback_service.send_scoring_result(
+                        submission_id=submission_id,
+                        body=be_body,
+                    )
+                    if success:
+                        logger.info(
+                            "[SubmitCode Background] result DONE 전송 완료 — "
+                            "submissionId=%s testCases=%s",
+                            submission_id,
+                            len(be_body.get("testCases") or []),
+                        )
+                    else:
+                        logger.warning(
+                            "[SubmitCode Background] result 전송 실패 — "
+                            "submissionId=%s (BE 400이면 위 error 로그 참고)",
+                            submission_id,
+                        )
+                except Exception as callback_error:
+                    logger.warning(
+                        "[SubmitCode Background] result 콜백 오류: %s",
+                        callback_error,
+                    )
 
+    except asyncio.TimeoutError:
+        timed_out_node = log_evaluation_timeout(submission_id)
+        await _fail_submission_evaluation_background(
+            submission_id,
+            submission_status_key,
+            log_message=(
+                f"평가 시간 초과 ({settings.EVAL_SUBMISSION_TIMEOUT_SEC}초) "
+                f"at node={timed_out_node}"
+            ),
+        )
     except Exception as e:
         logger.error(
             f"[SubmitCode Background] 평가 중 오류 - submissionId: {submission_id}",
             exc_info=True,
         )
-
-        # 진행 상태 업데이트 (실패)
-        await redis_client.set(submission_status_key, "failed", ttl_seconds=3600)
-
-        # 예외 발생 시 submission 상태 업데이트
-        try:
-            from app.infrastructure.persistence.models.enums import \
-                SubmissionStatusEnum
-            from app.infrastructure.persistence.session import get_db_context
-            from app.infrastructure.repositories.submission_repository import \
-                SubmissionRepository
-
-            async with get_db_context() as db_context:
-                submission_repo = SubmissionRepository(db_context)
-                await submission_repo.update_submission_status(
-                    submission_id=submission_id, status=SubmissionStatusEnum.FAILED
-                )
-                await db_context.commit()
-                logger.info(
-                    f"[SubmitCode Background] Submission 상태 업데이트 완료 (예외 발생) - "
-                    f"submissionId: {submission_id}, status: FAILED"
-                )
-        except Exception as update_error:
-            logger.warning(
-                f"[SubmitCode Background] Submission 상태 업데이트 실패 (예외 발생) - "
-                f"submissionId: {submission_id}, error: {str(update_error)}"
-            )
-
-        # Spring Boot 콜백 전송 (에러)
-        try:
-            callback_service = CallbackService()
-            success = await callback_service.send_submission_status(
-                submission_id=submission_id,
-                status="FAILED",
-            )
-            if success:
-                logger.info(
-                    f"[SubmitCode Background] 콜백 전송 완료 (예외) - submissionId: {submission_id}, status: FAILED"
-                )
-            else:
-                logger.warning(
-                    f"[SubmitCode Background] 콜백 전송 실패 - submissionId: {submission_id}"
-                )
-        except Exception as callback_error:
-            logger.warning(
-                f"[SubmitCode Background] 콜백 전송 실패: {str(callback_error)}"
-            )
+        await _fail_submission_evaluation_background(
+            submission_id,
+            submission_status_key,
+            log_message=f"평가 중 예외: {e}",
+        )
+    finally:
+        end_eval_tracking()
 
 
 # ===== [DEPRECATED] 레거시 API - 주석처리됨 (2024-12-07) =====

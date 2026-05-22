@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-05-20: BE 채점 result 콜백 (Issue #37 · BE PR #67)
+
+- AI → BE: `POST /api/callbacks/ai/submissions/{submissionId}/result` (`status`, `testCases`, `score`)
+- `analysis`: `RUNNING` / `FAILED`만; `DONE`은 result만
+- BE PR #67: `DONE`+빈 TC → 400, runs replace, SSE `scoring_complete`
+- 상세: [`docs/ai-callback-scoring.md`](ai-callback-scoring.md)
+
+---
+
 ## 2025-12-06: 엔드포인트 및 Worker 라우팅 변경
 
 API 엔드포인트 수정 및 FastAPI 측 구현 변경을 기록한 내용입니다.

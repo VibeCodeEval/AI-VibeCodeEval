@@ -98,15 +98,33 @@ class MessageStorageService:
 
             # 2. Role 변환 ('user' → USER, 'assistant'/'ai' → AI — DB enum 값)
             role_enum = self._convert_role(role)
+            conv_turn = self._api_turn_to_conversation_turn(turn, role_enum)
 
             # 3. PostgreSQL에 메시지 저장 (먼저)
+            merged_meta = dict(meta) if meta else {}
+            try:
+                redis_state = await self.state_repo.get_state(
+                    f"session_{session.id}"
+                )
+                if redis_state:
+                    gr_patch = self._guardrail_meta_patch(
+                        redis_state, turn, role_enum, content
+                    )
+                    if gr_patch:
+                        merged_meta.update(gr_patch)
+            except Exception as gr_err:
+                logger.warning(
+                    "[MessageStorage] 가드레일 meta 병합 실패 (저장은 계속) - %s",
+                    gr_err,
+                )
+
             message = await self.session_repo.add_message(
                 session_id=session.id,
-                turn=turn,
+                turn=conv_turn,
                 role=role_enum,
                 content=content,
                 token_count=token_count or 0,
-                meta=meta,
+                meta=merged_meta if merged_meta else None,
             )
 
             # 커밋 (PostgreSQL 저장 완료)
@@ -160,6 +178,62 @@ class MessageStorageService:
             logger.warning(f"[MessageStorage] 알 수 없는 role: {role}, USER로 처리")
             return PromptRoleEnum.USER
 
+    @staticmethod
+    def _api_turn_to_conversation_turn(turn: int, role: PromptRoleEnum) -> int:
+        from app.domain.langgraph.utils.guardrail_turns import api_turn_to_conversation_turn
+
+        return api_turn_to_conversation_turn(turn, role)
+
+    def _guardrail_meta_patch(
+        self,
+        state: Dict[str, Any],
+        message_turn: int,
+        role: PromptRoleEnum,
+        content: str,
+    ) -> Optional[Dict[str, Any]]:
+        from app.domain.langgraph.utils.guardrail_turns import build_guardrail_meta_patch
+
+        return build_guardrail_meta_patch(state, message_turn, role, content)
+
+    async def sync_guardrail_meta_to_db(
+        self, postgres_session_id: int, state: Dict[str, Any]
+    ) -> int:
+        """
+        LangGraph 실행 후 guardrail_flag_turns를 prompt_messages.meta에 백필.
+        save-message가 그래프보다 먼저 호출된 경우 V3 검증·export용.
+        """
+        from app.domain.langgraph.utils.guardrail_turns import (
+            get_guardrail_flag_turns,
+            get_guardrail_turn_reasons,
+        )
+
+        updated = 0
+        reasons = get_guardrail_turn_reasons(state)
+        for conv_turn in get_guardrail_flag_turns(state):
+            patch = {
+                "is_guardrail_failed": True,
+                "block_reason": reasons.get(str(conv_turn)),
+                "conversation_turn": conv_turn,
+            }
+            for role in (PromptRoleEnum.USER, PromptRoleEnum.AI):
+                msg = await self.session_repo.update_message_meta(
+                    session_id=postgres_session_id,
+                    turn=conv_turn,
+                    role=role,
+                    meta_update=patch,
+                    merge=True,
+                )
+                if msg:
+                    updated += 1
+        if updated:
+            await self.db.commit()
+            logger.info(
+                "[MessageStorage] 가드레일 meta DB 백필 - session_id=%s, rows=%s",
+                postgres_session_id,
+                updated,
+            )
+        return updated
+
     async def _update_redis_checkpoint(
         self,
         session_id: int,
@@ -194,21 +268,32 @@ class MessageStorageService:
         if "messages" not in state:
             state["messages"] = []
 
-        # 메시지 형식: {"role": "user", "content": "...", "turn": 1}
+        role_enum = self._convert_role(role)
+        conv_turn = self._api_turn_to_conversation_turn(turn, role_enum)
+        storage_turn = turn  # Spring turnId(DB slot) 보존
+
+        # LangGraph/N4는 conversation turn 기준
         message_data = {
             "role": role,
             "content": content,
-            "turn": turn,
+            "turn": conv_turn,
+            "storage_turn": storage_turn,
         }
         if token_count:
             message_data["token_count"] = token_count
 
-        state["messages"].append(message_data)
-        state["turn"] = max(state.get("turn", 0), turn)
-        # 제출 시 Eval Turn Guard는 current_turn 기준으로 1..(current_turn-1) 평가 → 메시지 turn과 맞춤
-        state["current_turn"] = max(state.get("current_turn", 0), turn)
+        gr_meta = self._guardrail_meta_patch(state, turn, role_enum, content)
+        if gr_meta:
+            message_data["guardrail"] = gr_meta
 
-        # 상태 저장
+        state["messages"].append(message_data)
+        from app.domain.langgraph.utils.guardrail_turns import (
+            normalize_state_turn_fields,
+        )
+
+        normalize_state_turn_fields(state)
+
+        # 상태 저장 (save_state 내부에서도 정규화)
         await self.state_repo.save_state(redis_session_id, state)
 
     async def save_messages_batch(
@@ -237,16 +322,30 @@ class MessageStorageService:
 
             saved_count = 0
 
+            redis_state = await self.state_repo.get_state(f"session_{session.id}")
+
             for msg in messages:
                 role_enum = self._convert_role(msg.get("role", "user"))
+                raw_turn = msg.get("turn", 1)
+                conv_turn = self._api_turn_to_conversation_turn(raw_turn, role_enum)
+                merged_meta = dict(msg.get("meta") or {})
+                if redis_state:
+                    gr_patch = self._guardrail_meta_patch(
+                        redis_state,
+                        raw_turn,
+                        role_enum,
+                        msg.get("content", ""),
+                    )
+                    if gr_patch:
+                        merged_meta.update(gr_patch)
 
                 message = await self.session_repo.add_message(
                     session_id=session.id,
-                    turn=msg.get("turn", 1),
+                    turn=conv_turn,
                     role=role_enum,
                     content=msg.get("content", ""),
                     token_count=msg.get("token_count", 0),
-                    meta=msg.get("meta"),
+                    meta=merged_meta if merged_meta else None,
                 )
                 saved_count += 1
 

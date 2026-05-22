@@ -10,8 +10,6 @@ from typing import Any, Dict, List, Literal, Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_google_vertexai import ChatVertexAI
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.config import settings
@@ -22,6 +20,10 @@ from app.domain.langgraph.utils.structured_output_parser import \
 from app.domain.langgraph.utils.token_tracking import (accumulate_tokens,
                                                        estimate_user_text_tokens,
                                                        extract_token_usage)
+from app.domain.langgraph.utils.guardrail_turns import (
+    format_guardrail_user_message,
+    register_guardrail_turn,
+)
 from app.infrastructure.persistence.models.enums import IntentAnalyzerStatus
 
 
@@ -30,9 +32,9 @@ class IntentAnalysisResult(BaseModel):
 
     # 새로운 필드 (Guide Strategy 기반)
     status: Literal["SAFE", "BLOCKED"] = Field(..., description="전체 안전 상태")
-    block_reason: Literal["DIRECT_ANSWER", "JAILBREAK", "OFF_TOPIC"] | None = Field(
-        None, description="차단 이유 (BLOCKED인 경우)"
-    )
+    block_reason: (
+        Literal["DIRECT_ANSWER", "JAILBREAK", "OFF_TOPIC", "INAPPROPRIATE"] | None
+    ) = Field(None, description="차단 이유 (BLOCKED인 경우)")
     request_type: Literal["CHAT", "SUBMISSION"] = Field(..., description="요청 유형")
     guide_strategy: (
         Literal[
@@ -66,32 +68,31 @@ class IntentAnalysisResult(BaseModel):
         return self
 
 
+def _merge_guardrail_turn_state(
+    state: MainGraphState,
+    output: Dict[str, Any],
+    block_reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    """BLOCKED 시 guardrail_flag_turns 등록 및 통일 거절 문구."""
+    if not output.get("is_guardrail_failed"):
+        return output
+    patch = register_guardrail_turn(
+        state,
+        turn=state.get("current_turn"),
+        block_reason=block_reason,
+    )
+    output.update(patch)
+    output["guardrail_message"] = format_guardrail_user_message(
+        output.get("guardrail_message")
+    )
+    return output
+
+
 def get_llm():
-    """LLM 인스턴스 생성 (Vertex AI 또는 AI Studio)"""
-    if settings.USE_VERTEX_AI:
-        # Vertex AI 사용 (GCP 크레딧 사용)
-        import json
+    """LLM 인스턴스 생성 (Vertex AI 또는 AI Studio — llm_factory 단일 경로)"""
+    from app.domain.langgraph.utils.llm_factory import create_gemini_llm
 
-        from google.oauth2 import service_account
-
-        credentials = None
-        if settings.GOOGLE_SERVICE_ACCOUNT_JSON:
-            service_account_info = json.loads(settings.GOOGLE_SERVICE_ACCOUNT_JSON)
-            credentials = service_account.Credentials.from_service_account_info(
-                service_account_info
-            )
-
-        return ChatVertexAI(
-            model=settings.DEFAULT_LLM_MODEL,
-            project=settings.GOOGLE_PROJECT_ID,
-            location=settings.GOOGLE_LOCATION,
-            credentials=credentials,
-            temperature=0.3,
-        )
-    else:
-        # AI Studio 사용 (API Key 방식, Free Tier)
-        from app.domain.langgraph.utils.llm_factory import create_gemini_llm
-        return create_gemini_llm(temperature=0.3)
+    return create_gemini_llm(temperature=settings.LLM_TEMPERATURE_INTENT)
 
 
 # Layer 1: 키워드 기반 빠른 검증 (정답 관련)
@@ -516,15 +517,21 @@ def process_output(result: IntentAnalysisResult) -> Dict[str, Any]:
         else:
             intent_status = IntentAnalyzerStatus.PASSED_HINT.value
 
+        violation = result.violation_message
+        if result.status == "BLOCKED":
+            violation = format_guardrail_user_message(violation)
+
         output = {
             "intent_status": intent_status,
             "is_guardrail_failed": not result.guardrail_passed,
-            "guardrail_message": result.violation_message,
+            "guardrail_message": violation,
             "is_submitted": result.is_submission_request,
             "guide_strategy": result.guide_strategy,
             "keywords": result.keywords,
             "updated_at": datetime.utcnow().isoformat(),
         }
+        if result.status == "BLOCKED":
+            output["block_reason"] = result.block_reason
         logger.debug(
             f"[Chain] process_output 완료 - status: {output['intent_status']}, guide_strategy: {output.get('guide_strategy')}"
         )
@@ -673,7 +680,7 @@ async def intent_analyzer(state: MainGraphState) -> Dict[str, Any]:
                 f"[Intent Analyzer] Layer 1 차단 - reason: {quick_result['block_reason']}"
             )
             # quick_result를 State 형식으로 변환
-            return {
+            quick_out = {
                 "intent_status": IntentAnalyzerStatus.FAILED_GUARDRAIL.value,
                 "is_guardrail_failed": True,
                 "guardrail_message": quick_result["violation_message"],
@@ -682,7 +689,11 @@ async def intent_analyzer(state: MainGraphState) -> Dict[str, Any]:
                 "keywords": quick_result.get("keywords", []),
                 "updated_at": datetime.utcnow().isoformat(),
                 "intent_llm_ran": False,
+                "block_reason": quick_result.get("block_reason"),
             }
+            return _merge_guardrail_turn_state(
+                state, quick_out, block_reason=quick_result.get("block_reason")
+            )
 
         # Layer 2: LLM 기반 상세 분석
         logger.debug("[Intent Analyzer] Layer 1 통과 - Layer 2 LLM 분석 진행")
@@ -750,8 +761,16 @@ async def intent_analyzer(state: MainGraphState) -> Dict[str, Any]:
         if "chat_tokens" in state:
             result["chat_tokens"] = state["chat_tokens"]
 
+        result = _merge_guardrail_turn_state(
+            state,
+            result,
+            block_reason=result.get("block_reason")
+            if result.get("is_guardrail_failed")
+            else None,
+        )
+
         logger.info(
-            f"[Intent Analyzer] 분석 결과 - status: {result['intent_status']}, guardrail_passed: {not result['is_guardrail_failed']}, is_submission: {result['is_submitted']}, guide_strategy: {result.get('guide_strategy')}"
+            f"[Intent Analyzer] 분석 결과 - status: {result['intent_status']}, guardrail_passed: {not result['is_guardrail_failed']}, is_submission: {result['is_submitted']}, guide_strategy: {result.get('guide_strategy')}, guardrail_turns: {result.get('guardrail_flag_turns')}"
         )
 
         return result

@@ -12,6 +12,7 @@
 
 핵심 책임:
 - `eval_turn_guard` — 턴 루프 실행, 서브그래프 invoke, 이전 턴 요약 전달
+- **가드레일 턴** (`guardrail_flag_turns`): eval 스킵·0점·요약/N8 제외 — `utils/guardrail_turns.py` (2026-05-19)
 - Eval Turn 서브그래프 — 의도 분석 → 의도별 평가 노드 → 요약 → 집계
 - 평가 프롬프트(eval_turn.yaml, eval_intent_disambiguation.yaml) 관리
 - V3.1 Rubric 모델(1-5) + 서버 산식(turn_score) 유지
@@ -21,7 +22,8 @@
 
 ### 직접 관리 (수정 권한 있음)
 ```
-app/domain/langgraph/nodes/eval/n4_eval_turn_guard.py      # 턴 평가 가드 (서브그래프 invoke)
+app/domain/langgraph/nodes/eval/n4_eval_turn_guard.py      # 턴 평가 가드 (서브그래프 invoke, 가드레일 스킵)
+app/domain/langgraph/utils/guardrail_turns.py              # guardrail_flag_turns SoT, N8 필터
 app/domain/langgraph/subgraph_eval_turn.py                 # 서브그래프 빌드
 
 app/domain/langgraph/nodes/eval_turn/

@@ -68,16 +68,35 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
 
-    # Vertex AI 설정 (Google Cloud)
-    USE_VERTEX_AI: bool = False  # Vertex AI 사용 여부
-    GOOGLE_PROJECT_ID: Optional[str] = None  # GCP 프로젝트 ID
-    GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None  # Service Account JSON (문자열)
+    # Vertex AI 설정 (Google Cloud) — 기본은 Vertex, 로컬/테스트는 .env에서 USE_VERTEX_AI=false
+    USE_VERTEX_AI: bool = True
+    # Vertex `project` — .env 의 GOOGLE_PROJECT_ID (비우면 SA JSON 의 project_id 폴백, vertex_auth)
+    GOOGLE_PROJECT_ID: Optional[str] = None
+    GOOGLE_SERVICE_ACCOUNT_JSON: Optional[str] = None  # SA JSON 전체를 문자열로 (비권장·민감)
+    # 프로젝트 루트 기준 상대 경로 권장. 예: secrets/vertex-sa.json (.gitignore 처리)
+    GOOGLE_SERVICE_ACCOUNT_JSON_PATH: Optional[str] = None
     GOOGLE_LOCATION: str = "us-central1"  # GCP 리전
 
     # 기본 LLM 설정
     DEFAULT_LLM_MODEL: str = "gemini-2.5-flash"  # .env에서 오버라이드 가능 (기본값)
-    LLM_TEMPERATURE: float = 0.7
+    LLM_TEMPERATURE: float = 0.7  # N3 Writer
     LLM_MAX_TOKENS: int = 4096
+    LLM_TEMPERATURE_DEFAULT: float = 0.3  # create_gemini_llm 미지정 시
+    LLM_TEMPERATURE_INTENT: float = 0.3  # N2 Intent Analyzer
+    LLM_TEMPERATURE_SYSTEM: float = 0.3  # 시스템 노드(요약 등)
+    LLM_TEMPERATURE_EVAL: float = 0.0  # N4 루브릭 평가, N7
+    LLM_TEMPERATURE_EVAL_INTENT: float = 0.1  # N4 intent_analysis (6대 통합 의도)
+    LLM_TEMPERATURE_EVAL_SUMMARY: float = 0.2  # N4 summarize_answer (대화 요약)
+    LLM_TEMPERATURE_SPEC: float = 0.2  # Spec Extractor
+    # N8 토론: None이면 debate_agents.yaml temperature 사용 (B안 폴백)
+    LLM_TEMPERATURE_DEBATE_STRICT: Optional[float] = None
+    LLM_TEMPERATURE_DEBATE_ADVOCATE: Optional[float] = None
+    LLM_TEMPERATURE_DEBATE_NEUTRAL: Optional[float] = None
+    LLM_TEMPERATURE_DEBATE_VERDICT: Optional[float] = None
+
+    # Writer(N3): LLM에 넘기는 최근 대화 턴 수 (user+assistant 한 쌍=1턴). 클수록 맥락↑·토큰·지연↑
+    # Field(ge=1, le=20): Pydantic 검증 — ge=이상(greater or equal), le=이하(less or equal). 1~20만 허용.
+    WRITER_MAX_HISTORY_TURNS: int = Field(default=4, ge=1, le=20)
 
     # Judge0 설정 (코드 실행 평가)
     JUDGE0_API_URL: str = (
@@ -94,6 +113,7 @@ class Settings(BaseSettings):
     ENABLE_JUDGE_WORKER: bool = True  # 서버 시작 시 Judge0 Worker 자동 실행
 
     # Spring Boot 콜백 설정
+    BE_BASE_URL: str = "http://localhost:8080"
     SPRING_CALLBACK_URL: str = "http://localhost:8080/api/ai/callback"
     SPRING_API_KEY: Optional[str] = None
 
@@ -116,7 +136,18 @@ class Settings(BaseSettings):
 
     # N5 Judge0 정확성(Correctness) 만점. TC당 점수 = (만점 / TC 개수), 합산 상한 = 이 값.
     # State의 code_correctness_score는 0 ~ 이 값 범위. N9 총점 가중치는 이를 0~100으로 환산해 적용.
-    CODE_CORRECTNESS_MAX_POINTS: float = 30.0
+    CODE_CORRECTNESS_MAX_POINTS: float = 100.0
+
+    # N5 성능(Performance) 만점. passed TC마다 time·memory로 0~100 raw 산출 후
+    # (Σ raw / TC 수) × (만점 / 100) — failed TC는 raw 0. State code_performance_score 범위.
+    CODE_PERFORMANCE_MAX_POINTS: float = 100.0
+
+    # Judge0 POST /submissions/batch 청크 상한 (CE 기본 20)
+    JUDGE0_MAX_BATCH_SIZE: int = 20
+
+    # 제출 평가 E2E 상한 (백그라운드 LangGraph N4~N9). 초과 시 FAILED 콜백.
+    # 환경 변수: EVAL_SUBMISSION_TIMEOUT_SEC=600
+    EVAL_SUBMISSION_TIMEOUT_SEC: float = 600.0
 
     # LangSmith 설정 (개발 환경에서 사용)
     # 공식 문서: https://docs.langchain.com/langsmith/create-account-api-key
@@ -129,7 +160,7 @@ class Settings(BaseSettings):
 
     # LLM 추론/타임아웃 설정
     LLM_THINKING_BUDGET: Optional[int] = 0   # 0=thinking 비활성화, None=모델 기본값
-    LLM_REQUEST_TIMEOUT: float = 60.0        # LLM API 요청 타임아웃 (초)
+    LLM_REQUEST_TIMEOUT: float = 120.0  # LLM API 요청 타임아웃 (초, N8 pro 등 장호출용)
 
     # Middleware 설정
     MIDDLEWARE_RATE_LIMIT_MAX_CALLS: int = 15  # Rate limit 최대 호출 횟수

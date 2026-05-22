@@ -24,14 +24,68 @@ from app.domain.langgraph.utils.token_tracking import (accumulate_tokens,
 logger = logging.getLogger(__name__)
 
 
+def _build_turn_content_section(state: Dict[str, Any]) -> str:
+    """Intent 단계 산출: 문제/요청 분해 → eval 프롬프트 블록."""
+    problem = (state.get("problem_in_turn") or "NONE").strip()
+    request = (state.get("user_request_in_turn") or "NONE").strip()
+    one_liner = (state.get("request_one_liner") or "").strip() or "(없음)"
+    carry = (state.get("carry_forward") or "").strip()
+    lines = [
+        f"- problem_in_turn: {problem}",
+        f"- user_request_in_turn: {request}",
+        f"- request_one_liner: {one_liner}",
+    ]
+    if carry:
+        lines.append(f"- carry_forward: {carry}")
+    has_spec = problem in ("FULL_SPEC", "PARTIAL")
+    mixed = has_spec and request not in ("NONE", "")
+    has_prior_dialogue = bool(
+        (state.get("previous_turn_dialogue") or "").strip()
+        and "이전 턴 대화 없음" not in (state.get("previous_turn_dialogue") or "")
+    )
+
+    if has_spec:
+        lines.append(
+            "- **R1 (스펙 상세성)**: 본문에 붙은 문제·과제 스펙이 얼마나 완전·구체적인지 "
+            "(제약, 예제, 입출력, 규칙 누락 여부)."
+        )
+        lines.append(
+            "- **R2 (요청 명확성)**: user_request_in_turn이 NONE이면 요청 없음 → R2는 1~2점. "
+            "CODE_CREATE 등이면 **요청 문장/구간만** 보고 명확·완전한지 평가."
+        )
+        if mixed and request == "CODE_CREATE":
+            lines.append(
+                "- **혼합 턴**: R1=스펙만. 요청이 「코드 짜줄래」 등 한 줄이면 **R2≤2, R3≤2 필수**. "
+                "scoring_cot에 스펙/요청 구간 구분."
+            )
+        if has_prior_dialogue:
+            lines.append(
+                "- **후속 턴**: [이전 턴 대화]의 **AI** 절 필수 확인. "
+                "베이스 코드·토대로 요청이면 R2·R3·R4(·R1) 3~4대 검토."
+            )
+    elif request not in ("NONE", "") and problem == "NONE":
+        if has_prior_dialogue:
+            lines.append(
+                "- **후속/참조 턴**: [이전 턴 대화]와 대조해 이번 요청의 R2·R3·R4(·R1 범위) 해석. "
+                "이전 턴 스펙 완전성으로 R1·R3 상향 금지."
+            )
+        else:
+            lines.append(
+                "- **R1·R2·R3**: 이번 턴 요청만. 이전 턴 스펙·문제 본문으로 상향 금지."
+            )
+            lines.append("- **R2**: 짧은 한 줄 요청이면 2 이하를 먼저 검토.")
+    return "\n".join(lines)
+
+
 def prepare_evaluation_input_internal(
-    inputs: Dict[str, Any], eval_type: str, criteria: str
+    inputs: Dict[str, Any], eval_type: str, criteria: str = ""
 ) -> Dict[str, Any]:
     """평가 입력 준비 (문제 정보 포함) - 외부에서 재사용 가능
 
     YAML 파일에서 프롬프트 템플릿을 로드하고 변수를 치환합니다.
+    criteria: 레거시 인자(미사용, eval_turn v3.4+ 템플릿에 없음).
     """
-    from app.domain.langgraph.prompts import load_prompt, render_prompt
+    from app.domain.langgraph.prompts import render_prompt
 
     state = inputs.get("state")
     human_message = state.get("human_message", "")
@@ -42,11 +96,18 @@ def prepare_evaluation_input_internal(
     previous_turns_summary = (
         raw_previous if raw_previous else "이전 대화 없음 (첫 번째 턴입니다)."
     )
+    from app.domain.langgraph.utils.turn_dialogue import (
+        format_previous_turn_dialogue,
+    )
+
+    raw_dialogue = (state.get("previous_turn_dialogue") or "").strip()
+    previous_turn_dialogue = (
+        raw_dialogue if raw_dialogue else format_previous_turn_dialogue([])
+    )
 
     # 문제 정보 추출
     problem_info_section = ""
     problem_algorithms = None
-    algorithms_display = "알 수 없음"
 
     if problem_context:
         basic_info = problem_context.get("basic_info", {})
@@ -56,7 +117,6 @@ def prepare_evaluation_input_internal(
         key_algorithms = ai_guide.get("key_algorithms", [])
         problem_algorithms = key_algorithms
         algorithms_text = ", ".join(key_algorithms) if key_algorithms else "없음"
-        algorithms_display = algorithms_text
 
         # DB problem_specs.content_md 우선 (턴 평가 프롬프트 길이 제한)
         problem_body = problem_statement_for_evaluation(
@@ -64,11 +124,11 @@ def prepare_evaluation_input_internal(
         )
 
         problem_info_section = f"""
-[문제 정보]
-- 문제: {problem_title}
+[문제 메타 — 채점·Rn 상향 근거로 사용 금지]
+- 제목: {problem_title}
 - 필수 알고리즘: {algorithms_text}
 
-[문제 본문 (content_md / 요약)]
+[문제 본문 발췌 — 사실 확인만]
 {problem_body}
 
 """
@@ -87,45 +147,33 @@ def prepare_evaluation_input_internal(
 - 문제 적절성 메트릭: 기술 용어 {metrics['problem_relevance']['technical_term_count']}개
 - 코드 블록: {metrics['has_code_blocks']} ({metrics['code_block_count']}개)
 
-**참고**: 위 메트릭은 객관적 측정값입니다. LLM 평가 시 이 메트릭을 참고하되, 맥락과 의미를 종합적으로 고려하여 평가하세요.
+**참고**: 객관 측정만. Rn 점수의 직접 근거로 쓰지 말고, 본문·요청 구간 해석 보조로만 사용하세요.
 """
+
+    turn_content_section = _build_turn_content_section(state)
+    request_one_liner = (state.get("request_one_liner") or "").strip()
+    if not request_one_liner:
+        request_one_liner = "(Intent 단계 request_one_liner 없음 — 본문과 턴 내용 분해만으로 판단)"
 
     # YAML 템플릿에서 시스템 프롬프트 렌더링 (V2.2: previous_turns_summary 포함)
     system_prompt = render_prompt(
         "eval_turn",
         eval_type=eval_type,
-        criteria=criteria,
+        request_one_liner=request_one_liner,
         problem_info_section=problem_info_section,
         metrics_section=metrics_section,
-        algorithms_display=algorithms_display,
-        word_count=metrics["word_count"],
-        sentence_count=metrics["sentence_count"],
-        specific_value_count=metrics["clarity"]["specific_value_count"],
-        technical_term_count=metrics["problem_relevance"]["technical_term_count"],
-        has_examples=metrics["examples"]["has_examples"],
-        example_count=metrics["examples"]["example_count"],
-        xml_tag_count=metrics["rules"]["xml_tag_count"],
-        constraint_count=metrics["rules"]["constraint_count"],
-        has_structured_format=metrics["rules"]["has_structured_format"],
-        has_context_reference=metrics["context"]["has_context_reference"],
-        context_reference_count=metrics["context"]["context_reference_count"],
+        turn_content_section=turn_content_section,
         previous_turns_summary=previous_turns_summary,
+        previous_turn_dialogue=previous_turn_dialogue,
         text=human_message,
         ai_message=ai_message,
     )
 
-    follow_up_guide = ""
-    if "후속 질문" in eval_type or "Follow Up" in eval_type:
-        yaml_data = load_prompt("eval_turn")
-        follow_up_guide = yaml_data.get("follow_up_guide", "")
-
-    user_tail = (
-        "출력은 JSON 한 객체뿐이며, 키는 scoring_cot와 rubric_breakdown만 사용하세요."
-    )
     user_prompt = (
-        f"{follow_up_guide}\n{user_tail}".strip()
-        if follow_up_guide.strip()
-        else user_tail
+        "출력은 JSON 한 객체뿐입니다. "
+        "반드시 scoring_cot(근거·점수 숫자 없음)를 먼저 작성한 뒤, "
+        "그 CoT만 보고 rubric_breakdown(1~5 정수)을 확정하세요. "
+        "두 객체의 Rn 키는 동일해야 합니다."
     )
 
     return {

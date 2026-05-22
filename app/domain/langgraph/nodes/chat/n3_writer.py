@@ -10,8 +10,6 @@ from typing import Any, Dict, Optional
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_google_vertexai import ChatVertexAI
 
 from app.core.config import settings
 from app.domain.langgraph.middleware import wrap_chain_with_middleware
@@ -21,11 +19,76 @@ from app.domain.langgraph.utils.token_tracking import (accumulate_tokens,
                                                        extract_token_usage)
 from app.infrastructure.persistence.models.enums import WriterResponseStatus
 
+
+def _writer_history_cap_messages() -> int:
+    """Writer에 넣을 state.messages 슬라이스 상한(턴당 약 2메시지)."""
+    return settings.WRITER_MAX_HISTORY_TURNS * 2
+
+
 # Step 03 (V2.1): 스마트 게이트 2026 Writer 분기 – 구조적 용어 감지
 # 이 키워드가 사용자 메시지에 포함되면 "클린 아키텍처" 응답, 미포함 시 "스파게티" 유도 응답
 SMART_GATE_2026_SPEC_ID = 20
-# Writer LLM에 넣는 대화 히스토리: 턴당 user+ai 2메시지 가정 시 최근 N턴
-WRITER_MAX_HISTORY_TURNS = 10
+# LLM 입력 로그(이전 대화 참조 확인용) — 메시지 본문 미리보기 최대 길이
+WRITER_LLM_INPUT_LOG_PREVIEW = 320
+
+
+def _preview_for_log(text: Any, max_chars: int = WRITER_LLM_INPUT_LOG_PREVIEW) -> str:
+    if text is None:
+        return ""
+    s = text if isinstance(text, str) else str(text)
+    if len(s) <= max_chars:
+        return s
+    return f"{s[:max_chars]}...(truncated,len={len(s)})"
+
+
+def log_writer_llm_payload(chat_messages: list, logger: Any) -> None:
+    """LLM 호출 직전 페이로드: 시스템(길이)·과거 user/assistant 미리보기."""
+    logger.info(
+        "[Writer→LLM] 페이로드 순서: 총 %d개 (System → 과거 대화… → 마지막 Human=이번 턴)",
+        len(chat_messages),
+    )
+    for idx, m in enumerate(chat_messages):
+        body = getattr(m, "content", "") or ""
+        if not isinstance(body, str):
+            body = str(body)
+        if isinstance(m, SystemMessage):
+            has_mem = "이전 대화 요약" in body
+            logger.info(
+                "[Writer→LLM] [%d] SystemMessage 본문_길이=%d 이전대화요약_포함=%s",
+                idx,
+                len(body),
+                has_mem,
+            )
+            if has_mem:
+                # 요약 블록만 잘라서 확인하기 쉽게
+                marker = "이전 대화 요약"
+                pos = body.find(marker)
+                if pos != -1:
+                    tail = body[pos : pos + WRITER_LLM_INPUT_LOG_PREVIEW + len(marker)]
+                    logger.info(
+                        "[Writer→LLM] [%d] memory 요약 미리보기: %r",
+                        idx,
+                        _preview_for_log(tail),
+                    )
+        elif isinstance(m, AIMessage):
+            logger.info(
+                "[Writer→LLM] [%d] AIMessage(과거 어시스턴트) preview=%r",
+                idx,
+                _preview_for_log(body),
+            )
+        elif isinstance(m, HumanMessage):
+            logger.info(
+                "[Writer→LLM] [%d] HumanMessage preview=%r",
+                idx,
+                _preview_for_log(body),
+            )
+        else:
+            logger.info(
+                "[Writer→LLM] [%d] %s preview=%r",
+                idx,
+                type(m).__name__,
+                _preview_for_log(body),
+            )
 
 STRUCTURAL_TERMS = [
     "규칙 인터페이스",
@@ -92,35 +155,13 @@ def _normalize_code_response(ai_content: str, state: MainGraphState) -> str:
 
 
 def get_llm():
-    """LLM 인스턴스 생성 (Vertex AI 또는 AI Studio)"""
-    if settings.USE_VERTEX_AI:
-        # Vertex AI 사용 (GCP 크레딧 사용)
-        import json
+    """LLM 인스턴스 생성 (Vertex AI 또는 AI Studio — llm_factory 단일 경로)"""
+    from app.domain.langgraph.utils.llm_factory import create_gemini_llm
 
-        from google.oauth2 import service_account
-
-        credentials = None
-        if settings.GOOGLE_SERVICE_ACCOUNT_JSON:
-            service_account_info = json.loads(settings.GOOGLE_SERVICE_ACCOUNT_JSON)
-            credentials = service_account.Credentials.from_service_account_info(
-                service_account_info
-            )
-
-        return ChatVertexAI(
-            model=settings.DEFAULT_LLM_MODEL,
-            project=settings.GOOGLE_PROJECT_ID,
-            location=settings.GOOGLE_LOCATION,
-            credentials=credentials,
-            temperature=settings.LLM_TEMPERATURE,
-            max_output_tokens=settings.LLM_MAX_TOKENS,
-        )
-    else:
-        # AI Studio 사용 (API Key 방식, Free Tier)
-        from app.domain.langgraph.utils.llm_factory import create_gemini_llm
-        return create_gemini_llm(
-            temperature=settings.LLM_TEMPERATURE,
-            max_output_tokens=settings.LLM_MAX_TOKENS,
-        )
+    return create_gemini_llm(
+        temperature=settings.LLM_TEMPERATURE,
+        max_output_tokens=settings.LLM_MAX_TOKENS,
+    )
 
 
 # 시스템 프롬프트 템플릿 - YAML에서 로드
@@ -298,7 +339,7 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
             # 이전 대화에서 힌트나 점화식이 논의되었는지 확인
             has_previous_context = False
             if messages:
-                cap = WRITER_MAX_HISTORY_TURNS * 2
+                cap = _writer_history_cap_messages()
                 recent_messages = messages[-cap:] if len(messages) > cap else messages
                 for msg in recent_messages:
                     if hasattr(msg, "content"):
@@ -396,8 +437,8 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
                 f"[prepare_writer_input] 시스템 프롬프트 (처음 500자): {system_prompt[:500]}..."
             )
 
-    # 최근 메시지 변환 (최대 WRITER_MAX_HISTORY_TURNS턴 ≒ 2*N개 메시지)
-    hist_cap = WRITER_MAX_HISTORY_TURNS * 2
+    # 최근 메시지 변환 (설정 WRITER_MAX_HISTORY_TURNS턴 ≒ 2*N개 메시지)
+    hist_cap = _writer_history_cap_messages()
     recent_messages = messages[-hist_cap:] if len(messages) > hist_cap else messages
     formatted_messages = []
     for msg in recent_messages:
@@ -411,6 +452,21 @@ def prepare_writer_input(state: MainGraphState) -> Dict[str, Any]:
                 elif role == "ai":
                     role = "assistant"
                 formatted_messages.append({"role": role, "content": content})
+
+    logger.info(
+        "[Writer→LLM 히스토리 준비] state messages 총 %d개 → LLM용 비어있지 않은 과거 메시지 %d개 (상한 %d)",
+        len(messages),
+        len(formatted_messages),
+        hist_cap,
+    )
+    if memory_summary:
+        logger.info(
+            "[Writer→LLM 히스토리 준비] state.memory_summary 길이=%d preview=%r",
+            len(memory_summary),
+            _preview_for_log(memory_summary),
+        )
+    else:
+        logger.info("[Writer→LLM 히스토리 준비] state.memory_summary 비어 있음")
 
     return {
         "system_prompt": system_prompt,
@@ -498,6 +554,8 @@ def format_writer_messages(inputs: Dict[str, Any]) -> list:
             f"[format_writer_messages] 모든 메시지가 비어있음! 기본 메시지 추가"
         )
         chat_messages.append(SystemMessage(content="안녕하세요. 무엇을 도와드릴까요?"))
+
+    log_writer_llm_payload(chat_messages, logger)
 
     logger.info(f"[format_writer_messages] 최종 메시지 개수: {len(chat_messages)}개")
     return chat_messages

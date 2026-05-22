@@ -7,27 +7,38 @@ AI 바이브 코딩 테스트 평가 플로우
 - 상태 기반 워크플로우로 일관성 있는 평가 프로세스 구현
 
 [그래프 구조]
-START → 1. Handle Request → 2. Intent Analyzer → 3. Writer LLM → END
-                                      ↓ (제출)
-                           4. Eval Turn Guard → 5. Main Router
-                                                       ↓
-                                           6a-6d. 평가 노드들
-                                                       ↓
-                                          7. Final Score Aggregation
-                                                       ↓
-                                                      END
+START → N1 handle_request → N2 intent_analyzer ─┬→ N3 writer → END (일반 채팅)
+                                                 ├→ handle_failure / summarize_memory
+                                                 └→ N4 eval_turn_guard (제출)
+                                                        → N5 eval_code_execution (Judge0)
+                                                        → N6 eval_static_analysis (Radon)
+                                                        → N7 eval_code_agent (코드 리뷰 LLM)
+                                                        → N7 → (N4 turn_scores 있으면 N8 토론, 없으면 생략)
+                                                        → N9 aggregate_final_scores → END
 
 [노드 설명]
 1. Handle Request: Redis 상태 로드, 턴 번호 증가
 2. Intent Analyzer: 의도 분석 + 가드레일 체크 (v2.1: 4대 통합 의도 unified_intent)
 3. Writer LLM: AI 답변 생성. v2.1: spec_id=20일 때 클린/스파게티 분기(구조적 용어 감지)
 4. Eval Turn Guard: 제출 시 State의 messages에서 모든 턴 추출하여 동기 평가 실행
-5. Main Router: 제출 여부에 따른 분기
 5. Eval Code Execution (N5): Judge0 코드 실행 평가
 6. Eval Static Analysis (N6): Radon CC 정적 분석
 7. Eval Code Agent (N7): 코드 리뷰 LLM (단일 에이전트)
 8. Holistic Debate (N8): 다중 에이전트 토론 (검사/변호인/중재자 × 2라운드)
-9. Final Scores (N9): 최종 점수·등급 집계 및 DB 저장
+9. Final Scores (N9): 최종 점수·등급 집계 및 DB 저장[N4 서브그래프 — eval_turn_guard 내부, subgraph_eval_turn.py]
+intent_analysis → intent_router → eval_* (의도별 루브릭 LLM) → summarize_answer → aggregate_turn_log
+
+[노드 ID ↔ 역할 — create_main_graph() 주석과 동기화]
+| 그래프 노드 ID          | 단계 | 구현 |
+| handle_request          | N1   | Redis·턴 로드 |
+| intent_analyzer         | N2   | 채팅 의도·가드레일 |
+| writer                  | N3   | AI 답변 |
+| eval_turn_guard         | N4   | 턴 평가 서브그래프 일괄 실행 |
+| eval_code_execution     | N5   | Judge0 |
+| eval_static_analysis    | N6   | Radon CC |
+| eval_code_agent         | N7   | 코드 리뷰 LLM |
+| holistic_debate         | N8   | 토론 (strict/advocate/neutral/verdict) |
+| aggregate_final_scores  | N9   | 최종 점수·등급 |
 
 [상태 관리]
 - MainGraphState: 모든 노드가 공유하는 상태 객체
@@ -60,8 +71,10 @@ from app.domain.langgraph.nodes.eval.n8_code_execution import \
 import logging
 from app.domain.langgraph.nodes.eval.n9_final_scores import \
     aggregate_final_scores
+from app.domain.langgraph.nodes.eval.routers import holistic_debate_router
 from app.domain.langgraph.nodes.system.system_nodes import (handle_failure,
                                                              summarize_memory)
+from app.domain.langgraph.eval_timeout_tracking import wrap_eval_node_tracking
 from app.domain.langgraph.states import MainGraphState
 from app.domain.langgraph.subgraph_eval_turn import create_eval_turn_subgraph
 from app.domain.langgraph.utils.problem_info import get_problem_info_sync
@@ -134,44 +147,85 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
     # 메인 그래프 빌더 초기화
     builder = StateGraph(MainGraphState)
 
-    # ===== 노드 추가 =====
+    # ===== 노드 추가 (그래프 노드 ID → 구현 파일) =====
+    #
+    # [채팅 루프 N1~N3]
+    # handle_request      n1_handle_request.py   Redis 세션 로드, current_turn 증가, 요청 타입 반영
+    # intent_analyzer     n2_intent_analyzer.py  채팅 의도·가드레일(시험 규정 위반 등), unified_intent
+    # writer              n3_writer.py           응시자용 AI 답변 생성(YAML 프롬프트, 최근 N턴 맥락)
+    #
+    # [시스템]
+    # handle_failure      system_nodes.py        가드레일/오류 시 거절·안내 메시지, END 또는 재라우팅
+    # summarize_memory    system_nodes.py        대화 메모리 요약 후 handle_request로 재진입(재시도)
+    #
+    # [제출·턴 평가 N4]
+    # eval_turn_guard     n4_eval_turn_guard.py  제출 시 messages에서 1~(current_turn-1) 턴 추출,
+    #                                              Eval Turn SubGraph(의도→루브릭→요약) 동기 실행
+    #
+    # [제출 후 통합 평가 N5~N9 — 순차 엣지]
+    # eval_code_execution n5_integrated_evaluator.py  N5 Judge0 정확성·성능(TC 배치 실행)
+    # eval_static_analysis n6_holistic_flow.py        N6 Radon CC·AST 패턴, v1/v2 메트릭
+    # eval_code_agent     n7_aggregate_turn_scores.py N7 단일 LLM 코드 리뷰(정성 리포트)
+    # holistic_debate     n8_code_execution.py      N8 검사/변호인/중재자 토론(subgraph_debate)
+    # aggregate_final_scores n9_final_scores.py     N9 가중 합산·등급·DB/콜백용 final_scores
 
-    # 1. Handle Request Load State
-    builder.add_node("handle_request", handle_request_load_state)
+    builder.add_node(
+        "handle_request",  # N1
+        wrap_eval_node_tracking("handle_request", handle_request_load_state),
+    )
 
-    # 2. Intent Analyzer
-    builder.add_node("intent_analyzer", intent_analyzer)
+    builder.add_node(
+        "intent_analyzer",  # N2
+        wrap_eval_node_tracking("intent_analyzer", intent_analyzer),
+    )
 
-    # 3. Writer LLM
-    builder.add_node("writer", writer_llm)
+    builder.add_node(
+        "writer",  # N3
+        wrap_eval_node_tracking("writer", writer_llm),
+    )
 
-    # SYSTEM 노드들
-    builder.add_node("handle_failure", handle_failure)
-    builder.add_node("summarize_memory", summarize_memory)
+    builder.add_node(
+        "handle_failure",
+        wrap_eval_node_tracking("handle_failure", handle_failure),
+    )
+    builder.add_node(
+        "summarize_memory",
+        wrap_eval_node_tracking("summarize_memory", summarize_memory),
+    )
 
-    # 4. Eval Turn Guard (제출 시 State의 messages에서 모든 턴 추출하여 동기 평가 실행)
-    builder.add_node("eval_turn_guard", eval_turn_submit_guard)
+    builder.add_node(
+        "eval_turn_guard",  # N4 (+ subgraph_eval_turn 내부: intent_analysis, eval_*, summarize_answer)
+        wrap_eval_node_tracking("eval_turn_guard", eval_turn_submit_guard),
+    )
 
-    # 5. Main Router (조건부 분기 함수로 처리)
-
-    # 신규 평가 파이프라인 (N5~N8)
-    builder.add_node("eval_code_execution", eval_code_execution)      # N5 Judge0
-    builder.add_node("eval_static_analysis", eval_static_analysis)    # N6 Radon CC
-    builder.add_node("eval_code_agent", eval_code_agent)              # N7 Code Review LLM
-    builder.add_node("holistic_debate", holistic_debate_flow)         # N8 다중 에이전트 토론
-
-    # 7. Aggregate Final Scores
-    builder.add_node("aggregate_final_scores", aggregate_final_scores)
+    builder.add_node(
+        "eval_code_execution",  # N5
+        wrap_eval_node_tracking("eval_code_execution", eval_code_execution),
+    )
+    builder.add_node(
+        "eval_static_analysis",  # N6
+        wrap_eval_node_tracking("eval_static_analysis", eval_static_analysis),
+    )
+    builder.add_node(
+        "eval_code_agent",  # N7
+        wrap_eval_node_tracking("eval_code_agent", eval_code_agent),
+    )
+    builder.add_node(
+        "holistic_debate",  # N8
+        wrap_eval_node_tracking("holistic_debate", holistic_debate_flow),
+    )
+    builder.add_node(
+        "aggregate_final_scores",  # N9
+        wrap_eval_node_tracking("aggregate_final_scores", aggregate_final_scores),
+    )
 
     # ===== 엣지 추가 =====
 
-    # START -> Handle Request
     builder.add_edge(START, "handle_request")
 
-    # Handle Request -> Intent Analyzer
     builder.add_edge("handle_request", "intent_analyzer")
 
-    # Intent Analyzer -> 조건부 분기
+    # N2 → intent_router: writer | handle_failure | summarize_memory | eval_turn_guard(제출)
     builder.add_conditional_edges(
         "intent_analyzer",
         intent_router,
@@ -184,20 +238,19 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
         },
     )
 
-    # Writer -> 조건부 분기
+    # N3 → writer_router: 성공 시 END(일반 채팅 종료), 실패·요약·재요청 분기
     builder.add_conditional_edges(
         "writer",
         writer_router,
         {
-            "end": END,  # 답변 생성 성공 시 바로 종료
+            "end": END,
             "handle_failure": "handle_failure",
             "summarize_memory": "summarize_memory",
             "handle_request": "handle_request",
         },
     )
 
-    # 제출 시 eval_turn_guard 통과 후 N5(eval_code_execution)로 진입
-    # "eval_holistic_flow" 키는 main_router가 반환하는 레거시 값으로, 실제 노드는 eval_code_execution(N5)으로 매핑
+    # N4 완료 후 main_router → N5 시작 (키 eval_holistic_flow는 레거시 라우터 반환값)
     builder.add_conditional_edges(
         "eval_turn_guard",
         main_router,
@@ -208,7 +261,6 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
         },
     )
 
-    # Handle Failure -> Main Router
     builder.add_conditional_edges(
         "handle_failure",
         main_router,
@@ -219,16 +271,20 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
         },
     )
 
-    # Summarize Memory -> Handle Request (재시도)
     builder.add_edge("summarize_memory", "handle_request")
 
-    # N5 -> N6 -> N7 -> N8 -> N9 순차 실행
-    builder.add_edge("eval_code_execution", "eval_static_analysis")   # N5 -> N6
-    builder.add_edge("eval_static_analysis", "eval_code_agent")       # N6 -> N7
-    builder.add_edge("eval_code_agent", "holistic_debate")            # N7 -> N8
-    builder.add_edge("holistic_debate", "aggregate_final_scores")     # N8 -> N9
-
-    # 7 -> END
+    # 제출 평가 파이프라인: N5 → N6 → N7 → (N4 turn_scores 있으면 N8) → N9 → END
+    builder.add_edge("eval_code_execution", "eval_static_analysis")
+    builder.add_edge("eval_static_analysis", "eval_code_agent")
+    builder.add_conditional_edges(
+        "eval_code_agent",
+        holistic_debate_router,
+        {
+            "holistic_debate": "holistic_debate",
+            "aggregate_final_scores": "aggregate_final_scores",
+        },
+    )
+    builder.add_edge("holistic_debate", "aggregate_final_scores")
     builder.add_edge("aggregate_final_scores", END)
 
     # 그래프 컴파일
@@ -309,8 +365,10 @@ def get_initial_state(
         skip_reason=None,
         test_cases_passed=None,
         test_cases_total=None,
+        test_case_results=None,
         correctness_reasoning=None,
         final_scores=None,
+        be_scoring_callback=None,
         memory_summary=None,
         error_message=None,
         retry_count=0,
@@ -328,6 +386,8 @@ def get_initial_state(
         debate_log=None,
         debate_initial_opinions=None,
         debate_rebuttals=None,
+        guardrail_flag_turns=None,
+        guardrail_turn_reasons=None,
         # v2.1 Snapshot·평가 (제출 플로우에서 채워짐)
         v1_code=None,
         v2_code=None,

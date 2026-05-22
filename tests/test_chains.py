@@ -117,7 +117,9 @@ class TestIntentAnalyzerChain:
         
         assert result["intent_status"] == "failed_guardrail"
         assert result["is_guardrail_failed"] is True
-        assert result["guardrail_message"] == "부적절한 요청입니다."
+        assert result["block_reason"] == "DIRECT_ANSWER"
+        assert "해당 요청은 시험 규정상 답변할 수 없습니다" in result["guardrail_message"]
+        assert "부적절한 요청입니다" in result["guardrail_message"]
     
     def test_process_output_submission(self):
         """제출 요청 처리 테스트"""
