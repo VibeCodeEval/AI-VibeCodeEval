@@ -64,7 +64,7 @@ class PromptMessage(Base):
     )
     turn: Mapped[int] = mapped_column(Integer, nullable=False)
     role: Mapped[PromptRoleEnum] = mapped_column(
-        Enum(PromptRoleEnum, name="prompt_role_enum", schema="public"),
+        Enum(PromptRoleEnum, name="prompt_role_enum", schema="ai_vibe_coding_test"),
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -106,7 +106,7 @@ class PromptEvaluation(Base):
         Enum(
             EvaluationTypeEnum,
             name="evaluation_type_enum",
-            schema="public",
+            schema="ai_vibe_coding_test",
             create_type=False,  # 기존 ENUM 타입 사용 (DB에 이미 존재)
             native_enum=True,  # PostgreSQL 네이티브 ENUM 사용
         ),
