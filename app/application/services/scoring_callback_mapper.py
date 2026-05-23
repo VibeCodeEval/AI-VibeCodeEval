@@ -65,16 +65,17 @@ def map_test_case_to_be_dto(
     default_group: str = _DEFAULT_RUN_GROUP,
 ) -> Dict[str, Any]:
     """단일 Judge0 TC 결과 → BE testCases[] 항목."""
-    idx = tc.get("test_case_index", 0)
+    idx = tc.get("index", tc.get("test_case_index", 0))
     try:
         case_index = int(idx)
     except (TypeError, ValueError):
         case_index = 0
 
-    time_sec = parse_judge_time_seconds(tc.get("time"))
+    time_sec = tc.get("time_sec") or parse_judge_time_seconds(tc.get("time"))
     time_ms = int(round(time_sec * 1000)) if time_sec is not None else None
 
-    mem_kb = parse_judge_memory_kb(tc.get("memory"))
+    mem_kb_raw = tc.get("memory_mb")
+    mem_kb = int(round(mem_kb_raw * 1024)) if mem_kb_raw is not None else parse_judge_memory_kb(tc.get("memory"))
 
     return {
         "caseIndex": case_index,
