@@ -21,6 +21,7 @@ services:
       - REDIS_HOST=${REDIS_HOST:-vibecode-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - BE_BASE_URL=${BE_BASE_URL:-http://vibecode-app:8080}
       - SPRING_CALLBACK_URL=${SPRING_CALLBACK_URL}
       - JUDGE0_API_URL=${JUDGE0_API_URL}
       - JUDGE0_API_KEY=${JUDGE0_API_KEY}
