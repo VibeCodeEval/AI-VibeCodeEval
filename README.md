@@ -574,6 +574,7 @@ docker-compose down
 | `JUDGE0_API_URL` | Judge0 API URL | `http://localhost:2358` | ✅ |
 | `JUDGE0_API_KEY` | Judge0 API 키 (RapidAPI) | - | ⚠️ (RapidAPI 사용 시) |
 | `JUDGE0_USE_RAPIDAPI` | RapidAPI 사용 여부 | `false` | ❌ |
+| `BE_BASE_URL` | Spring Boot BE 기본 URL (analysis/result 콜백 URL 조립 기준) | `http://localhost:8080` | ✅ |
 | `SPRING_CALLBACK_URL` | Spring 콜백 URL | `http://localhost:8080/api/ai/callback` | ✅ |
 | `DEBATE_LOG_TO_REDIS` | N8 토론 로그를 Redis에 저장 | `true` | ❌ |
 
