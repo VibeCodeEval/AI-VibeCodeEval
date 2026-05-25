@@ -153,28 +153,81 @@ def format_guardrail_user_message(violation_message: Optional[str] = None) -> st
     )
 
 
+def _turn_key_to_int(key: Any) -> Optional[int]:
+    try:
+        return int(key)
+    except (TypeError, ValueError):
+        return None
+
+
+def debate_exclusion_reason_for_turn(
+    turn: Optional[int],
+    log: Optional[Dict[str, Any]],
+    state: Dict[str, Any],
+) -> Optional[str]:
+    """
+    N8 토론 컨텍스트에서 제외할 턴이면 사유 문자열, 포함이면 None.
+
+    turn_logs 항목이 없어도 guardrail_flag_turns로 제외 가능.
+    """
+    if turn is None:
+        return None
+    blocked = set(get_guardrail_flag_turns(state))
+    if turn in blocked:
+        return "guardrail_flag_turns"
+    if not isinstance(log, dict):
+        return None
+    if log.get("is_guardrail_failed"):
+        return "is_guardrail_failed"
+    ped = log.get("prompt_evaluation_details") or {}
+    if ped.get("intent") == "GUARDRAIL_BLOCKED":
+        return "GUARDRAIL_BLOCKED"
+    return None
+
+
+def filter_turn_material_for_debate(
+    turn_logs: Dict[str, Any],
+    turn_scores: Dict[str, Any],
+    state: Dict[str, Any],
+) -> tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    N8 토론: 가드레일 턴의 turn_logs·turn_scores 모두 제외.
+
+    N9 aggregate_turn_score 등 MainGraph turn_scores는 변경하지 않음.
+    Returns:
+        (filtered_logs, filtered_scores, excluded) — excluded: {turn, reason}[]
+    """
+    logs_in = turn_logs if isinstance(turn_logs, dict) else {}
+    scores_in = turn_scores if isinstance(turn_scores, dict) else {}
+    all_keys = set(logs_in.keys()) | set(scores_in.keys())
+
+    filtered_logs: Dict[str, Any] = {}
+    filtered_scores: Dict[str, Any] = {}
+    excluded: List[Dict[str, Any]] = []
+
+    for key in all_keys:
+        turn = _turn_key_to_int(key)
+        log = logs_in.get(key) if isinstance(logs_in.get(key), dict) else {}
+        reason = debate_exclusion_reason_for_turn(turn, log, state)
+        if reason:
+            excluded.append({"turn": key, "reason": reason})
+            continue
+        if key in logs_in and isinstance(logs_in[key], dict):
+            filtered_logs[key] = logs_in[key]
+        if key in scores_in:
+            filtered_scores[key] = scores_in[key]
+
+    return filtered_logs, filtered_scores, excluded
+
+
 def filter_turn_logs_for_debate(
     turn_logs: Dict[str, Any],
     state: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """N8 토론: 가드레일 턴 로그 제외 (0점은 turn_scores 평균에만 반영)."""
-    blocked = set(get_guardrail_flag_turns(state))
-    filtered: Dict[str, Any] = {}
-    for key, log in (turn_logs or {}).items():
-        if not isinstance(log, dict):
-            continue
-        try:
-            t = int(key)
-        except (TypeError, ValueError):
-            t = None
-        if t is not None and t in blocked:
-            continue
-        ped = log.get("prompt_evaluation_details") or {}
-        if log.get("is_guardrail_failed"):
-            continue
-        if ped.get("intent") == "GUARDRAIL_BLOCKED":
-            continue
-        filtered[key] = log
+    """N8 토론: 가드레일 턴 turn_logs만 제외 (하위 호환). turn_scores는 filter_turn_material_for_debate 사용."""
+    filtered, _, _ = filter_turn_material_for_debate(
+        turn_logs, {}, state
+    )
     return filtered
 
 

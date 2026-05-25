@@ -1,0 +1,14 @@
+# 턴 유형: 이전 턴 대화·AI 산출 참조
+version: "3.5.0"
+name: eval_turn_gate_follow_up_ref
+
+template: |
+  ---
+
+  ## [턴 유형 캘리브레이션] FOLLOW_UP_REF (후속·참조)
+
+  - **USER+AI 모두**로 이번 요청을 해석. [이전 턴 대화] **AI** 절을 반드시 확인.
+  - 직전 **[이전 턴 N] AI**에 Roadmap·기능 분해·Pseudo Code가 있고, 이번 턴이 「베이스 코드」「토대로」「방금」이면:
+    - **REFINEMENT:** R4≥4, R2≥3, R3≥3, R1≥3 (네 Rn 모두 채점, R4 생략 금지).
+    - **CREATION 후속:** R2≥3, R3≥3. R1~R3만 2로 맞추지 마십시오.
+  - 이전 턴 스펙 **완전성**만으로 R1·R3 상향 **금지**.

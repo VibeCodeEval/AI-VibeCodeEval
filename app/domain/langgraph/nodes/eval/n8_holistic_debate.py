@@ -27,7 +27,7 @@ from typing import Any, Dict
 from app.core.config import get_settings
 from app.domain.langgraph.states import DebateState, MainGraphState
 from app.domain.langgraph.subgraph_debate import create_debate_subgraph
-from app.domain.langgraph.utils.guardrail_turns import filter_turn_logs_for_debate
+from app.domain.langgraph.utils.guardrail_turns import filter_turn_material_for_debate
 from app.infrastructure.cache.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
@@ -53,11 +53,19 @@ async def holistic_debate_flow(state: MainGraphState) -> Dict[str, Any]:
         logger.warning(f"[N8] Redis turn_logs 로드 실패 (폴백: 빈 dict) - {e}")
         turn_logs = {}
 
-    turn_logs = filter_turn_logs_for_debate(turn_logs, state)
+    raw_turn_scores = state.get("turn_scores") or {}
+    turn_logs, debate_turn_scores, excluded_turns = filter_turn_material_for_debate(
+        turn_logs, raw_turn_scores, state
+    )
     logger.info(
         "[N8] 토론용 turn_logs (가드레일 제외) - 턴 수: %s",
         len(turn_logs),
     )
+    if excluded_turns:
+        logger.info(
+            "[N8] N8 토론에서 제외된 턴 (turn_logs·turn_scores): %s",
+            excluded_turns,
+        )
 
     # ── DebateState 구성 ─────────────────────────────────────────────────
     debate_input: DebateState = {
@@ -65,8 +73,8 @@ async def holistic_debate_flow(state: MainGraphState) -> Dict[str, Any]:
         "problem_context": state.get("problem_context"),
         "code_content": state.get("code_content"),
 
-        # N4
-        "turn_scores": state.get("turn_scores"),
+        # N4 (가드레일 턴 제외)
+        "turn_scores": debate_turn_scores,
         "aggregate_turn_score": state.get("aggregate_turn_score"),
         "turn_logs": turn_logs,
 

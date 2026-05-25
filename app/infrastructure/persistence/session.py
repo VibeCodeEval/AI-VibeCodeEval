@@ -12,6 +12,8 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
+_PG_SEARCH_PATH = settings.POSTGRES_SEARCH_PATH.strip() or "public"
+
 # Async 엔진 생성
 engine = create_async_engine(
     settings.POSTGRES_URL,
@@ -19,16 +21,16 @@ engine = create_async_engine(
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True,
-    connect_args={"server_settings": {"search_path": "public"}},
+    connect_args={"server_settings": {"search_path": _PG_SEARCH_PATH}},
 )
 
 
 # 세션마다 search_path 설정 함수
 async def _set_search_path(session: AsyncSession):
-    """세션마다 search_path 설정 (ai_vibe_coding_test 스키마만 사용)"""
+    """세션마다 search_path 설정 (POSTGRES_SEARCH_PATH, 기본 public)"""
     from sqlalchemy import text
 
-    await session.execute(text("SET search_path TO public"))
+    await session.execute(text(f"SET search_path TO {_PG_SEARCH_PATH}"))
 
 
 # 세션 팩토리
@@ -82,8 +84,7 @@ async def init_db():
         # Spring Boot가 테이블을 관리하므로 여기서는 테이블 생성하지 않음
         # 연결 테스트만 수행
         await conn.execute(text("SELECT 1"))
-        # search_path 설정 (ai_vibe_coding_test 스키마만 사용)
-        await conn.execute(text("SET search_path TO public"))
+        await conn.execute(text(f"SET search_path TO {_PG_SEARCH_PATH}"))
 
 
 async def close_db():

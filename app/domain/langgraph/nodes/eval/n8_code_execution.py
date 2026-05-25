@@ -25,12 +25,62 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from app.core.config import get_settings
+from app.domain.langgraph.nodes.eval.holistic_debate_skip import (
+    HOLISTIC_DEBATE_SKIP_MESSAGE,
+    build_skipped_holistic_debate_result,
+)
 from app.domain.langgraph.states import DebateState, MainGraphState
 from app.domain.langgraph.subgraph_debate import create_debate_subgraph
-from app.domain.langgraph.utils.guardrail_turns import filter_turn_logs_for_debate
+from app.domain.langgraph.utils.guardrail_turns import filter_turn_material_for_debate
 from app.infrastructure.cache.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
+
+
+async def _maybe_save_debate_log_to_redis(
+    session_id: str, payload: Dict[str, Any]
+) -> None:
+    if not get_settings().DEBATE_LOG_TO_REDIS:
+        return
+    try:
+        await redis_client.save_debate_log(session_id, payload)
+        logger.info(
+            "[N8] Redis debate_log 저장 완료 - key debate_log:%s", session_id
+        )
+    except Exception as redis_err:
+        logger.warning(
+            "[N8] Redis debate_log 저장 실패 (그래프는 정상 진행) - %s",
+            redis_err,
+        )
+
+
+async def holistic_debate_skipped_flow(state: MainGraphState) -> Dict[str, Any]:
+    """
+    N8 스킵: LLM 토론 없이 holistic 0점·debate_log 플레이스홀더만 반환.
+    """
+    session_id = state.get("session_id", "unknown")
+    logger.info(
+        "[N8. Holistic Debate] 스킵 — %s (session_id=%s)",
+        HOLISTIC_DEBATE_SKIP_MESSAGE,
+        session_id,
+    )
+    result = build_skipped_holistic_debate_result()
+    await _maybe_save_debate_log_to_redis(
+        session_id,
+        {
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "session_id": session_id,
+            "holistic_flow_score": result["holistic_flow_score"],
+            "r4_context_maintenance_score": result["r4_context_maintenance_score"],
+            "holistic_flow_analysis": result["holistic_flow_analysis"],
+            "initial_opinions": result["debate_initial_opinions"],
+            "rebuttals": result["debate_rebuttals"],
+            "debate_log": result["debate_log"],
+            "skipped": True,
+            "skip_reason": HOLISTIC_DEBATE_SKIP_MESSAGE,
+        },
+    )
+    return result
 
 
 async def holistic_debate_flow(state: MainGraphState) -> Dict[str, Any]:
@@ -53,11 +103,31 @@ async def holistic_debate_flow(state: MainGraphState) -> Dict[str, Any]:
         logger.warning(f"[N8] Redis turn_logs 로드 실패 (폴백: 빈 dict) - {e}")
         turn_logs = {}
 
-    turn_logs = filter_turn_logs_for_debate(turn_logs, state)
-    logger.info(
-        "[N8] 토론용 turn_logs (가드레일 제외) - 턴 수: %s",
-        len(turn_logs),
+    raw_turn_scores = state.get("turn_scores") or {}
+    turn_logs, debate_turn_scores, excluded_turns = filter_turn_material_for_debate(
+        turn_logs, raw_turn_scores, state
     )
+    logger.info(
+        "[N8] 토론용 turn_logs (가드레일 제외) - 턴 수: %s (원본 %s)",
+        len(turn_logs),
+        len(raw_turn_scores) if isinstance(raw_turn_scores, dict) else 0,
+    )
+    logger.info(
+        "[N8] 토론용 turn_scores (가드레일 제외) - 턴 수: %s, 키: %s",
+        len(debate_turn_scores),
+        sorted(debate_turn_scores.keys(), key=lambda k: int(k) if str(k).isdigit() else 0),
+    )
+    if excluded_turns:
+        logger.info(
+            "[N8] N8 토론에서 제외된 턴 (turn_logs·turn_scores·대화요약): %s",
+            excluded_turns,
+        )
+
+    if not turn_logs:
+        logger.info(
+            "[N8] 비가드레일 turn_logs 없음 — %s", HOLISTIC_DEBATE_SKIP_MESSAGE
+        )
+        return await holistic_debate_skipped_flow(state)
 
     # ── DebateState 구성 ─────────────────────────────────────────────────
     debate_input: DebateState = {
@@ -65,8 +135,8 @@ async def holistic_debate_flow(state: MainGraphState) -> Dict[str, Any]:
         "problem_context": state.get("problem_context"),
         "code_content": state.get("code_content"),
 
-        # N4
-        "turn_scores": state.get("turn_scores"),
+        # N4 (가드레일 턴 제외 — 토론 컨텍스트·R4 궤적)
+        "turn_scores": debate_turn_scores,
         "aggregate_turn_score": state.get("aggregate_turn_score"),
         "turn_logs": turn_logs,
 
@@ -110,31 +180,21 @@ async def holistic_debate_flow(state: MainGraphState) -> Dict[str, Any]:
             f"R2 rebuttals: {len(result.get('rebuttals', []))}"
         )
 
-        # Redis: 선택 시에만 저장 (DEBATE_LOG_TO_REDIS=true). 기본은 비활성.
-        if get_settings().DEBATE_LOG_TO_REDIS:
-            try:
-                await redis_client.save_debate_log(
-                    session_id,
-                    {
-                        "saved_at": datetime.now(timezone.utc).isoformat(),
-                        "session_id": session_id,
-                        "holistic_flow_score": holistic_score,
-                        "r4_context_maintenance_score": result.get(
-                            "r4_context_maintenance_score"
-                        ),
-                        "holistic_flow_analysis": holistic_analysis,
-                        "initial_opinions": result.get("initial_opinions", []),
-                        "rebuttals": result.get("rebuttals", []),
-                        "debate_log": debate_log,
-                    },
-                )
-                logger.info(
-                    f"[N8] Redis debate_log 저장 완료 - key debate_log:{session_id}"
-                )
-            except Exception as redis_err:
-                logger.warning(
-                    f"[N8] Redis debate_log 저장 실패 (그래프는 정상 진행) - {redis_err}"
-                )
+        await _maybe_save_debate_log_to_redis(
+            session_id,
+            {
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+                "session_id": session_id,
+                "holistic_flow_score": holistic_score,
+                "r4_context_maintenance_score": result.get(
+                    "r4_context_maintenance_score"
+                ),
+                "holistic_flow_analysis": holistic_analysis,
+                "initial_opinions": result.get("initial_opinions", []),
+                "rebuttals": result.get("rebuttals", []),
+                "debate_log": debate_log,
+            },
+        )
 
         return {
             "holistic_flow_score": holistic_score,

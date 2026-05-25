@@ -1,0 +1,12 @@
+# 턴 유형: FULL_SPEC|PARTIAL + CODE_CREATE (혼합)
+version: "3.5.0"
+name: eval_turn_gate_mixed_spec_code
+
+template: |
+  ---
+
+  ## [턴 유형 캘리브레이션] MIXED_SPEC_CODE (스펙 + 한 줄 코드 요청)
+
+  - **R1 (스펙 상세성)**: 본문에 붙은 스펙 블록만 평가. 요청 한 줄로 R1을 올리지 마십시오.
+  - **R2·R3 (요청 구간만)**: user_request 구간이 「코드 짜줄래/짜주세요/풀어줘」 등 **한 줄(대략 80자 이내)**이면 **R2=1~2, R3=1~2** (`scoring_cot`에 스펙/요청 구간 구분 필수).
+  - 스펙이 아무리 길어도 요청이 한 줄이면 R3=1을 우선 검토. 목표 turn_score **60 미만** (예: R1=5,R2=2,R3=1 → 53).

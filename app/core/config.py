@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "ai_vibe_coding_test"
+    # Spring BE / prod: public | 로컬 init-db.sql: ai_vibe_coding_test (.env에서만 오버라이드)
+    POSTGRES_SEARCH_PATH: str = "public"
 
     # DB에 참가자 테이블이 `users` 인 경우(Core/구 스키마) `users` 로 설정.
     # init-db.sql 기본은 `participants`.

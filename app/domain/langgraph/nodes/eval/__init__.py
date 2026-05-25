@@ -5,8 +5,10 @@ from app.domain.langgraph.nodes.eval.n5_integrated_evaluator import \
 from app.domain.langgraph.nodes.eval.n6_holistic_flow import eval_static_analysis
 from app.domain.langgraph.nodes.eval.n7_aggregate_turn_scores import \
     eval_code_agent
-from app.domain.langgraph.nodes.eval.n8_code_execution import \
-    holistic_debate_flow
+from app.domain.langgraph.nodes.eval.n8_code_execution import (
+    holistic_debate_flow,
+    holistic_debate_skipped_flow,
+)
 from app.domain.langgraph.nodes.eval.n9_final_scores import \
     aggregate_final_scores
 
@@ -16,5 +18,6 @@ __all__ = [
     "eval_static_analysis",
     "eval_code_agent",
     "holistic_debate_flow",
+    "holistic_debate_skipped_flow",
     "aggregate_final_scores",
 ]

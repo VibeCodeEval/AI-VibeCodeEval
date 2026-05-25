@@ -19,6 +19,7 @@ from app.domain.langgraph.utils.guardrail_turns import (
     api_turn_to_conversation_turn,
     build_guardrail_meta_patch,
     filter_turn_logs_for_debate,
+    filter_turn_material_for_debate,
     format_guardrail_user_message,
     is_guardrail_blocked_response_text,
     is_guardrail_turn,
@@ -109,6 +110,24 @@ def test_filter_turn_logs_for_debate_excludes_guardrail():
     }
     filtered = filter_turn_logs_for_debate(logs, state)
     assert set(filtered.keys()) == {"2"}
+
+
+def test_filter_turn_material_for_debate_excludes_guardrail_turn_scores():
+    state = {"guardrail_flag_turns": [1]}
+    logs = {
+        "1": {
+            "is_guardrail_failed": True,
+            "prompt_evaluation_details": {"intent": "GUARDRAIL_BLOCKED", "score": 0},
+        },
+        "2": {"prompt_evaluation_details": {"intent": "SETTING", "score": 80}},
+    }
+    scores = {"1": {"turn_score": 0.0}, "2": {"turn_score": 80.0}}
+    filtered_logs, filtered_scores, excluded = filter_turn_material_for_debate(
+        logs, scores, state
+    )
+    assert set(filtered_logs.keys()) == {"2"}
+    assert set(filtered_scores.keys()) == {"2"}
+    assert excluded == [{"turn": "1", "reason": "guardrail_flag_turns"}]
 
 
 def test_resolve_conversation_turn_storage_slot():

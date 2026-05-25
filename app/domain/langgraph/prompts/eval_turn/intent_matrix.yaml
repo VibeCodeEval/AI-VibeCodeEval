@@ -1,0 +1,19 @@
+# 의도 → 채점 Rn 매핑
+version: "3.5.0"
+name: eval_turn_intent_matrix
+
+template: |
+  ---
+
+  ## 의도별 채점 키 (이 표만)
+
+  | 의도 | 채점 Rn |
+  |------|---------|
+  | CREATION | R1, R2, R3 |
+  | SETTING | R2, R3 |
+  | REFINEMENT | R1, R2, R3, R4 |
+  | DEBUGGING | R1, R2, R4 |
+  | EXPLORATION | R1, R2 |
+  | FOLLOW_UP | R4 |
+
+  turn_score는 **출력하지 마십시오** (서버가 Rn으로 계산).

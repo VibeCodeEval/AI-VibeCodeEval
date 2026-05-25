@@ -66,8 +66,10 @@ from app.domain.langgraph.nodes.eval.n5_integrated_evaluator import \
 from app.domain.langgraph.nodes.eval.n6_holistic_flow import eval_static_analysis
 from app.domain.langgraph.nodes.eval.n7_aggregate_turn_scores import \
     eval_code_agent
-from app.domain.langgraph.nodes.eval.n8_code_execution import \
-    holistic_debate_flow
+from app.domain.langgraph.nodes.eval.n8_code_execution import (
+    holistic_debate_flow,
+    holistic_debate_skipped_flow,
+)
 import logging
 from app.domain.langgraph.nodes.eval.n9_final_scores import \
     aggregate_final_scores
@@ -215,6 +217,12 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
         wrap_eval_node_tracking("holistic_debate", holistic_debate_flow),
     )
     builder.add_node(
+        "holistic_debate_skipped",  # N8 스킵 (0점·플레이스홀더)
+        wrap_eval_node_tracking(
+            "holistic_debate_skipped", holistic_debate_skipped_flow
+        ),
+    )
+    builder.add_node(
         "aggregate_final_scores",  # N9
         wrap_eval_node_tracking("aggregate_final_scores", aggregate_final_scores),
     )
@@ -273,7 +281,7 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
 
     builder.add_edge("summarize_memory", "handle_request")
 
-    # 제출 평가 파이프라인: N5 → N6 → N7 → (N4 turn_scores 있으면 N8) → N9 → END
+    # 제출 평가 파이프라인: N5 → N6 → N7 → (비가드레일 턴 있으면 N8, 없으면 N8 스킵) → N9 → END
     builder.add_edge("eval_code_execution", "eval_static_analysis")
     builder.add_edge("eval_static_analysis", "eval_code_agent")
     builder.add_conditional_edges(
@@ -281,10 +289,11 @@ def create_main_graph(checkpointer: Optional[MemorySaver] = None) -> StateGraph:
         holistic_debate_router,
         {
             "holistic_debate": "holistic_debate",
-            "aggregate_final_scores": "aggregate_final_scores",
+            "holistic_debate_skipped": "holistic_debate_skipped",
         },
     )
     builder.add_edge("holistic_debate", "aggregate_final_scores")
+    builder.add_edge("holistic_debate_skipped", "aggregate_final_scores")
     builder.add_edge("aggregate_final_scores", END)
 
     # 그래프 컴파일
