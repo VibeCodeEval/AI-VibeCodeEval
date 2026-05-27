@@ -19,6 +19,7 @@ from app.domain.langgraph.utils.guardrail_turns import (
     api_turn_to_conversation_turn,
     build_guardrail_meta_patch,
     filter_turn_logs_for_debate,
+    filter_turn_material_for_debate,
     format_guardrail_user_message,
     is_guardrail_blocked_response_text,
     is_guardrail_turn,
@@ -80,6 +81,32 @@ def test_normalize_state_preserves_already_conversation_turns():
     assert state["messages"][1]["turn"] == 1
 
 
+def test_normalize_state_preserves_conversation_turns_without_storage_turn():
+    state = {
+        "current_turn": 4,
+        "messages": [
+            {"role": "user", "turn": 1, "content": "u1"},
+            {"role": "assistant", "turn": 1, "content": "a1"},
+            {"role": "user", "turn": 2, "content": "u2"},
+            {"role": "assistant", "turn": 2, "content": "a2"},
+            {"role": "user", "turn": 3, "content": "u3"},
+            {"role": "assistant", "turn": 3, "content": "a3"},
+            {"role": "user", "turn": 4, "content": "u4"},
+            {"role": "assistant", "turn": 4, "content": "a4"},
+        ],
+        "guardrail_flag_turns": [2, 4],
+        "guardrail_turn_reasons": {"2": "INAPPROPRIATE", "4": "JAILBREAK"},
+    }
+    normalize_state_turn_fields(state)
+    assert state["current_turn"] == 4
+    assert [m["turn"] for m in state["messages"]] == [1, 1, 2, 2, 3, 3, 4, 4]
+    assert state["guardrail_flag_turns"] == [2, 4]
+    assert state["guardrail_turn_reasons"] == {
+        "2": "INAPPROPRIATE",
+        "4": "JAILBREAK",
+    }
+
+
 def test_storage_slot_to_conversation_turn():
     assert storage_slot_to_conversation_turn(10) == 5
     assert storage_slot_to_conversation_turn(9) == 5
@@ -111,6 +138,24 @@ def test_filter_turn_logs_for_debate_excludes_guardrail():
     assert set(filtered.keys()) == {"2"}
 
 
+def test_filter_turn_material_for_debate_excludes_guardrail_turn_scores():
+    state = {"guardrail_flag_turns": [1]}
+    logs = {
+        "1": {
+            "is_guardrail_failed": True,
+            "prompt_evaluation_details": {"intent": "GUARDRAIL_BLOCKED", "score": 0},
+        },
+        "2": {"prompt_evaluation_details": {"intent": "SETTING", "score": 80}},
+    }
+    scores = {"1": {"turn_score": 0.0}, "2": {"turn_score": 80.0}}
+    filtered_logs, filtered_scores, excluded = filter_turn_material_for_debate(
+        logs, scores, state
+    )
+    assert set(filtered_logs.keys()) == {"2"}
+    assert set(filtered_scores.keys()) == {"2"}
+    assert excluded == [{"turn": "1", "reason": "guardrail_flag_turns"}]
+
+
 def test_resolve_conversation_turn_storage_slot():
     state = {"guardrail_flag_turns": [1]}
     assert resolve_conversation_turn_for_guardrail(state, 1) == 1
@@ -127,6 +172,18 @@ def test_message_matches_conversation_turn_storage_slot():
     assert message_matches_conversation_turn(3, "user", 0, 2)
     assert message_matches_conversation_turn(4, "assistant", 0, 2)
     assert not message_matches_conversation_turn(3, "assistant", 0, 2)
+
+
+def test_message_matches_conversation_turn_disambiguates_assistant_turn_two():
+    # idx=1은 첫 번째 assistant 메시지 자리 -> conversation turn 1로 해석되어야 함
+    assert message_matches_conversation_turn(2, "assistant", 1, 1)
+    assert not message_matches_conversation_turn(2, "assistant", 1, 2)
+
+
+def test_message_matches_conversation_turn_keeps_conversation_style_when_index_matches():
+    # idx=3은 두 번째 assistant 자리 -> conversation turn 2와 정합
+    assert message_matches_conversation_turn(2, "assistant", 3, 2)
+    assert not message_matches_conversation_turn(2, "assistant", 3, 1)
 
 
 def test_extract_turn_pair_mismatched_tags_uses_index_fallback():

@@ -153,28 +153,81 @@ def format_guardrail_user_message(violation_message: Optional[str] = None) -> st
     )
 
 
+def _turn_key_to_int(key: Any) -> Optional[int]:
+    try:
+        return int(key)
+    except (TypeError, ValueError):
+        return None
+
+
+def debate_exclusion_reason_for_turn(
+    turn: Optional[int],
+    log: Optional[Dict[str, Any]],
+    state: Dict[str, Any],
+) -> Optional[str]:
+    """
+    N8 토론 컨텍스트에서 제외할 턴이면 사유 문자열, 포함이면 None.
+
+    turn_logs 항목이 없어도 guardrail_flag_turns로 제외 가능.
+    """
+    if turn is None:
+        return None
+    blocked = set(get_guardrail_flag_turns(state))
+    if turn in blocked:
+        return "guardrail_flag_turns"
+    if not isinstance(log, dict):
+        return None
+    if log.get("is_guardrail_failed"):
+        return "is_guardrail_failed"
+    ped = log.get("prompt_evaluation_details") or {}
+    if ped.get("intent") == "GUARDRAIL_BLOCKED":
+        return "GUARDRAIL_BLOCKED"
+    return None
+
+
+def filter_turn_material_for_debate(
+    turn_logs: Dict[str, Any],
+    turn_scores: Dict[str, Any],
+    state: Dict[str, Any],
+) -> tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    N8 토론: 가드레일 턴의 turn_logs·turn_scores 모두 제외.
+
+    N9 aggregate_turn_score 등 MainGraph turn_scores는 변경하지 않음.
+    Returns:
+        (filtered_logs, filtered_scores, excluded) — excluded: {turn, reason}[]
+    """
+    logs_in = turn_logs if isinstance(turn_logs, dict) else {}
+    scores_in = turn_scores if isinstance(turn_scores, dict) else {}
+    all_keys = set(logs_in.keys()) | set(scores_in.keys())
+
+    filtered_logs: Dict[str, Any] = {}
+    filtered_scores: Dict[str, Any] = {}
+    excluded: List[Dict[str, Any]] = []
+
+    for key in all_keys:
+        turn = _turn_key_to_int(key)
+        log = logs_in.get(key) if isinstance(logs_in.get(key), dict) else {}
+        reason = debate_exclusion_reason_for_turn(turn, log, state)
+        if reason:
+            excluded.append({"turn": key, "reason": reason})
+            continue
+        if key in logs_in and isinstance(logs_in[key], dict):
+            filtered_logs[key] = logs_in[key]
+        if key in scores_in:
+            filtered_scores[key] = scores_in[key]
+
+    return filtered_logs, filtered_scores, excluded
+
+
 def filter_turn_logs_for_debate(
     turn_logs: Dict[str, Any],
     state: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """N8 토론: 가드레일 턴 로그 제외 (0점은 turn_scores 평균에만 반영)."""
-    blocked = set(get_guardrail_flag_turns(state))
-    filtered: Dict[str, Any] = {}
-    for key, log in (turn_logs or {}).items():
-        if not isinstance(log, dict):
-            continue
-        try:
-            t = int(key)
-        except (TypeError, ValueError):
-            t = None
-        if t is not None and t in blocked:
-            continue
-        ped = log.get("prompt_evaluation_details") or {}
-        if log.get("is_guardrail_failed"):
-            continue
-        if ped.get("intent") == "GUARDRAIL_BLOCKED":
-            continue
-        filtered[key] = log
+    """N8 토론: 가드레일 턴 turn_logs만 제외 (하위 호환). turn_scores는 filter_turn_material_for_debate 사용."""
+    filtered, _, _ = filter_turn_material_for_debate(
+        turn_logs, {}, state
+    )
     return filtered
 
 
@@ -192,6 +245,61 @@ def _message_role_str(msg: Any) -> str:
         return str(msg.get("role") or msg.get("type") or "user")
     role = getattr(msg, "role", None) or getattr(msg, "type", None)
     return str(role or "user")
+
+
+def _raw_message_turn_int(msg: Any) -> Optional[int]:
+    if isinstance(msg, dict):
+        raw = msg.get("turn")
+    else:
+        raw = getattr(msg, "turn", None)
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalized_role(role: str) -> str:
+    r = str(role or "").lower()
+    if r in ("assistant", "ai"):
+        return "assistant"
+    if r in ("user", "human"):
+        return "user"
+    return "other"
+
+
+def _detect_message_turn_style(messages: List[Any]) -> str:
+    """
+    message.turn 스타일 추정:
+    - conversation: (user=1, assistant=1), (user=2, assistant=2) ...
+    - storage:      (user=1, assistant=2), (user=3, assistant=4) ...
+
+    모호하면 conversation(보수적)으로 간주해 오탐 변환을 막는다.
+    """
+    same_pairs = 0
+    slot_pairs = 0
+    prev_role = "other"
+    prev_turn: Optional[int] = None
+
+    for msg in messages or []:
+        role = _normalized_role(_message_role_str(msg))
+        turn = _raw_message_turn_int(msg)
+        if turn is None:
+            prev_role, prev_turn = role, turn
+            continue
+
+        if prev_role == "user" and role == "assistant" and prev_turn is not None:
+            if turn == prev_turn:
+                same_pairs += 1
+            if turn == prev_turn + 1:
+                slot_pairs += 1
+
+        prev_role, prev_turn = role, turn
+
+    if slot_pairs > same_pairs and slot_pairs > 0:
+        return "storage"
+    if same_pairs > 0:
+        return "conversation"
+    return "conversation"
 
 
 def _normalize_scalar_to_conversation_turn(value: Any, conv_max_from_messages: int) -> int:
@@ -215,7 +323,7 @@ def _normalize_guardrail_turn_entry(turn: int, conv_max: int) -> int:
     return storage_slot_to_conversation_turn(turn)
 
 
-def _normalize_one_message_turn(msg: Any) -> int:
+def _normalize_one_message_turn(msg: Any, style: str) -> int:
     """message.turn을 conversation turn으로 맞추고 conv 번호 반환."""
     role = _message_role_str(msg)
     if isinstance(msg, dict):
@@ -231,12 +339,18 @@ def _normalize_one_message_turn(msg: Any) -> int:
             return conv
         if raw is None:
             return 0
-        conv = api_turn_to_conversation_turn(raw, role)
+        if style == "storage":
+            conv = api_turn_to_conversation_turn(raw, role)
+        else:
+            try:
+                conv = int(raw)
+            except (TypeError, ValueError):
+                conv = api_turn_to_conversation_turn(raw, role)
         try:
             raw_i = int(raw)
         except (TypeError, ValueError):
             raw_i = conv
-        if raw_i != conv:
+        if style == "storage" and raw_i != conv:
             msg["storage_turn"] = raw_i
         msg["turn"] = conv
         return conv
@@ -244,12 +358,18 @@ def _normalize_one_message_turn(msg: Any) -> int:
     raw = getattr(msg, "turn", None)
     if raw is None:
         return 0
-    conv = api_turn_to_conversation_turn(raw, role)
+    if style == "storage":
+        conv = api_turn_to_conversation_turn(raw, role)
+    else:
+        try:
+            conv = int(raw)
+        except (TypeError, ValueError):
+            conv = api_turn_to_conversation_turn(raw, role)
     try:
         raw_i = int(raw)
     except (TypeError, ValueError):
         raw_i = conv
-    if raw_i != conv:
+    if style == "storage" and raw_i != conv:
         setattr(msg, "storage_turn", raw_i)
     setattr(msg, "turn", conv)
     return conv
@@ -266,17 +386,26 @@ def normalize_state_turn_fields(state: Dict[str, Any]) -> Dict[str, Any]:
     if not state:
         return state
 
+    messages = state.get("messages") or []
+    style = _detect_message_turn_style(messages)
+
     conv_max = 0
-    for msg in state.get("messages") or []:
-        c = _normalize_one_message_turn(msg)
+    for msg in messages:
+        c = _normalize_one_message_turn(msg, style)
         if c > conv_max:
             conv_max = c
 
     for field in ("current_turn", "turn"):
         if field in state and state[field] is not None:
-            state[field] = _normalize_scalar_to_conversation_turn(
-                state[field], conv_max
-            )
+            if style == "storage":
+                state[field] = _normalize_scalar_to_conversation_turn(
+                    state[field], conv_max
+                )
+            else:
+                try:
+                    state[field] = max(conv_max, int(state[field]))
+                except (TypeError, ValueError):
+                    state[field] = conv_max
 
     raw_gr = state.get("guardrail_flag_turns")
     if raw_gr is not None:
@@ -286,7 +415,11 @@ def normalize_state_turn_fields(state: Dict[str, Any]) -> Dict[str, Any]:
                 ti = int(t)
             except (TypeError, ValueError):
                 continue
-            nt = _normalize_guardrail_turn_entry(ti, conv_max)
+            nt = (
+                _normalize_guardrail_turn_entry(ti, conv_max)
+                if style == "storage"
+                else ti
+            )
             if nt not in normalized:
                 normalized.append(nt)
         state["guardrail_flag_turns"] = sorted(normalized)
@@ -296,7 +429,11 @@ def normalize_state_turn_fields(state: Dict[str, Any]) -> Dict[str, Any]:
         new_reasons: Dict[str, str] = {}
         for k, v in raw_reasons.items():
             try:
-                nk = str(_normalize_guardrail_turn_entry(int(k), conv_max))
+                nk = str(
+                    _normalize_guardrail_turn_entry(int(k), conv_max)
+                    if style == "storage"
+                    else int(k)
+                )
             except (TypeError, ValueError):
                 nk = str(k)
             new_reasons[nk] = v

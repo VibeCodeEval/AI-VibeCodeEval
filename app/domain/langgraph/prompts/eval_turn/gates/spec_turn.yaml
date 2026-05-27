@@ -1,0 +1,12 @@
+# 턴 유형: 스펙만·스펙+요청(혼합·CODE_CREATE 한 줄 제외)
+version: "3.5.0"
+name: eval_turn_gate_spec_turn
+
+template: |
+  ---
+
+  ## [턴 유형 캘리브레이션] SPEC_TURN (스펙 붙임)
+
+  - **R1**: 붙여넣은 과제·스펙의 완전성·구체성.
+  - **R2·R3**: `user_request_in_turn`이 NONE이면 요청 없음 → R2는 1~2 검토. CODE_CREATE 등이 있으면 **요청 문장/구간만** 평가.
+  - 스펙 완전성으로 R2·R3를 상향하지 마십시오.

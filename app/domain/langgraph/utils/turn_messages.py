@@ -76,16 +76,35 @@ def message_matches_conversation_turn(
         return False
 
     if raw_turn is not None:
+        raw_i: Optional[int] = None
+        mapped_turn: Optional[int] = None
+
         try:
-            if api_turn_to_conversation_turn(raw_turn, role) == conversation_turn:
-                return True
+            raw_i = int(raw_turn)
         except (TypeError, ValueError):
-            pass
+            raw_i = None
+
         try:
-            if int(raw_turn) == conversation_turn:
-                return True
+            mapped_turn = api_turn_to_conversation_turn(raw_turn, role)
         except (TypeError, ValueError):
-            pass
+            mapped_turn = None
+
+        # storage slot(2N-1/2N)과 conversation turn(N)이 모두 가능한 모호한 케이스는
+        # 메시지 인덱스 기반 추정 턴으로 우선 정렬해 오탐(한 메시지가 두 턴에 매칭) 방지.
+        if (
+            raw_i is not None
+            and mapped_turn is not None
+            and raw_i != mapped_turn
+            and message_index >= 0
+        ):
+            inferred = (message_index // 2) + 1
+            if inferred in (raw_i, mapped_turn):
+                return inferred == conversation_turn
+
+        if mapped_turn is not None and mapped_turn == conversation_turn:
+            return True
+        if raw_i is not None and raw_i == conversation_turn:
+            return True
 
     if raw_turn is None and message_index >= 0:
         inferred = (message_index // 2) + 1
