@@ -85,7 +85,10 @@ def prepare_evaluation_input_internal(
     YAML 파일에서 프롬프트 템플릿을 로드하고 변수를 치환합니다.
     criteria: 레거시 인자(미사용, eval_turn v3.4+ 템플릿에 없음).
     """
-    from app.domain.langgraph.prompts import render_prompt
+    from app.domain.langgraph.prompts.eval_turn_compose import (
+        eval_turn_compose_metadata,
+        render_eval_turn_prompt,
+    )
 
     state = inputs.get("state")
     human_message = state.get("human_message", "")
@@ -155,9 +158,9 @@ def prepare_evaluation_input_internal(
     if not request_one_liner:
         request_one_liner = "(Intent 단계 request_one_liner 없음 — 본문과 턴 내용 분해만으로 판단)"
 
-    # YAML 템플릿에서 시스템 프롬프트 렌더링 (V2.2: previous_turns_summary 포함)
-    system_prompt = render_prompt(
-        "eval_turn",
+    # 분할 YAML 조합으로 시스템 프롬프트 렌더링
+    system_prompt = render_eval_turn_prompt(
+        state,
         eval_type=eval_type,
         request_one_liner=request_one_liner,
         problem_info_section=problem_info_section,
@@ -167,6 +170,13 @@ def prepare_evaluation_input_internal(
         previous_turn_dialogue=previous_turn_dialogue,
         text=human_message,
         ai_message=ai_message,
+    )
+    compose_meta = eval_turn_compose_metadata(state)
+    logger.info(
+        "[N4 eval_turn compose] gate=%s intent=%s rubrics=%s",
+        compose_meta.get("gate"),
+        compose_meta.get("unified_intent"),
+        compose_meta.get("rubrics"),
     )
 
     user_prompt = (

@@ -22,6 +22,22 @@ def score(intent: str, r1: int, r2: int, r3: int, r4: int = 3) -> tuple[int, int
     return likert, likert_to_final(likert)
 
 
+def normalize_intent(raw_intent: str) -> str:
+    intent = (raw_intent or "").strip().upper()
+    if intent == "VALIDATION":
+        return "DEBUGGING"
+    if intent in {
+        "CREATION",
+        "SETTING",
+        "REFINEMENT",
+        "DEBUGGING",
+        "EXPLORATION",
+        "FOLLOW_UP",
+    }:
+        return intent
+    return "CREATION"
+
+
 def main() -> None:
     print("=" * 72)
     print("CREATION — R1=5 고정, R2×R3 (1~5) → likert / final(×20)")
@@ -104,13 +120,21 @@ def main() -> None:
             det = te.get("details") or te
             bd = det.get("rubric_breakdown") or {}
             intent = det.get("unified_intent") or det.get("intent") or "?"
-            sc = det.get("score") or det.get("turn_score")
+            intent_for_calc = normalize_intent(str(intent))
+            sc = det.get("score")
+            if sc is None:
+                sc = det.get("turn_score")
             if bd:
-                r1, r2, r3 = bd.get("R1"), bd.get("R2"), bd.get("R3")
-                calc_l, calc_f = score("CREATION", r1 or 3, r2 or 3, r3 or 3)
+                r1, r2, r3, r4 = (
+                    bd.get("R1") or 3,
+                    bd.get("R2") or 3,
+                    bd.get("R3") or 3,
+                    bd.get("R4") or 3,
+                )
+                calc_l, calc_f = score(intent_for_calc, r1, r2, r3, r4)
                 print(
-                    f"  turn {turn} intent={intent} breakdown={bd} "
-                    f"DB={sc} calc_final={calc_f}"
+                    f"  turn {turn} intent={intent}({intent_for_calc}) breakdown={bd} "
+                    f"DB={sc} calc_likert={calc_l} calc_final={calc_f}"
                 )
 
 

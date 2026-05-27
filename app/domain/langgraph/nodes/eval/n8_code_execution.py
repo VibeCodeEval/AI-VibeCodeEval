@@ -54,6 +54,32 @@ async def _maybe_save_debate_log_to_redis(
         )
 
 
+def _synthesize_turn_logs_from_scores(
+    turn_scores: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Redis turn_logs가 비어도 N8 토론이 진행되도록 최소 컨텍스트를 생성한다.
+
+    목적:
+    - Redis 장애/누락으로 turn_logs가 비어 있을 때 오탐 스킵 방지
+    - turn_scores 기반으로 intent/점수 궤적은 유지
+    """
+    synthesized: Dict[str, Dict[str, Any]] = {}
+    for key, entry in (turn_scores or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        synthesized[str(key)] = {
+            "user_prompt_summary": "(Redis turn_logs 없음: turn_scores 폴백)",
+            "llm_answer_summary": "(Redis turn_logs 없음: turn_scores 폴백)",
+            "prompt_evaluation_details": {
+                "intent": entry.get("intent_type") or entry.get("unified_intent") or "UNKNOWN",
+                "score": entry.get("turn_score", 0),
+                "reasoning": "(turn_scores 기반 최소 컨텍스트)",
+            },
+        }
+    return synthesized
+
+
 async def holistic_debate_skipped_flow(state: MainGraphState) -> Dict[str, Any]:
     """
     N8 스킵: LLM 토론 없이 holistic 0점·debate_log 플레이스홀더만 반환.
@@ -123,11 +149,24 @@ async def holistic_debate_flow(state: MainGraphState) -> Dict[str, Any]:
             excluded_turns,
         )
 
-    if not turn_logs:
+    if not turn_logs and not debate_turn_scores:
         logger.info(
-            "[N8] 비가드레일 turn_logs 없음 — %s", HOLISTIC_DEBATE_SKIP_MESSAGE
+            "[N8] 비가드레일 turn_logs/turn_scores 모두 없음 — %s",
+            HOLISTIC_DEBATE_SKIP_MESSAGE,
         )
         return await holistic_debate_skipped_flow(state)
+
+    if not turn_logs and debate_turn_scores:
+        logger.warning(
+            "[N8] Redis turn_logs 없음 + 비가드레일 turn_scores=%s건 — "
+            "오탐 스킵 방지를 위해 turn_scores 기반 최소 컨텍스트로 토론 진행",
+            len(debate_turn_scores),
+        )
+        turn_logs = _synthesize_turn_logs_from_scores(debate_turn_scores)
+        logger.info(
+            "[N8] 토론용 합성 turn_logs 생성 완료 - 턴 수: %s",
+            len(turn_logs),
+        )
 
     # ── DebateState 구성 ─────────────────────────────────────────────────
     debate_input: DebateState = {
